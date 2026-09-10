@@ -4,6 +4,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { adminAPI } from "@food/api"
+import ManualEntries from "@food/components/admin/balance-sheet/ManualEntries"
 
 /**
  * What the platform owes each restaurant and rider for a period, and paying it.
@@ -374,6 +375,10 @@ export default function BalanceSheet() {
             )}
           </div>
         )}
+
+        {/* Beside the derived figures, never inside them: a payout total that
+            quietly contains a hand-typed expense cannot be traced to orders. */}
+        <ManualEntries className="mt-6" from={period.from} to={period.to} />
       </div>
     </div>
   )

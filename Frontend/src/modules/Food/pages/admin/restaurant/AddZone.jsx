@@ -32,6 +32,10 @@ export default function AddZone() {
     country: "India",
     zoneName: "",
     unit: "kilometer",
+    city: "",
+    // "" means follow the platform switch, which is not the same as off.
+    codEnabled: "",
+    codMinDeliveredOrders: "0",
   })
   
   const [coordinates, setCoordinates] = useState([])
@@ -131,6 +135,15 @@ export default function AddZone() {
         setFormData({
           country: zoneData.country || "India",
           zoneName: zoneData.name || zoneData.zoneName || "",
+          city: zoneData.city || "",
+          // null is a real stored value here, so it must not collapse to "off".
+          codEnabled:
+            zoneData.codEnabled === true
+              ? "on"
+              : zoneData.codEnabled === false
+                ? "off"
+                : "",
+          codMinDeliveredOrders: String(zoneData.codMinDeliveredOrders ?? 0),
           unit: zoneData.unit || "kilometer",
         })
         
@@ -650,6 +663,13 @@ export default function AddZone() {
         country: formData.country,
         unit: formData.unit || "kilometer",
         coordinates: validCoordinates,
+        city: formData.city.trim(),
+        // Three states, and null is one of them: "not decided here, follow
+        // the platform". Sending false instead would switch COD off in every
+        // zone anyone edits.
+        codEnabled:
+          formData.codEnabled === "on" ? true : formData.codEnabled === "off" ? false : null,
+        codMinDeliveredOrders: Number(formData.codMinDeliveredOrders) || 0,
         isActive: true
       }
 
@@ -759,6 +779,61 @@ export default function AddZone() {
                     className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    City
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.city}
+                    onChange={(e) => handleInputChange("city", e.target.value)}
+                    placeholder="Indore"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    What the zone filters group by. Spelling matters &mdash; use the same
+                    one across a city&rsquo;s zones.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Cash on delivery
+                  </label>
+                  <select
+                    value={formData.codEnabled}
+                    onChange={(e) => handleInputChange("codEnabled", e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Follow the platform setting</option>
+                    <option value="on">On in this zone</option>
+                    <option value="off">Off in this zone</option>
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    The platform switch still wins: if COD is off globally, it is off here
+                    whatever this says.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Delivered orders before COD
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.codMinDeliveredOrders}
+                    onChange={(e) => handleInputChange("codMinDeliveredOrders", e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    0 offers it to everyone. Counted across the whole platform, so a
+                    regular customer ordering here for the first time is not treated as
+                    new. Cancelled orders do not count.
+                  </p>
                 </div>
 
                 <div>

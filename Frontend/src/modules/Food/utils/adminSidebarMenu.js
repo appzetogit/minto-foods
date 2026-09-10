@@ -49,6 +49,13 @@ export const adminSidebarMenu = [
         icon: "MapPin",
       },
       {
+        // The vocabulary restaurants are filed under, so it sits with them.
+        type: "link",
+        label: "Cuisines",
+        path: "/admin/food/cuisines",
+        icon: "Utensils",
+      },
+      {
         type: "expandable",
         label: "Restaurants",
         icon: "UtensilsCrossed",

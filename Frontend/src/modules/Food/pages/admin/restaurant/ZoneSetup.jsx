@@ -12,10 +12,20 @@ export default function ZoneSetup() {
   const [zones, setZones] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
+  const [cityFilter, setCityFilter] = useState("")
+  const [cities, setCities] = useState([])
 
   useEffect(() => {
     fetchZones()
   }, [])
+
+  // Derived from the zones that exist, so a city with none is never offered.
+  useEffect(() => {
+    adminAPI
+      .getZoneCities()
+      .then((res) => setCities(res?.data?.data?.cities ?? []))
+      .catch(() => setCities([]))
+  }, [zones])
 
   const fetchZones = async () => {
     try {
@@ -47,10 +57,18 @@ export default function ZoneSetup() {
     }
   }
 
-  const filteredZones = zones.filter(zone =>
-    zone.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    zone.serviceLocation?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredZones = zones.filter((zone) => {
+    // Exact on city, because the options come from the zones themselves --
+    // a loose match would make "Indore" also select "Indore Rural".
+    if (cityFilter && zone.city !== cityFilter) return false
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return (
+      zone.name?.toLowerCase().includes(q) ||
+      zone.serviceLocation?.toLowerCase().includes(q) ||
+      zone.city?.toLowerCase().includes(q)
+    )
+  })
 
   return (
     <div className="p-2 lg:p-3 bg-slate-50 min-h-screen">
@@ -93,7 +111,21 @@ export default function ZoneSetup() {
 
         {/* Search Bar */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-6">
-          <div className="relative">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <select
+              value={cityFilter}
+              onChange={(e) => setCityFilter(e.target.value)}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
+              aria-label="Filter by city"
+            >
+              <option value="">All cities</option>
+              {cities.map((c) => (
+                <option key={c.city} value={c.city}>
+                  {c.city} ({c.zones})
+                </option>
+              ))}
+            </select>
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
               type="text"
@@ -102,6 +134,7 @@ export default function ZoneSetup() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+          </div>
           </div>
         </div>
 

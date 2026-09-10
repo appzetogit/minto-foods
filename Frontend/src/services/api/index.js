@@ -1142,6 +1142,39 @@ export const adminAPI = {
       body ?? {},
       { contextModule: "admin" },
     ),
+  /** Income and expenses recorded by hand, shown beside the derived figures. */
+  getLedgerEntries: (params = {}) =>
+    apiClient.get("/food/admin/withdrawals/balance-sheet/entries", {
+      params,
+      contextModule: "admin",
+    }),
+  createLedgerEntry: (body) =>
+    apiClient.post("/food/admin/withdrawals/balance-sheet/entries", body ?? {}, {
+      contextModule: "admin",
+    }),
+  updateLedgerEntry: (id, body) =>
+    apiClient.patch(`/food/admin/withdrawals/balance-sheet/entries/${String(id)}`, body ?? {}, {
+      contextModule: "admin",
+    }),
+  deleteLedgerEntry: (id) =>
+    apiClient.delete(`/food/admin/withdrawals/balance-sheet/entries/${String(id)}`, {
+      contextModule: "admin",
+    }),
+
+  /** The cuisine vocabulary restaurants are filed under. */
+  getCuisines: (params = {}) =>
+    apiClient.get("/food/admin/cuisines", { params, contextModule: "admin" }),
+  createCuisine: (body) =>
+    apiClient.post("/food/admin/cuisines", body ?? {}, { contextModule: "admin" }),
+  updateCuisine: (id, body) =>
+    apiClient.patch(`/food/admin/cuisines/${String(id)}`, body ?? {}, { contextModule: "admin" }),
+  deleteCuisine: (id) =>
+    apiClient.delete(`/food/admin/cuisines/${String(id)}`, { contextModule: "admin" }),
+
+  /** Cities that have zones, for the zone filter. */
+  getZoneCities: () =>
+    apiClient.get("/food/admin/zones/cities", { contextModule: "admin" }),
+
   setRestaurantBillingMode: (id, billingMode) =>
     apiClient.patch(
       `/food/admin/restaurants/${String(id)}/billing-mode`,
