@@ -63,7 +63,30 @@ const FOOD_FALLBACK_IMAGE =
 
 export default function FoodsList() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedRestaurant, setSelectedRestaurant] = useState("all")
+  // Which restaurant's menu is on screen, kept in the URL.
+  //
+  // Held in component state it was forgotten on every reload, so working
+  // through one restaurant's menu meant re-picking it after each refresh, and
+  // "the menu I am looking at" could not be sent to anyone.
+  const [menuParams, setMenuParams] = useSearchParams()
+  const selectedRestaurant = menuParams.get("restaurantId") || "all"
+  const setSelectedRestaurant = useCallback(
+    (next) => {
+      setMenuParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          // "all" is the absence of a filter, so the plain URL stays plain.
+          if (!next || next === "all") params.delete("restaurantId")
+          else params.set("restaurantId", String(next))
+          // A different menu starts at its own first page.
+          params.delete("page")
+          return params
+        },
+        { replace: false },
+      )
+    },
+    [setMenuParams],
+  )
   const [foods, setFoods] = useState([])
   const [restaurantsForFilter, setRestaurantsForFilter] = useState([])
   const [loading, setLoading] = useState(true)
@@ -247,12 +270,16 @@ export default function FoodsList() {
     }
   }, [currentPage, pageSize, selectedRestaurant, debouncedSearchQuery])
 
+  // Page 3 of one restaurant's menu is off the end of another's.
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [selectedRestaurant])
+
   useEffect(() => {
     fetchAllFoods()
   }, [fetchAllFoods])
 
-  const [searchParams] = useSearchParams()
-  const productIdFromUrl = searchParams.get("productId")
+  const productIdFromUrl = menuParams.get("productId")
 
   useEffect(() => {
     if (productIdFromUrl && foods.length > 0) {
@@ -1162,10 +1189,15 @@ export default function FoodsList() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Restaurant</label>
+                {/* Locked while a menu is on screen. Adding a dish to the menu
+                    you are looking at should not ask which menu it is, and
+                    being able to change it here is how a dish ends up filed
+                    under the wrong restaurant. Clear the filter to add
+                    somewhere else. */}
                 <select
                   value={foodForm.restaurantId}
                   onChange={(e) => setFoodForm((prev) => ({ ...prev, restaurantId: e.target.value, categoryId: "", categoryName: "" }))}
-                  disabled={foodFormMode === "edit"}
+                  disabled={foodFormMode === "edit" || selectedRestaurant !== "all"}
                   className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white disabled:bg-slate-100"
                 >
                   <option value="">Select restaurant</option>
@@ -1175,6 +1207,11 @@ export default function FoodsList() {
                     </option>
                   ))}
                 </select>
+                {foodFormMode === "add" && selectedRestaurant !== "all" ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Adding to the menu you have open.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
