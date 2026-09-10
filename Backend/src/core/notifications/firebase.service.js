@@ -126,16 +126,38 @@ const getServiceAccountFromEnv = () => {
     throw new Error('Firebase service account is not configured. Set FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_PATH.');
 };
 
-const getFirebaseProjectId = () => {
+/**
+ * The project to send from.
+ *
+ * The service account is authoritative, because it is what mints the access
+ * token: the send url names a project and the bearer token proves membership
+ * of one, and if those disagree every send 403s. FIREBASE_PROJECT_ID used to
+ * win here, which made a half-finished project swap -- new key, stale env var,
+ * or the reverse -- look like configured-and-healthy while nothing could be
+ * delivered. It is now only a cross-check, and disagreeing with the key is a
+ * configuration error rather than something to paper over.
+ *
+ * Note config.firebaseProjectId falls back to VITE_FIREBASE_PROJECT_ID, which
+ * is the web frontend's project and has no business steering server sends.
+ * That is another reason not to let it decide.
+ */
+export const getFirebaseProjectId = () => {
     const account = getServiceAccountFromEnv();
-    const projectId =
-        sanitizeString(config.firebaseProjectId) ||
-        sanitizeString(account.project_id) ||
-        sanitizeString(process.env.FIREBASE_PROJECT_ID);
-    if (!projectId) {
-        throw new Error('Firebase project ID is not configured.');
+    const fromAccount = sanitizeString(account.project_id);
+    const declared = sanitizeString(config.firebaseProjectId) || sanitizeString(process.env.FIREBASE_PROJECT_ID);
+
+    if (!fromAccount) {
+        if (!declared) throw new Error('Firebase project ID is not configured.');
+        return declared;
     }
-    return projectId;
+    if (declared && declared !== fromAccount) {
+        throw new Error(
+            `Firebase config mismatch: FIREBASE_PROJECT_ID is "${declared}" but the service account belongs to `
+            + `"${fromAccount}". Point both at the same project -- the apps register against the project in `
+            + `google-services.json, and a send from any other project is rejected for every device.`,
+        );
+    }
+    return fromAccount;
 };
 
 const getFirebaseAccessToken = async () => {
@@ -312,10 +334,30 @@ const parseFirebaseError = async (response) => {
     }
 };
 
-const shouldRemoveTokenFromError = (errorJson, response) => {
+/**
+ * Is this token genuinely dead, or is the server misconfigured?
+ *
+ * Only UNREGISTERED and 404 NOT_FOUND mean the device is gone. INVALID_ARGUMENT
+ * used to be treated the same way and must not be: FCM reports a token minted
+ * by a different project under that same code, so when the send project is
+ * wrong every healthy token in the database looks dead and gets deleted. The
+ * app re-registers, the next push deletes it again, and the token table drains
+ * while appearing to be a registration problem in the clients.
+ *
+ * Deleting a token is unrecoverable from here -- only the device can mint
+ * another -- so the ambiguous code is the one to leave alone.
+ */
+const isSenderMismatch = (message) =>
+    message.includes('SENDERID MISMATCH')
+    || message.includes('MISMATCHED-CREDENTIAL')
+    || message.includes('MISMATCHED CREDENTIAL')
+    || (message.includes('INVALID_ARGUMENT') && message.includes('SENDER'));
+
+export const shouldRemoveTokenFromError = (errorJson, response) => {
     const status = response?.status;
     const message = String(errorJson?.error?.message || '').toUpperCase();
-    return status === 404 || message.includes('UNREGISTERED') || message.includes('INVALID_ARGUMENT');
+    if (isSenderMismatch(message)) return false;
+    return status === 404 || message.includes('UNREGISTERED');
 };
 
 /** Transient FCM failures worth a retry. Anything else is permanent. */
@@ -529,6 +571,19 @@ const sendMessageWithRetry = async (message, { projectId, accessToken }) => {
             }
 
             const errorJson = await parseFirebaseError(response);
+
+            // A mismatch is not a per-device problem: it fails identically for
+            // every token and no retry or reinstall changes it. Say so once,
+            // loudly, because the callers below deliberately swallow failures
+            // and this is the one that means the server is misconfigured.
+            if (isSenderMismatch(String(errorJson?.error?.message || '').toUpperCase())) {
+                logger.error(
+                    `FCM rejected a token as belonging to another project while sending from "${projectId}". `
+                    + 'Every push is failing. The service account must belong to the same Firebase project the '
+                    + 'apps register against (see google-services.json / GoogleService-Info.plist).',
+                );
+            }
+
             const remove = shouldRemoveTokenFromError(errorJson, response);
             const retryable = !remove && RETRYABLE_HTTP_STATUSES.has(response.status);
             if (retryable && attempt < MAX_SEND_ATTEMPTS) {

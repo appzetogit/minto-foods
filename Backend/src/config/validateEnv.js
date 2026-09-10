@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { config } from './env.js';
 import { logger } from '../utils/logger.js';
 
@@ -29,6 +32,24 @@ const PRODUCTION_SECRETS = [
 ];
 
 /**
+ * The project a configured service account belongs to, or '' if it cannot be
+ * read. Unreadable is not a problem to report here -- the missing-credential
+ * check above already covers absence, and a malformed key fails loudly on
+ * first use with a better message than this function could give.
+ */
+const readServiceAccountProjectId = (cfg) => {
+    try {
+        const inline = String(cfg.firebaseServiceAccount || '').trim();
+        if (inline) return String(JSON.parse(inline).project_id || '').trim();
+        const file = String(cfg.firebaseServiceAccountPath || '').trim();
+        if (!file) return '';
+        return String(JSON.parse(readFileSync(resolve(process.cwd(), file), 'utf8')).project_id || '').trim();
+    } catch {
+        return '';
+    }
+};
+
+/**
  * Returns the reasons this configuration should not serve traffic, as
  * sentences. Empty means it is fit to run.
  *
@@ -42,6 +63,20 @@ export const findConfigProblems = (cfg = config) => {
     if (!cfg.databaseUrl) problems.push('DATABASE_URL is not set.');
     if (!cfg.jwtAccessSecret) problems.push('JWT_ACCESS_SECRET (or JWT_SECRET) is not set.');
     if (!cfg.jwtRefreshSecret) problems.push('JWT_REFRESH_SECRET is not set.');
+
+    // A push goes to a token minted by the project in the apps'
+    // google-services.json, and FCM rejects it for every device if the server
+    // sends from a different one. The service account decides which project
+    // that is, so FIREBASE_PROJECT_ID disagreeing with it is a misconfiguration
+    // that would otherwise only show up as pushes nobody receives.
+    const declaredProject = String(cfg.firebaseProjectId || '').trim();
+    const accountProject = readServiceAccountProjectId(cfg);
+    if (declaredProject && accountProject && declaredProject !== accountProject) {
+        problems.push(
+            `FIREBASE_PROJECT_ID is "${declaredProject}" but the service account belongs to `
+            + `"${accountProject}". Every push would be rejected.`,
+        );
+    }
 
     if (cfg.redisEnabled && !cfg.redisUrl) {
         problems.push('REDIS_ENABLED is true but REDIS_URL is not set.');
