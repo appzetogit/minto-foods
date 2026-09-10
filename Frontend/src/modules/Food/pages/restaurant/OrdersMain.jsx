@@ -28,7 +28,8 @@ import {
 import { toast } from "sonner";
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
-import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
+import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
+import FssaiExpiryBanner from "@food/components/restaurant/FssaiExpiryBanner";
 import NewOrderAcceptCard from "@food/components/restaurant/NewOrderAcceptCard";
 import { restaurantAPI, diningAPI } from "@food/api";
 import { useRestaurantNotifications } from "@food/hooks/useRestaurantNotifications";
@@ -1926,6 +1927,10 @@ export default function OrdersMain() {
       <div className="sticky top-0 z-50 bg-white md:hidden">
         <RestaurantNavbar showNotifications={true} />
       </div>
+
+      {/* Renders itself away unless the licence is within 30 days of lapsing —
+          a banner that is always there stops being read by the time it counts. */}
+      <FssaiExpiryBanner className="mx-4 mt-3 md:mx-6" />
 
       {/* Desktop Header */}
       <div className="hidden md:flex items-center justify-between px-6 pt-5 pb-3 bg-white">
