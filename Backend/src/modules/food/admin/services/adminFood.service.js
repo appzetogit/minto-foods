@@ -25,6 +25,20 @@ import { categoryAllowsFoodType } from '../../shared/categoryWorkflow.js';
 
 const WITH_VARIANTS = { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } };
 
+// The dish's own commission rate, so the form that sets it can also show what
+// it is already on. Without this an edit would open blank and look unset.
+const WITH_VARIANTS_AND_RATE = { ...WITH_VARIANTS, commissionRule: true };
+
+
+/** A dish's own rate, or null when it simply follows the restaurant's. */
+const serializeItemCommission = (rule) =>
+    rule
+        ? {
+              commissionType: rule.commissionType,
+              commissionValue: Number(rule.commissionValue) || 0,
+              status: rule.status,
+          }
+        : null;
 
 const serializeFood = (f, restaurantName) => ({
     id: f.id,
@@ -44,6 +58,7 @@ const serializeFood = (f, restaurantName) => ({
     // still returns a one-entry list, rather than the panel having to special
     // case "no images but there is an image".
     images: Array.isArray(f.images) && f.images.length ? f.images : f.image ? [f.image] : [],
+    commission: serializeItemCommission(f.commissionRule),
     foodType: fromFoodTypeColumn(f.foodType),
     isAvailable: f.isAvailable !== false,
     preparationTime: f.preparationTime || '',
@@ -77,7 +92,7 @@ export async function getFoods(query = {}) {
             skip,
             take: limit,
             include: {
-                ...WITH_VARIANTS,
+                ...WITH_VARIANTS_AND_RATE,
                 // The restaurant name came from a second query and a Map; it is
                 // a foreign key, so it is an include.
                 restaurant: { select: { restaurantName: true } },
@@ -203,6 +218,58 @@ const getAdminFoodUpdatedPricing = (existing = {}, body = {}) => {
     return update;
 };
 
+/**
+ * Set or clear a dish's own commission rate as part of saving the dish.
+ *
+ * The rate lived only on the commission screen, so adding a dish and pricing
+ * the platform's cut were two separate errands and the second was easy to
+ * forget -- a new dish quietly earned the restaurant-wide rate whether or not
+ * that was intended.
+ *
+ * Delegates to upsertItemCommission rather than writing the row here: that is
+ * where the rules live (a percentage cannot exceed 100, a value cannot be
+ * negative, and the dish must belong to the restaurant being charged), and a
+ * second copy of them would drift.
+ *
+ * Absent means "leave alone", so an edit that only changes the price cannot
+ * wipe a rate. An explicit null clears it back to the restaurant rate.
+ */
+async function applyItemCommission(restaurantId, itemId, body = {}) {
+    const commission = body.commission;
+    if (commission === undefined) return undefined;
+
+    const { upsertItemCommission } = await import('./adminCommission.service.js');
+
+    if (commission === null) {
+        await upsertItemCommission(restaurantId, itemId, { clear: true });
+        return null;
+    }
+
+    const saved = await upsertItemCommission(restaurantId, itemId, {
+        commissionType: commission.commissionType,
+        commissionValue: commission.commissionValue,
+        status: commission.status,
+    });
+
+    return {
+        commissionType: saved.commissionType,
+        commissionValue: saved.commissionValue,
+        status: saved.status,
+    };
+}
+
+/**
+ * Put the rate that was just saved onto the row being returned.
+ *
+ * The dish is read before the rate is written -- the rate is keyed on the
+ * dish id, so it cannot be otherwise -- which would send back a row still
+ * claiming no rate, and a form that reopened blank straight after saving one.
+ */
+const withAppliedRate = (row, applied) =>
+    applied === undefined
+        ? row
+        : { ...row, commissionRule: applied === null ? null : { ...applied } };
+
 export async function createFood(body = {}) {
     if (!isId(body.restaurantId)) throw new ValidationError('Valid restaurantId is required');
 
@@ -232,7 +299,7 @@ export async function createFood(body = {}) {
         pureVegRestaurant: restaurant.pureVegRestaurant === true,
     });
 
-    return prisma.foodItem.create({
+    const created = await prisma.foodItem.create({
         data: {
             restaurantId: restaurant.id,
             categoryId: resolved.categoryId,
@@ -257,8 +324,15 @@ export async function createFood(body = {}) {
             // An admin creating a dish is the approval.
             approvalStatus: 'approved',
         },
-        include: WITH_VARIANTS,
+        include: WITH_VARIANTS_AND_RATE,
     });
+
+    // After the dish exists, because the rate is keyed on its id. A rejected
+    // rate throws here and the dish is already saved -- which is the right way
+    // round: the admin fixes the number rather than retyping the whole dish.
+    const applied = await applyItemCommission(restaurant.id, created.id, body);
+
+    return withAppliedRate(created, applied);
 }
 
 export async function updateFood(id, body = {}) {
@@ -266,7 +340,7 @@ export async function updateFood(id, body = {}) {
 
     const existing = await prisma.foodItem.findUnique({
         where: { id: String(id) },
-        include: WITH_VARIANTS,
+        include: WITH_VARIANTS_AND_RATE,
     });
     if (!existing) return null;
 
@@ -331,16 +405,23 @@ export async function updateFood(id, body = {}) {
 
     // One transaction: a dish must never be priced from variants that failed to
     // save, nor keep sizes it was just repriced away from.
-    return prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx) => {
         if (nextVariants !== undefined) {
             await syncFoodVariants(tx, existing.id, nextVariants);
         }
         return tx.foodItem.update({
             where: { id: existing.id },
             data,
-            include: WITH_VARIANTS,
+            include: WITH_VARIANTS_AND_RATE,
         });
     });
+
+    // Outside the transaction: the rate lives in its own table and the
+    // commission service opens its own writes, so nesting it here would hold
+    // the dish transaction open across an unrelated set of queries.
+    const applied = await applyItemCommission(existing.restaurantId, existing.id, body);
+
+    return withAppliedRate(updated, applied);
 }
 
 export async function deleteFood(id) {

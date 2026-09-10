@@ -38,6 +38,10 @@ const createFoodForm = () => ({
   foodType: "Non-Veg",
   isAvailable: true,
   preparationTime: "",
+  // The platform's cut on this dish. Empty means it simply follows the
+  // restaurant's rate, which is what most dishes do.
+  commissionType: "percentage",
+  commissionValue: "",
 })
 
 const createVariantDraft = (variant = {}) => ({
@@ -380,6 +384,13 @@ export default function FoodsList() {
       foodType: String(food.foodType || "Non-Veg"),
       isAvailable: food.isAvailable !== false,
       preparationTime: String(food.preparationTime || ""),
+      commissionType: String(food.commission?.commissionType || "percentage"),
+      // Blank rather than "0" when the dish has no rate of its own: 0 is a
+      // real rate meaning "we take nothing", and the two must not look alike.
+      commissionValue:
+        food.commission && food.commission.commissionValue !== undefined
+          ? String(food.commission.commissionValue)
+          : "",
     })
     setSelectedImageFile(null)
     setImagePreviewUrl(String(food.image || ""))
@@ -536,6 +547,15 @@ export default function FoodsList() {
 
       const imageUrl = imageUrls[0] || ""
 
+      const rawCommission = String(foodForm.commissionValue || "").trim()
+      const commissionPayload =
+        rawCommission === ""
+          ? null
+          : {
+              commissionType: foodForm.commissionType === "amount" ? "amount" : "percentage",
+              commissionValue: Number(rawCommission),
+            }
+
       const payload = {
         restaurantId: foodForm.restaurantId,
         categoryId: foodForm.categoryId || undefined,
@@ -555,6 +575,10 @@ export default function FoodsList() {
         foodType: foodForm.foodType === "Veg" ? "Veg" : "Non-Veg",
         isAvailable: foodForm.isAvailable !== false,
         preparationTime: String(foodForm.preparationTime || "").trim(),
+        // null clears the dish rate back to the restaurant's; omitting the key
+        // entirely would mean "leave alone", which is not what an emptied field
+        // is asking for.
+        commission: commissionPayload,
       }
 
       if (foodFormMode === "edit") {
@@ -1289,6 +1313,41 @@ export default function FoodsList() {
                   </select>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Commission
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={foodForm.commissionType}
+                    onChange={(e) =>
+                      setFoodForm((prev) => ({ ...prev, commissionType: e.target.value }))
+                    }
+                    className="w-32 px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                  >
+                    <option value="percentage">Percent</option>
+                    <option value="amount">Amount</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="0"
+                    {...(foodForm.commissionType === "percentage" ? { max: 100 } : {})}
+                    step="0.01"
+                    value={foodForm.commissionValue}
+                    onChange={(e) =>
+                      setFoodForm((prev) => ({ ...prev, commissionValue: e.target.value }))
+                    }
+                    placeholder="Follows restaurant rate"
+                    className="flex-1 px-3 py-2.5 border border-slate-300 rounded-lg text-sm"
+                  />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {/* Blank and zero are different answers: zero is a real rate
+                      meaning the platform takes nothing on this dish. */}
+                  Leave blank to charge the restaurant&rsquo;s usual rate. Applies only
+                  where the restaurant is billed per dish.
+                </p>
               </div>
               {foodImages.length ? (
                 <div className="md:col-span-2">
