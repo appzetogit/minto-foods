@@ -154,6 +154,7 @@ export async function updateRestaurantById(id, body = {}) {
 
     // Business and documents
     if (body.panNumber !== undefined) data.panNumber = toStr(body.panNumber);
+    if (body.aadhaarNumber !== undefined) data.aadhaarNumber = toStr(body.aadhaarNumber);
     if (body.nameOnPan !== undefined) data.nameOnPan = toStr(body.nameOnPan);
     if (body.gstRegistered !== undefined) {
         data.gstRegistered = parseBooleanLike(body.gstRegistered, 'gstRegistered');
@@ -178,6 +179,7 @@ export async function updateRestaurantById(id, body = {}) {
     // Images
     if (body.profileImage !== undefined) data.profileImage = toUrl(body.profileImage) ?? '';
     if (body.panImage !== undefined) data.panImage = toUrl(body.panImage) ?? '';
+    if (body.aadhaarImage !== undefined) data.aadhaarImage = toUrl(body.aadhaarImage) ?? '';
     if (body.gstImage !== undefined) data.gstImage = toUrl(body.gstImage) ?? '';
     if (body.fssaiImage !== undefined) data.fssaiImage = toUrl(body.fssaiImage) ?? '';
     if (body.menuImages !== undefined) data.menuImages = toUrlList(body.menuImages, 10);
@@ -312,6 +314,7 @@ export async function createRestaurantByAdmin(body = {}) {
                 closingTime,
                 openDays: Array.isArray(body.openDays) ? body.openDays : [],
                 panNumber: toStr(body.panNumber),
+                aadhaarNumber: toStr(body.aadhaarNumber),
                 nameOnPan: toStr(body.nameOnPan),
                 gstRegistered: Boolean(body.gstRegistered),
                 gstNumber: toStr(body.gstNumber),
@@ -326,6 +329,7 @@ export async function createRestaurantByAdmin(body = {}) {
                 menuImages: toUrlList(body.menuImages, 10),
                 profileImage: toUrl(body.profileImage) ?? '',
                 panImage: toUrl(body.panImage) ?? '',
+                aadhaarImage: toUrl(body.aadhaarImage) ?? '',
                 gstImage: toUrl(body.gstImage) ?? '',
                 fssaiImage: toUrl(body.fssaiImage) ?? '',
                 estimatedDeliveryTime: toStr(body.estimatedDeliveryTime),

@@ -311,6 +311,21 @@ const attachPublicOffersToRestaurants = async (restaurants = []) => {
     });
 };
 
+/**
+ * Aadhaar, shown as the last four digits only.
+ *
+ * It is the most sensitive identifier the platform stores, and a profile
+ * response is fetched on nearly every restaurant screen -- an unmasked number
+ * would sit in browser caches, proxy logs and error reports for no benefit,
+ * since the owner already knows their own. The admin verification view reads
+ * the column directly when someone actually needs to check it.
+ */
+const maskAadhaar = (value) => {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length <= 4) return digits;
+    return `XXXX XXXX ${digits.slice(-4)}`;
+};
 const toRestaurantProfile = (doc) => {
     if (!doc) return null;
     const loc = doc.location && typeof doc.location === 'object' ? doc.location : null;
@@ -369,6 +384,10 @@ const toRestaurantProfile = (doc) => {
         ownerPhone: doc.ownerPhone || '',
         primaryContactNumber: doc.primaryContactNumber || '',
         panNumber: doc.panNumber || '',
+        // Masked. The partner already knows their own number, and an
+        // unmasked one on every profile response ends up in logs and caches.
+        aadhaarNumber: maskAadhaar(doc.aadhaarNumber),
+        aadhaarImage: doc.aadhaarImage ? { url: doc.aadhaarImage } : null,
         nameOnPan: doc.nameOnPan || '',
         panImage: doc.panImage ? { url: doc.panImage } : null,
         gstRegistered: Boolean(doc.gstRegistered),
@@ -466,6 +485,7 @@ const PROFILE_SELECT = {
     onboardingFeePaymentOrderId: true, onboardingFeePaymentSignature: true,
     openDays: true, openingTime: true, outsideHoursOverride: true,
     ownerEmail: true, ownerName: true, ownerPhone: true, panImage: true,
+    aadhaarNumber: true, aadhaarImage: true,
     panNumber: true, pincode: true, primaryContactNumber: true,
     profileImage: true, pureVegRestaurant: true, restaurantName: true,
     state: true, status: true, subscriptionAmount: true, subscriptionDueAmount: true,
@@ -1374,6 +1394,14 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     if (body.panImage !== undefined) {
         update.panImage = toUrl(body.panImage) || '';
     }
+    if (body.aadhaarNumber !== undefined) {
+        // Digits only. Partners type it spaced or hyphenated, and a stored
+        // number that varies by punctuation cannot be matched or compared.
+        update.aadhaarNumber = String(body.aadhaarNumber || '').replace(/\D/g, '');
+    }
+    if (body.aadhaarImage !== undefined) {
+        update.aadhaarImage = toUrl(body.aadhaarImage) || '';
+    }
     if (body.gstRegistered !== undefined) {
         if (typeof body.gstRegistered === 'boolean') {
             update.gstRegistered = body.gstRegistered;
@@ -1439,6 +1467,8 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         'panNumber',
         'nameOnPan',
         'panImage',
+        'aadhaarNumber',
+        'aadhaarImage',
         'gstRegistered',
         'gstNumber',
         'gstLegalName',
