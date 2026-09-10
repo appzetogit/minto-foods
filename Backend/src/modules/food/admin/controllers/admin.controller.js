@@ -1565,63 +1565,63 @@ export async function rejectDeliveryPartner(req, res, next) {
 export async function listLedgerEntries(req, res, next) {
     try {
         const data = await adminService.listLedgerEntries(req.query);
-        return sendResponse(res, 200, 'Ledger entries fetched successfully', data);
+        return res.status(200).json({ success: true, message: 'Ledger entries fetched successfully', data: data });
     } catch (error) { next(error); }
 }
 
 export async function createLedgerEntry(req, res, next) {
     try {
         const data = await adminService.createLedgerEntry(req.body || {}, req.user?.userId);
-        return sendResponse(res, 201, 'Entry recorded', data);
+        return res.status(201).json({ success: true, message: 'Entry recorded', data: data });
     } catch (error) { next(error); }
 }
 
 export async function updateLedgerEntry(req, res, next) {
     try {
         const data = await adminService.updateLedgerEntry(req.params.id, req.body || {});
-        return sendResponse(res, 200, 'Entry updated', data);
+        return res.status(200).json({ success: true, message: 'Entry updated', data: data });
     } catch (error) { next(error); }
 }
 
 export async function deleteLedgerEntry(req, res, next) {
     try {
         const data = await adminService.deleteLedgerEntry(req.params.id);
-        return sendResponse(res, 200, 'Entry deleted', data);
+        return res.status(200).json({ success: true, message: 'Entry deleted', data: data });
     } catch (error) { next(error); }
 }
 
 export async function listCuisines(req, res, next) {
     try {
         const data = await adminService.listCuisines(req.query);
-        return sendResponse(res, 200, 'Cuisines fetched successfully', data);
+        return res.status(200).json({ success: true, message: 'Cuisines fetched successfully', data: data });
     } catch (error) { next(error); }
 }
 
 export async function createCuisine(req, res, next) {
     try {
         const data = await adminService.createCuisine(req.body || {});
-        return sendResponse(res, 201, 'Cuisine created successfully', data);
+        return res.status(201).json({ success: true, message: 'Cuisine created successfully', data: data });
     } catch (error) { next(error); }
 }
 
 export async function updateCuisine(req, res, next) {
     try {
         const data = await adminService.updateCuisine(req.params.id, req.body || {});
-        return sendResponse(res, 200, 'Cuisine updated successfully', data);
+        return res.status(200).json({ success: true, message: 'Cuisine updated successfully', data: data });
     } catch (error) { next(error); }
 }
 
 export async function deleteCuisine(req, res, next) {
     try {
         const data = await adminService.deleteCuisine(req.params.id);
-        return sendResponse(res, 200, data.deleted ? 'Cuisine deleted' : 'Cuisine hidden from the picker', data);
+        return res.status(200).json({ success: true, message: data.deleted ? 'Cuisine deleted' : 'Cuisine hidden from the picker', data: data });
     } catch (error) { next(error); }
 }
 
 export async function getZoneCities(req, res, next) {
     try {
         const data = await adminService.getZoneCities();
-        return sendResponse(res, 200, 'Zone cities fetched successfully', data);
+        return res.status(200).json({ success: true, message: 'Zone cities fetched successfully', data: data });
     } catch (error) {
         next(error);
     }
