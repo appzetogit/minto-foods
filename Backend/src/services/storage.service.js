@@ -44,6 +44,15 @@ export const fixMediaUrlProtocol = (url) => String(url || '')
     .replace(/^(https?):\/(?!\/)/i, '$1://')
     .replace(/^(https?:\/\/)(https?:\/\/)+/i, '$1');
 
+/** Hosts that serve our own upload bucket, for the signed-url check below. */
+const isOwnBucketHost = (hostname) => {
+    const bucket = process.env.UPLOAD_S3_BUCKET || '';
+    if (!bucket) return false;
+    const region = process.env.UPLOAD_S3_REGION || process.env.AWS_REGION || 'ap-south-1';
+    return hostname === `${bucket}.s3.${region}.amazonaws.com`
+        || hostname === `${bucket}.s3.amazonaws.com`;
+};
+
 export const buildPublicUrl = (relativePath) => {
     const cleanPath = String(relativePath || '').replace(/^\/+/, '');
     const base = fixMediaUrlProtocol(String(config.uploadBaseUrl || '').replace(/\/+$/, ''));
@@ -61,8 +70,17 @@ export const buildPublicUrl = (relativePath) => {
 };
 
 /**
- * Normalize any media URL before saving to MongoDB.
- * Strips localhost origins; fixes protocol typos (https:/ → https://).
+ * Normalize any media URL before saving.
+ * Strips localhost origins; fixes protocol typos (https:/ → https://); and
+ * drops the query string from a signed url belonging to our own bucket.
+ *
+ * That last one is not cosmetic. Responses leave here with S3 urls signed for
+ * an hour, so any edit form that loads an entity and posts it back carries a
+ * signed url in the body. Persisting it freezes the signature: mediaSigning
+ * skips re-signing anything that already has X-Amz-Signature -- correctly, so
+ * that one response never signs twice -- and the row then serves a url that
+ * 403s forever once the hour is up. Storing the bare object url is the
+ * invariant the signing service documents, and this is where it is enforced.
  */
 export const normalizeMediaUrlForStorage = (url) => {
     const trimmed = fixMediaUrlProtocol(url);
@@ -79,6 +97,11 @@ export const normalizeMediaUrlForStorage = (url) => {
         }
         if (parsed.pathname.startsWith('/uploads/')) {
             return fixMediaUrlProtocol(parsed.toString());
+        }
+        // Only our own bucket: an external signed url is someone else's
+        // contract and stripping its query would break it.
+        if (parsed.searchParams.has('X-Amz-Signature') && isOwnBucketHost(parsed.hostname)) {
+            return `${parsed.origin}${parsed.pathname}`;
         }
     } catch {
         /* not a full URL */

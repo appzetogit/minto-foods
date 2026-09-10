@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
 import { fromRestaurantLocation, toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import {
     DAY_NAMES,
@@ -23,10 +24,17 @@ import {
 
 const toStr = (v) => (v != null ? String(v).trim() : '');
 const getUrl = (v) => (v && typeof v === 'object' ? v.url : v);
-const toUrl = (v) => toStr(getUrl(v)) || undefined;
+
+// Through the normalizer, not raw. An admin edit posts back the urls the GET
+// handed it, and those are signed and expiring -- see
+// normalizeMediaUrlForStorage.
+const toUrl = (v) => normalizeMediaUrlForStorage(toStr(getUrl(v))) || undefined;
 const toUrlList = (value, max) => {
     const list = Array.isArray(value) ? value : [value];
-    return list.map((v) => toStr(getUrl(v))).filter(Boolean).slice(0, max);
+    return list
+        .map((v) => normalizeMediaUrlForStorage(toStr(getUrl(v))))
+        .filter(Boolean)
+        .slice(0, max);
 };
 
 const ZONE_DETAIL = {
