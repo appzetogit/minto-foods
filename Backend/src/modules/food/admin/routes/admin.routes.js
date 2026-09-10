@@ -439,6 +439,14 @@ router.patch(
 );
 router.delete('/delivery/:id', adminController.deleteDeliveryPartner);
 
+// ----- Cuisines -----
+// Filed under restaurant management: it is the vocabulary restaurants are
+// classified by, and whoever manages restaurants decides it.
+router.get('/cuisines', requireAdminPermission('restaurant_management', 'view'), adminController.listCuisines);
+router.post('/cuisines', requireAdminPermission('restaurant_management', 'create'), adminController.createCuisine);
+router.patch('/cuisines/:id', requireAdminPermission('restaurant_management', 'edit'), adminController.updateCuisine);
+router.delete('/cuisines/:id', requireAdminPermission('restaurant_management', 'delete'), adminController.deleteCuisine);
+
 // ----- Zones -----
 router.get(
     '/zones',

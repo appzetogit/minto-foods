@@ -1867,6 +1867,32 @@ enum FavoriteEntity {
 // Zones and geography
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The cuisines a restaurant can be filed under.
+///
+/// FoodRestaurant.cuisines stays a String[] of names. It is denormalised on
+/// purpose: the customer app filters and displays by name on nearly every
+/// screen, and a join for a label that changes once a year is not worth it.
+/// This table is the picker and the vocabulary -- it stops the list being
+/// whatever anyone has ever typed.
+model FoodCuisine {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name String @unique
+  /// Lowercased, spaces collapsed. What "North  Indian" and "north indian"
+  /// have in common, so the same cuisine cannot be added twice.
+  slug String @unique
+
+  image     String?
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_cuisines")
+}
+
 model FoodZone {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 

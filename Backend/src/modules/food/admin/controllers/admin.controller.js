@@ -1562,6 +1562,34 @@ export async function rejectDeliveryPartner(req, res, next) {
 }
 
 // ----- Zones -----
+export async function listCuisines(req, res, next) {
+    try {
+        const data = await adminService.listCuisines(req.query);
+        return sendResponse(res, 200, 'Cuisines fetched successfully', data);
+    } catch (error) { next(error); }
+}
+
+export async function createCuisine(req, res, next) {
+    try {
+        const data = await adminService.createCuisine(req.body || {});
+        return sendResponse(res, 201, 'Cuisine created successfully', data);
+    } catch (error) { next(error); }
+}
+
+export async function updateCuisine(req, res, next) {
+    try {
+        const data = await adminService.updateCuisine(req.params.id, req.body || {});
+        return sendResponse(res, 200, 'Cuisine updated successfully', data);
+    } catch (error) { next(error); }
+}
+
+export async function deleteCuisine(req, res, next) {
+    try {
+        const data = await adminService.deleteCuisine(req.params.id);
+        return sendResponse(res, 200, data.deleted ? 'Cuisine deleted' : 'Cuisine hidden from the picker', data);
+    } catch (error) { next(error); }
+}
+
 export async function getZoneCities(req, res, next) {
     try {
         const data = await adminService.getZoneCities();
