@@ -116,6 +116,55 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
     return statsMap;
 }
 
+/**
+ * A rider's identity documents, in the shape the admin screens already read.
+ *
+ * Both the rider popup and the join-request review have had a Documents
+ * section all along -- number, photo and a link per document -- and neither has
+ * ever rendered anything, because this file returned none of those columns.
+ * `viewDetails.documents` was always undefined, so the whole block was skipped
+ * in silence. On the join-request screen that meant approving an application
+ * without being able to see what was submitted.
+ *
+ * Returns null when nothing was supplied, so the section stays hidden rather
+ * than appearing empty; each document is likewise omitted unless it has a
+ * number or a file.
+ *
+ * No expiry date. The licence block reads one, but nothing in the system
+ * collects it, so a column would only ever be null -- and the UI guards every
+ * field separately, so leaving it out renders nothing rather than breaking.
+ */
+const serializeDocuments = (doc) => {
+    const entry = (number, file) => {
+        const n = String(number || '').trim();
+        const d = String(file || '').trim();
+        if (!n && !d) return undefined;
+        return { ...(n ? { number: n } : {}), ...(d ? { document: d } : {}) };
+    };
+
+    const named = {
+        aadhar: entry(doc.aadharNumber, doc.aadharPhoto),
+        pan: entry(doc.panNumber, doc.panPhoto),
+        drivingLicense: entry(doc.drivingLicenseNumber, doc.drivingLicensePhoto),
+    };
+
+    // Files uploaded against admin-defined registration fields. Kept under
+    // their own key so a custom field named "pan" cannot shadow the real one.
+    const custom =
+        doc.customDocuments && typeof doc.customDocuments === 'object'
+            ? Object.entries(doc.customDocuments)
+                  .filter(([, url]) => String(url || '').trim())
+                  .map(([key, url]) => ({ key, document: String(url) }))
+            : [];
+
+    const present = Object.fromEntries(
+        Object.entries(named).filter(([, value]) => value !== undefined),
+    );
+    if (!Object.keys(present).length && !custom.length) return null;
+
+    return { ...present, ...(custom.length ? { custom } : {}) };
+};
+
 const serializePartner = (doc, stats = {}, sl = 0) => {
     const lastLat = toFiniteNumber(doc.lastLat);
     const lastLng = toFiniteNumber(doc.lastLng);
@@ -153,6 +202,8 @@ const serializePartner = (doc, stats = {}, sl = 0) => {
         // sat unreachable for hours while the list showed them green.
         hasPushToken:
             (doc.fcmTokenMobile || []).length > 0 || (doc.fcmTokens || []).length > 0,
+        // Signed per response by the media middleware, so these urls expire.
+        documents: serializeDocuments(doc),
         profilePhoto: doc.profilePhoto || null,
         profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null,
         totalOrders: stats.totalOrders || 0,
@@ -372,6 +423,8 @@ export async function getDeliveryJoinRequests(query = {}) {
         vehicleType: doc.vehicleType || '',
         status: doc.status === 'rejected' ? 'denied' : doc.status,
         rejectionReason: doc.rejectionReason || undefined,
+        // Signed per response by the media middleware, so these urls expire.
+        documents: serializeDocuments(doc),
         profilePhoto: doc.profilePhoto || null,
         profileImage: doc.profilePhoto ? { url: doc.profilePhoto } : null,
     }));
