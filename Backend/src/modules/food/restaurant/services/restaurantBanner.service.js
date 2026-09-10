@@ -2,10 +2,14 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
+import { saveVideoFile, buildPublicUrl, deleteStoredFile, MAX_VIDEO_MB } from '../../../../services/storage.service.js';
 import { invalidateCache } from '../../../../middleware/cache.js';
 
 const MAX_BANNERS = 10;
 const MAX_GALLERY = 10;
+// Fewer than photos on purpose: each one is megabytes, and a storefront that
+// needs six clips to explain itself has a different problem.
+const MAX_VIDEOS = 3;
 
 /** Columns are text[] now, but older rows and clients still send { url } objects. */
 const toUrl = (image) => {
@@ -106,6 +110,92 @@ export const uploadRestaurantGalleryImages = async (restaurantId, files = []) =>
 
     await save(restaurantId, { galleryImages: next });
     return { galleryImages: next, uploaded, skipped };
+};
+
+/**
+ * Storefront videos.
+ *
+ * Stored as objects, not urls: a player needs the mime type to choose a
+ * decoder and a poster frame to show before anyone presses play, and given
+ * neither it renders a black rectangle. The path is what is kept -- urls are
+ * signed per response and expire within the hour, so a stored one is a link
+ * that works today and breaks tomorrow.
+ */
+const serializeVideo = (video) => {
+    const storedPath = String(video?.path || '').trim();
+    if (!storedPath) return null;
+    return {
+        path: storedPath,
+        url: buildPublicUrl(storedPath),
+        mimeType: String(video?.mimeType || ''),
+        size: Number(video?.size) || 0,
+        poster: video?.poster ? buildPublicUrl(String(video.poster)) : null,
+    };
+};
+
+const readVideos = (list) =>
+    (Array.isArray(list) ? list : []).map(serializeVideo).filter(Boolean);
+
+export const listRestaurantVideos = async (restaurantId) => {
+    const doc = await load(restaurantId, { videos: true });
+    return { videos: readVideos(doc.videos), maxVideos: MAX_VIDEOS };
+};
+
+export const uploadRestaurantVideos = async (restaurantId, files = []) => {
+    const doc = await load(restaurantId, { videos: true });
+    const existing = Array.isArray(doc.videos) ? doc.videos : [];
+
+    const room = MAX_VIDEOS - existing.length;
+    if (room <= 0) {
+        throw new ValidationError(`A restaurant can have at most ${MAX_VIDEOS} videos`);
+    }
+    if (!files.length) throw new ValidationError(`No video was uploaded (max ${MAX_VIDEO_MB}MB each)`);
+
+    const saved = [];
+    for (const file of files.slice(0, room)) {
+        const stored = await saveVideoFile(file, 'food/restaurants/videos');
+        saved.push({
+            path: stored.path,
+            mimeType: stored.mimeType,
+            size: stored.size,
+            poster: '',
+        });
+    }
+
+    const videos = [...existing, ...saved];
+    await save(restaurantId, { videos });
+
+    return {
+        videos: readVideos(videos),
+        uploaded: saved.length,
+        skipped: Math.max(0, files.length - saved.length),
+    };
+};
+
+/**
+ * Remove one video, by the path it was stored under.
+ *
+ * By path rather than url because a url carries a signature that differs
+ * between responses -- matching on one would fail for a client holding a copy
+ * fetched a moment earlier.
+ */
+export const deleteRestaurantVideo = async (restaurantId, videoPath) => {
+    const doc = await load(restaurantId, { videos: true });
+    const target = String(videoPath || '').trim();
+    if (!target) throw new ValidationError('videoPath is required');
+
+    const existing = Array.isArray(doc.videos) ? doc.videos : [];
+    const found = existing.find((v) => String(v?.path) === target);
+    if (!found) throw new ValidationError('Video not found for this restaurant');
+
+    const videos = existing.filter((v) => String(v?.path) !== target);
+    await save(restaurantId, { videos });
+
+    // The row is the record; a file left behind is wasted storage but a row
+    // pointing at a deleted file is a broken player, so the row goes first.
+    await deleteStoredFile(target).catch(() => {});
+
+    return { videos: readVideos(videos), deleted: target };
 };
 
 /** Remove one gallery photo by exact URL. */

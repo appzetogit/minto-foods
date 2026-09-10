@@ -7,7 +7,10 @@ import {
     getRestaurantMedia,
     uploadRestaurantCoverImage,
     uploadRestaurantGalleryImages,
-    deleteRestaurantGalleryImage
+    deleteRestaurantGalleryImage,
+    listRestaurantVideos,
+    uploadRestaurantVideos,
+    deleteRestaurantVideo
 } from '../services/restaurantBanner.service.js';
 
 export const listBannersController = async (req, res, next) => {
@@ -73,6 +76,27 @@ export const uploadGalleryImagesController = async (req, res, next) => {
     } catch (error) {
         next(error);
     }
+};
+
+export const listVideosController = async (req, res, next) => {
+    try {
+        const data = await listRestaurantVideos(req.user?.userId);
+        return sendResponse(res, 200, 'Videos fetched successfully', data);
+    } catch (error) { next(error); }
+};
+
+export const uploadVideosController = async (req, res, next) => {
+    try {
+        const data = await uploadRestaurantVideos(req.user?.userId, req.files || []);
+        return sendResponse(res, 201, 'Videos uploaded successfully', data);
+    } catch (error) { next(error); }
+};
+
+export const deleteVideoController = async (req, res, next) => {
+    try {
+        const data = await deleteRestaurantVideo(req.user?.userId, req.body?.videoPath);
+        return sendResponse(res, 200, 'Video deleted successfully', data);
+    } catch (error) { next(error); }
 };
 
 export const deleteGalleryImageController = async (req, res, next) => {

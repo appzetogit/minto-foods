@@ -82,6 +82,9 @@ import {
     getMediaController,
     uploadCoverImageController,
     uploadGalleryImagesController,
+    listVideosController,
+    uploadVideosController,
+    deleteVideoController,
     deleteGalleryImageController
 } from '../controllers/restaurantBanner.controller.js';
 import { listBannersForRestaurantAppController } from '../../admin/controllers/restaurantAppBanner.controller.js';
@@ -220,6 +223,12 @@ router.get('/media', authMiddleware, requireRestaurant, getMediaController);
 router.post('/media/cover-image', authMiddleware, requireRestaurant, upload.single('file'), uploadCoverImageController);
 router.post('/media/gallery', authMiddleware, requireRestaurant, upload.array('files', 10), uploadGalleryImagesController);
 router.delete('/media/gallery', authMiddleware, requireRestaurant, deleteGalleryImageController);
+
+// Storefront videos. Fewer at a time than photos: each is megabytes and is
+// buffered in memory on the way through.
+router.get('/media/videos', authMiddleware, requireRestaurant, listVideosController);
+router.post('/media/videos', authMiddleware, requireRestaurant, upload.array('files', 3), uploadVideosController);
+router.delete('/media/videos', authMiddleware, requireRestaurant, deleteVideoController);
 
 // Banners shown on the public restaurant page (/restaurants/:id -> coverImages).
 // Separate from /profile/cover-images, which resets the restaurant to 'pending' and is

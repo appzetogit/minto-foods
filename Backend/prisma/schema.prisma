@@ -718,7 +718,14 @@ model FoodRestaurant {
   coverImage    String   @default("")
   /// Storefront photos shown to the rider at pickup and on the customer page.
   galleryImages String[]
-  profileImage  String?
+
+  /// Storefront videos: [{ path, mimeType, size, poster }].
+  ///
+  /// The path is stored, never a url -- urls are signed per response and
+  /// expire. Json[] rather than String[] because a video needs its type and a
+  /// poster frame alongside it, and a player with neither shows a black box.
+  videos       Json[]  @default([])
+  profileImage String?
 
   fcmTokens      String[]
   fcmTokenMobile String[]

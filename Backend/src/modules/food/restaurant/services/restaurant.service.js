@@ -408,6 +408,18 @@ const toRestaurantProfile = (doc) => {
         profileImage: doc.profileImage ? { url: doc.profileImage } : null,
         menuImages,
         coverImages,
+        // Paths turned into urls at read time; the column stores paths because
+        // signed urls expire.
+        videos: Array.isArray(doc.videos)
+            ? doc.videos
+                  .filter((v) => v && String(v.path || '').trim())
+                  .map((v) => ({
+                      path: String(v.path),
+                      url: toUrl(String(v.path)),
+                      mimeType: String(v.mimeType || ''),
+                      size: Number(v.size) || 0,
+                  }))
+            : [],
         openingTime: normalizeRestaurantTime(doc.openingTime) || null,
         closingTime: normalizeRestaurantTime(doc.closingTime) || null,
         openDays: Array.isArray(doc.openDays) ? doc.openDays : [],
@@ -474,6 +486,7 @@ const PROFILE_SELECT = {
     accountHolderName: true, accountNumber: true, accountType: true,
     addressLine1: true, addressLine2: true, area: true, city: true,
     closingTime: true, coverImages: true, createdAt: true, cuisines: true,
+    videos: true,
     diningEnabled: true, diningMaxGuests: true, diningType: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     formattedAddress: true, fssaiExpiry: true, fssaiImage: true, fssaiNumber: true,

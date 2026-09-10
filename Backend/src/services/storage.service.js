@@ -259,6 +259,78 @@ export const saveImageFile = async (file, folder) => {
     };
 };
 
+/**
+ * Video formats a browser can play without a plugin or a transcode step.
+ *
+ * Deliberately short. Anything outside this list either needs transcoding
+ * before it will play (.mov from an iPhone, .avi, .mkv) or is a container we
+ * would be guessing about, and this server has no transcoder.
+ */
+const ALLOWED_VIDEO_MIME_TYPES = new Map([
+    ['video/mp4', '.mp4'],
+    ['video/webm', '.webm'],
+]);
+
+/**
+ * The ceiling for one video.
+ *
+ * Well under the 25MB upload limit, because a video goes through
+ * multer.memoryStorage() like everything else -- the whole file is held in
+ * process memory while it uploads, and the box has 2GB. A restaurant
+ * storefront clip does not need to be longer than this buys.
+ */
+const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_BYTES) || 12 * 1024 * 1024;
+
+export const MAX_VIDEO_MB = Math.floor(MAX_VIDEO_BYTES / (1024 * 1024));
+
+/**
+ * Store a video as it is.
+ *
+ * Unlike an image it is not re-encoded -- there is no transcoder here, and
+ * re-wrapping a container without one produces a file that plays on the
+ * machine that made it and nowhere else. So the format has to be right on the
+ * way in, which is why the allow-list is two entries rather than "video/*".
+ *
+ * The mime type is checked rather than the extension: a file called .mp4 is a
+ * claim, and the browser will believe the Content-Type we store it under.
+ */
+export const saveVideoFile = async (file, folder) => {
+    if (!file?.buffer?.length) {
+        throw new ValidationError('File is required');
+    }
+
+    const mimeType = String(file.mimetype || '').toLowerCase().split(';')[0].trim();
+    const extension = ALLOWED_VIDEO_MIME_TYPES.get(mimeType);
+    if (!extension) {
+        throw new ValidationError(
+            'Only MP4 and WebM videos are supported. Convert the file and try again.',
+        );
+    }
+
+    if (file.buffer.length > MAX_VIDEO_BYTES) {
+        throw new ValidationError(`That video is larger than ${MAX_VIDEO_MB}MB`);
+    }
+
+    const safeFolder = sanitizeUploadFolder(folder);
+    const filename = buildFilename(extension);
+    const relativePath = path.posix.join(safeFolder, filename);
+
+    if (useS3) {
+        await putObject(relativePath, file.buffer, mimeType);
+    } else {
+        await ensureUploadStorageReady(safeFolder);
+        await fs.writeFile(getAbsolutePath(relativePath), file.buffer);
+    }
+
+    return {
+        url: buildPublicUrl(relativePath),
+        path: relativePath,
+        filename,
+        mimeType,
+        size: file.buffer.length,
+    };
+};
+
 export const saveImageBuffer = async (buffer, folder, options = {}) => {
     return saveImageFile(
         {
