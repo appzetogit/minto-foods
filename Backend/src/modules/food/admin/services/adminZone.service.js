@@ -123,6 +123,15 @@ export async function updateZone(id, body = {}) {
     if (body.zoneName !== undefined) data.zoneName = String(body.zoneName).trim();
     if (body.country !== undefined) data.country = String(body.country).trim();
     if (body.city !== undefined) data.city = String(body.city || '').trim() || null;
+    if (body.codEnabled !== undefined) {
+        // null is a real answer here -- "follow the platform" -- and is not the
+        // same as false, which is "off in this zone whatever the platform says".
+        data.codEnabled = body.codEnabled === null ? null : body.codEnabled !== false;
+    }
+    if (body.codMinDeliveredOrders !== undefined) {
+        const n = Number(body.codMinDeliveredOrders);
+        data.codMinDeliveredOrders = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    }
     if (body.serviceLocation !== undefined) {
         data.serviceLocation = String(body.serviceLocation).trim();
     }

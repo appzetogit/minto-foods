@@ -476,11 +476,17 @@ export async function createOrder(userId, dto) {
     });
 
     const paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
-    // COD was hard-disabled here. It is back on by default and kept behind a switch
-    // so it can be turned off again without a deploy — everything downstream already
-    // supports it.
-    if (paymentMethod === "cash" && String(process.env.COD_ENABLED || "true") !== "true") {
-      throw new ValidationError("Cash on Delivery is no longer available. Please pay online.");
+    // COD is no longer one switch for the whole platform. A zone can turn it
+    // off on its own, and can require a customer to have taken delivery of a
+    // few orders first. Checked here, on the server, whatever the app offered:
+    // the checkout screen hides the option, but hiding is not enforcing.
+    if (paymentMethod === "cash") {
+      const { isCodAvailable } = await import("./codAvailability.service.js");
+      const cod = await isCodAvailable({
+        userId,
+        zoneId: dto.zoneId || restaurant.zoneId || null,
+      });
+      if (!cod.allowed) throw new ValidationError(cod.message);
     }
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";

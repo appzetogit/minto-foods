@@ -1960,6 +1960,18 @@ model FoodZone {
   /// to Prisma Client (Unsupported) — query it through findZoneForPoint().
   boundary Unsupported("geography(Polygon, 4326)")?
 
+  /// Whether cash on delivery is offered in this zone.
+  ///
+  /// Null means "follow the platform default" rather than "off", so a zone
+  /// created before this existed keeps behaving as it did.
+  codEnabled Boolean?
+
+  /// Delivered orders a customer needs before COD is offered here.
+  ///
+  /// 0 offers it to everyone. Counted platform-wide rather than per zone: a
+  /// good customer ordering in a new area is not a stranger.
+  codMinDeliveredOrders Int @default(0)
+
   isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
