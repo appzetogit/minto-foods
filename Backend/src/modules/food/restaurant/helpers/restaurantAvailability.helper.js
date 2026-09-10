@@ -2,6 +2,7 @@ import {
   getPreviousDayName,
   getRestaurantLocalTimeParts,
 } from '../../../../utils/timezone.js';
+import { readSlots, isWithinAnySlot } from './daySlots.helper.js';
 
 const DAY_NAMES = [
   'Sunday',
@@ -138,11 +139,20 @@ const checkDayWindow = (restaurant, dayName, nowMinutes) => {
     }
   }
 
-  const isWithin = hasExplicitWindow
-    ? openingMinutes !== null &&
-      closingMinutes !== null &&
-      isWithinTimeWindow(nowMinutes, openingMinutes, closingMinutes)
-    : true;
+  // A day can hold more than one window now -- lunch and dinner with a break
+  // between. `timing` still carries openingTime/closingTime mirroring the first
+  // of them, so a day stored before slots existed reads as a single window and
+  // behaves exactly as it always did.
+  const slots = readSlots(timing);
+  const hasSlots = slots.length > 1;
+
+  const isWithin = hasSlots
+    ? isWithinAnySlot(slots, nowMinutes)
+    : hasExplicitWindow
+      ? openingMinutes !== null &&
+        closingMinutes !== null &&
+        isWithinTimeWindow(nowMinutes, openingMinutes, closingMinutes)
+      : true;
 
   return {
     isWithin,

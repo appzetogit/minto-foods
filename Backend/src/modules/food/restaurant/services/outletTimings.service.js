@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { invalidateCache } from '../../../../middleware/cache.js';
 import { getRestaurantLocalTimeParts } from '../../../../utils/timezone.js';
+import { normalizeDaySlots, readSlots } from '../helpers/daySlots.helper.js';
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -45,7 +46,10 @@ const toClientShape = (doc) => {
         map[day] = {
             isOpen,
             openingTime: isOpen ? normalizeTime(found?.openingTime, '09:00') : '',
-            closingTime: isOpen ? normalizeTime(found?.closingTime, '22:00') : ''
+            closingTime: isOpen ? normalizeTime(found?.closingTime, '22:00') : '',
+            // Every window, for clients that can show more than one. The pair
+            // above stays and mirrors the first, so an older build is unaffected.
+            slots: isOpen ? readSlots(found) : [],
         };
     }
     return map;
@@ -73,13 +77,9 @@ export async function upsertOutletTimingsForRestaurant(restaurantId, outletTimin
 
     const timings = DAY_NAMES.map((day) => {
         const src = outletTimings[day] && typeof outletTimings[day] === 'object' ? outletTimings[day] : {};
-        const isOpen = src.isOpen !== false;
-        return {
-            day,
-            isOpen,
-            openingTime: isOpen ? normalizeTime(src.openingTime, '09:00') : '',
-            closingTime: isOpen ? normalizeTime(src.closingTime, '22:00') : ''
-        };
+        // Writes slots and mirrors the first into openingTime/closingTime, so
+        // the stored row stays readable by everything that predates slots.
+        return normalizeDaySlots(src, { day });
     });
 
     const id = String(restaurantId);
