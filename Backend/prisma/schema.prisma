@@ -1875,6 +1875,12 @@ model FoodZone {
   country         String   @default("India")
   /// Display label, e.g. city/area. Can mirror name.
   serviceLocation String?
+  /// The city this zone serves, as something to group and filter on.
+  ///
+  /// serviceLocation looks like it should do this job and cannot: it is free
+  /// text an admin types for display, so "Indore", "indore " and "Indore MP"
+  /// are three cities as far as a GROUP BY is concerned.
+  city            String?
   unit            ZoneUnit @default(kilometer)
 
   /// [{ latitude, longitude }] ring, ≥3 points. This stays the editable record —
@@ -1904,6 +1910,7 @@ model FoodZone {
   foodLandingZoneSettings FoodLandingZoneSettings?
 
   @@index([isActive, name])
+  @@index([city, name])
   @@index([country, name])
   @@map("food_zones")
 }

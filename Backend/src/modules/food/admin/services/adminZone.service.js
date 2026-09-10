@@ -23,11 +23,17 @@ export async function getZones(query = {}) {
     const skip = (page - 1) * limit;
 
     const search = typeof query.search === 'string' ? query.search.trim() : '';
+    const city = typeof query.city === 'string' ? query.city.trim() : '';
     const { isActive } = query;
 
     const where = {};
     if (isActive !== undefined && isActive !== '') {
         where.isActive = isActive === 'true' || isActive === '1';
+    }
+    if (city) {
+        // Exact, not contains: the filter is fed from the city list below, so a
+        // loose match would make "Indore" also select "Indore Rural".
+        where.city = city;
     }
     if (search) {
         const contains = { contains: search, mode: 'insensitive' };
@@ -35,6 +41,7 @@ export async function getZones(query = {}) {
             { name: contains },
             { zoneName: contains },
             { serviceLocation: contains },
+            { city: contains },
             { country: contains },
         ];
     }
@@ -45,6 +52,28 @@ export async function getZones(query = {}) {
     ]);
 
     return { zones, total, page, limit };
+}
+
+/**
+ * The cities that actually have zones, for the filter dropdown.
+ *
+ * Derived rather than kept as its own list: a city with no zones is nothing a
+ * zone filter can usefully offer, and a stored list would drift the moment a
+ * zone moved or was deleted.
+ */
+export async function getZoneCities() {
+    const rows = await prisma.foodZone.groupBy({
+        by: ['city'],
+        where: { city: { not: null } },
+        _count: { _all: true },
+    });
+
+    const cities = rows
+        .filter((r) => String(r.city || '').trim())
+        .map((r) => ({ city: r.city, zones: r._count._all }))
+        .sort((a, b) => a.city.localeCompare(b.city));
+
+    return { cities };
 }
 
 export async function getZoneById(id) {
@@ -72,6 +101,7 @@ export async function createZone(body = {}) {
             zoneName: body.zoneName?.trim() || name,
             country: body.country?.trim() || 'India',
             serviceLocation: body.serviceLocation?.trim() || name,
+            city: body.city?.trim() || null,
             unit: body.unit === 'miles' ? 'miles' : 'kilometer',
             coordinates,
             isActive: body.isActive !== false,
@@ -92,6 +122,7 @@ export async function updateZone(id, body = {}) {
     if (body.name !== undefined) data.name = String(body.name).trim();
     if (body.zoneName !== undefined) data.zoneName = String(body.zoneName).trim();
     if (body.country !== undefined) data.country = String(body.country).trim();
+    if (body.city !== undefined) data.city = String(body.city || '').trim() || null;
     if (body.serviceLocation !== undefined) {
         data.serviceLocation = String(body.serviceLocation).trim();
     }

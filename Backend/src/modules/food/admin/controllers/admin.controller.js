@@ -1562,6 +1562,15 @@ export async function rejectDeliveryPartner(req, res, next) {
 }
 
 // ----- Zones -----
+export async function getZoneCities(req, res, next) {
+    try {
+        const data = await adminService.getZoneCities();
+        return sendResponse(res, 200, 'Zone cities fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getZones(req, res, next) {
     try {
         const data = await adminService.getZones(req.query);

@@ -452,6 +452,19 @@ router.get(
     ]),
     adminController.getZones
 );
+// Before /zones/:id, or "cities" is read as a zone id.
+router.get(
+    '/zones/cities',
+    requireAnyAdminPermission([
+        { section: 'dashboard', action: 'view' },
+        { section: 'restaurant_management', action: 'view' },
+        { section: 'point_of_sale', action: 'view' },
+        { section: 'food_management', action: 'view' },
+        { section: 'delivery_management', action: 'view' },
+        { section: 'report_management', action: 'view' },
+    ]),
+    adminController.getZoneCities
+);
 router.get(
     '/zones/:id',
     requireAnyAdminPermission([
