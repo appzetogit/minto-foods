@@ -261,6 +261,14 @@ router.get('/withdrawals/balance-sheet/riders', adminController.getBalanceSheetR
 router.get('/withdrawals/balance-sheet/history', adminController.getBalanceSheetHistory);
 router.post('/withdrawals/balance-sheet/payout/:entityType/:entityId', adminController.payoutBalance);
 
+// Income and expenses recorded by hand, alongside the derived sheet. Same
+// mount, so they inherit the same transaction_management guard: writing a
+// figure onto the books is the same authority as paying one out.
+router.get('/withdrawals/balance-sheet/entries', adminController.listLedgerEntries);
+router.post('/withdrawals/balance-sheet/entries', adminController.createLedgerEntry);
+router.patch('/withdrawals/balance-sheet/entries/:id', adminController.updateLedgerEntry);
+router.delete('/withdrawals/balance-sheet/entries/:id', adminController.deleteLedgerEntry);
+
 router.patch('/restaurants/:id/billing-mode', adminController.setRestaurantBillingMode);
 router.get('/restaurants/:id/item-commissions', adminController.getItemCommissions);
 router.patch('/restaurants/:id/item-commissions/:itemId', adminController.upsertItemCommission);

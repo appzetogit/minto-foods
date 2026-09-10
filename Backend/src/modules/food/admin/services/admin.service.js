@@ -11,6 +11,7 @@
 
 export * from './adminZone.service.js';
 export * from './adminCuisine.service.js';
+export * from './adminLedgerEntry.service.js';
 export * from './adminSubAdmin.service.js';
 export * from './adminCommission.service.js';
 export * from './adminPlatformSettings.service.js';

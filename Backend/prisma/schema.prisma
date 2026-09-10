@@ -1893,6 +1893,45 @@ model FoodCuisine {
   @@map("food_cuisines")
 }
 
+enum LedgerEntryType {
+  income
+  expense
+}
+
+/// Money that did not come from an order.
+///
+/// Everything on the balance sheet is otherwise derived from the order ledger,
+/// so rent, a fine, a marketing spend or a one-off recovery had nowhere to go
+/// and the sheet never matched the bank. These sit beside the derived figures
+/// rather than being folded into them: a total nobody can trace back to orders
+/// is a total nobody trusts.
+model FoodLedgerEntry {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  type     LedgerEntryType
+  category String          @default("")
+  amount   Decimal         @db.Decimal(14, 2)
+  note     String          @default("")
+
+  /// When the money actually moved, which is not when it was typed in.
+  occurredAt DateTime
+
+  /// Who recorded it. Kept as a plain column rather than a relation so a
+  /// deleted admin cannot take the ledger row with them.
+  createdByAdminId String? @db.VarChar(24)
+
+  /// An uploaded receipt, stored as its path -- urls are signed per response
+  /// and expire.
+  attachmentPath String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([occurredAt(sort: Desc)])
+  @@index([type, occurredAt(sort: Desc)])
+  @@map("food_ledger_entries")
+}
+
 model FoodZone {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 

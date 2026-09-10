@@ -1562,6 +1562,34 @@ export async function rejectDeliveryPartner(req, res, next) {
 }
 
 // ----- Zones -----
+export async function listLedgerEntries(req, res, next) {
+    try {
+        const data = await adminService.listLedgerEntries(req.query);
+        return sendResponse(res, 200, 'Ledger entries fetched successfully', data);
+    } catch (error) { next(error); }
+}
+
+export async function createLedgerEntry(req, res, next) {
+    try {
+        const data = await adminService.createLedgerEntry(req.body || {}, req.user?.userId);
+        return sendResponse(res, 201, 'Entry recorded', data);
+    } catch (error) { next(error); }
+}
+
+export async function updateLedgerEntry(req, res, next) {
+    try {
+        const data = await adminService.updateLedgerEntry(req.params.id, req.body || {});
+        return sendResponse(res, 200, 'Entry updated', data);
+    } catch (error) { next(error); }
+}
+
+export async function deleteLedgerEntry(req, res, next) {
+    try {
+        const data = await adminService.deleteLedgerEntry(req.params.id);
+        return sendResponse(res, 200, 'Entry deleted', data);
+    } catch (error) { next(error); }
+}
+
 export async function listCuisines(req, res, next) {
     try {
         const data = await adminService.listCuisines(req.query);
