@@ -337,15 +337,13 @@ const parseFirebaseError = async (response) => {
 /**
  * Is this token genuinely dead, or is the server misconfigured?
  *
- * Only UNREGISTERED and 404 NOT_FOUND mean the device is gone. INVALID_ARGUMENT
- * used to be treated the same way and must not be: FCM reports a token minted
- * by a different project under that same code, so when the send project is
- * wrong every healthy token in the database looks dead and gets deleted. The
- * app re-registers, the next push deletes it again, and the token table drains
- * while appearing to be a registration problem in the clients.
- *
- * Deleting a token is unrecoverable from here -- only the device can mint
- * another -- so the ambiguous code is the one to leave alone.
+ * Only UNREGISTERED and 404 NOT_FOUND mean the device is gone. A token minted
+ * by a different project comes back as SENDER_ID_MISMATCH ("SenderId
+ * mismatch", messaging/mismatched-credential) and is never pruned: it is not
+ * dead, it is either on an app build pointed at another project or the server
+ * key is wrong, and deleting it cannot be undone from here -- only the device
+ * can mint another. INVALID_ARGUMENT is left alone for the same reason; it also
+ * covers malformed payloads, which say nothing about the token.
  */
 const isSenderMismatch = (message) =>
     message.includes('SENDERID MISMATCH')
@@ -578,9 +576,10 @@ const sendMessageWithRetry = async (message, { projectId, accessToken }) => {
             // and this is the one that means the server is misconfigured.
             if (isSenderMismatch(String(errorJson?.error?.message || '').toUpperCase())) {
                 logger.error(
-                    `FCM rejected a token as belonging to another project while sending from "${projectId}". `
-                    + 'Every push is failing. The service account must belong to the same Firebase project the '
-                    + 'apps register against (see google-services.json / GoogleService-Info.plist).',
+                    `FCM rejected a token minted by another Firebase project while sending from "${projectId}". `
+                    + 'Either this device runs an app build configured for a different project, or the server key '
+                    + 'is for the wrong one -- if every token fails this way, it is the key. The apps and the '
+                    + 'service account must share a project (see google-services.json / GoogleService-Info.plist).',
                 );
             }
 
