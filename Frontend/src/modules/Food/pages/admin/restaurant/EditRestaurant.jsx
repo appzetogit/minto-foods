@@ -105,6 +105,9 @@ const normalizeDetailsFormFromRestaurant = (restaurant) => {
       restaurant?.estimatedDeliveryTime ??
       "",
     offer: restaurant?.offer || "",
+    highlightBadge: restaurant?.highlightBadge || "",
+    freeDeliveryAbove:
+      restaurant?.freeDeliveryAbove == null ? "" : String(restaurant.freeDeliveryAbove),
     openingTime: restaurant?.openingTime || restaurant?.deliveryTimings?.openingTime || "",
     closingTime: restaurant?.closingTime || restaurant?.deliveryTimings?.closingTime || "",
     isActive: restaurant?.isActive !== false,
@@ -341,6 +344,10 @@ export default function EditRestaurant() {
             ? undefined
             : Number(detailsForm.estimatedDeliveryTimeMinutes),
         offer: detailsForm.offer,
+        highlightBadge: detailsForm.highlightBadge,
+        // "" clears the threshold; the API treats blank as "no free delivery".
+        freeDeliveryAbove:
+          detailsForm.freeDeliveryAbove === "" ? "" : Number(detailsForm.freeDeliveryAbove),
         openingTime: detailsForm.openingTime,
         closingTime: detailsForm.closingTime,
         isActive: detailsForm.isActive !== false,
@@ -606,6 +613,31 @@ export default function EditRestaurant() {
                 <div>
                   <Label>Offer</Label>
                   <Input value={detailsForm.offer} onChange={(e) => setDetailsForm((p) => ({ ...p, offer: e.target.value }))} />
+                </div>
+                <div>
+                  <Label>Highlight Badge</Label>
+                  <select
+                    className="w-full h-10 px-3 rounded-md border border-slate-200 bg-white text-sm"
+                    value={detailsForm.highlightBadge}
+                    onChange={(e) => setDetailsForm((p) => ({ ...p, highlightBadge: e.target.value }))}
+                  >
+                    <option value="">None</option>
+                    <option value="bestseller">Bestseller</option>
+                    <option value="popular">Popular</option>
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">Pill shown on the app's Top Restaurants card.</p>
+                </div>
+                <div>
+                  <Label>Free Delivery Above (₹)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={detailsForm.freeDeliveryAbove}
+                    onChange={(e) => setDetailsForm((p) => ({ ...p, freeDeliveryAbove: e.target.value }))}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Blank = no free delivery. Orders at or above this subtotal are charged no delivery fee.
+                  </p>
                 </div>
               </div>
             </section>

@@ -88,3 +88,30 @@ export const normalizeDayName = (value) => {
     const abbr = raw.slice(0, 3).toLowerCase();
     return DAY_NAMES.find((d) => d.toLowerCase().startsWith(abbr)) || null;
 };
+
+/**
+ * The merchandising pill shown on the discovery card. Anything outside the
+ * whitelist clears it rather than reaching the app as unrenderable copy.
+ */
+export const HIGHLIGHT_BADGES = ['bestseller', 'popular'];
+
+export const toHighlightBadge = (value) => {
+    const badge = String(value ?? '').trim().toLowerCase();
+    if (!badge) return null;
+    if (!HIGHLIGHT_BADGES.includes(badge)) {
+        throw new ValidationError(`highlightBadge must be one of: ${HIGHLIGHT_BADGES.join(', ')}`);
+    }
+    return badge;
+};
+
+/**
+ * Free-delivery threshold in rupees. Blank clears it; zero would mean "free for
+ * every order", which is a real setting an admin might want, so it is kept.
+ */
+export const toFreeDeliveryAbove = (value) => {
+    if (value === '' || value === null || value === undefined) return null;
+    const amount = toFiniteNumber(value);
+    if (amount === null) throw new ValidationError('freeDeliveryAbove must be a number');
+    if (amount < 0) throw new ValidationError('freeDeliveryAbove must be >= 0');
+    return amount;
+};

@@ -9,6 +9,8 @@ import {
     normalizeRestaurantTime,
     parseBooleanLike,
     toFiniteNumber,
+    toFreeDeliveryAbove,
+    toHighlightBadge,
     validateOpeningClosingTimes,
 } from './adminRestaurantWrite.helpers.js';
 
@@ -184,6 +186,12 @@ export async function updateRestaurantById(id, body = {}) {
     if (body.featuredDish !== undefined) data.featuredDish = toStr(body.featuredDish);
     if (body.featuredPrice !== undefined) data.featuredPrice = toFiniteNumber(body.featuredPrice);
 
+    // Discovery-card merchandising.
+    if (body.highlightBadge !== undefined) data.highlightBadge = toHighlightBadge(body.highlightBadge);
+    if (body.freeDeliveryAbove !== undefined) {
+        data.freeDeliveryAbove = toFreeDeliveryAbove(body.freeDeliveryAbove);
+    }
+
     // Images
     if (body.profileImage !== undefined) data.profileImage = toUrl(body.profileImage) ?? '';
     if (body.panImage !== undefined) data.panImage = toUrl(body.panImage) ?? '';
@@ -344,6 +352,8 @@ export async function createRestaurantByAdmin(body = {}) {
                 featuredDish: toStr(body.featuredDish),
                 featuredPrice: toFiniteNumber(body.featuredPrice),
                 offer: toStr(body.offer),
+                highlightBadge: toHighlightBadge(body.highlightBadge),
+                freeDeliveryAbove: toFreeDeliveryAbove(body.freeDeliveryAbove),
                 ...dining,
                 // An admin creating it is the approval.
                 status: 'approved',

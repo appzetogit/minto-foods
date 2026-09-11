@@ -1668,6 +1668,7 @@ const PUBLIC_CARD_SELECT = {
     profileImage: true, coverImages: true, menuImages: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     offer: true, featuredDish: true, featuredPrice: true,
+    highlightBadge: true, freeDeliveryAbove: true,
     rating: true, totalRatings: true, isAcceptingOrders: true, status: true,
     pureVegRestaurant: true, createdAt: true,
     openingTime: true, closingTime: true, openDays: true,
@@ -1714,6 +1715,10 @@ const toPublicCard = (r) => ({
     openingTime: r.openingTime || null,
     closingTime: r.closingTime || null,
     openDays: Array.isArray(r.openDays) ? r.openDays : [],
+    // Decimal, so it would otherwise reach the client as a string and the
+    // card's `> 0` check would compare against "149".
+    freeDeliveryAbove: r.freeDeliveryAbove == null ? null : Number(r.freeDeliveryAbove),
+    highlightBadge: r.highlightBadge || null,
 });
 
 export const listApprovedRestaurants = async (query = {}) => {

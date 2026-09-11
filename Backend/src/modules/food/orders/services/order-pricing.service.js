@@ -75,6 +75,8 @@ export async function loadRestaurantForOrdering(restaurantId) {
       openingTime: true,
       closingTime: true,
       openDays: true,
+      // The card advertises "Free delivery above ₹N"; pricing has to honour it.
+      freeDeliveryAbove: true,
     },
   });
 
@@ -295,10 +297,28 @@ export async function loadActiveFeeSettings(zoneId = null) {
   };
 }
 
-export function resolveUserDeliveryFee(feeSettings = {}, { subtotal = 0, distanceKm = null } = {}) {
+export function resolveUserDeliveryFee(
+  feeSettings = {},
+  { subtotal = 0, distanceKm = null, freeDeliveryAbove = null } = {},
+) {
   const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
     ? feeSettings.deliveryFeeRanges
     : [];
+
+  // The restaurant's own free-delivery threshold wins over every band. It is
+  // checked here rather than at the call site because this is the one function
+  // every quote and every placed order routes through, so the discovery card's
+  // promise and the final bill cannot drift apart.
+  // Not `Number(freeDeliveryAbove)` — `Number(null)` is 0, so an unset
+  // threshold read as "free above ₹0" and made every delivery free.
+  const threshold = freeDeliveryAbove == null ? NaN : Number(freeDeliveryAbove);
+  if (Number.isFinite(threshold) && Number(subtotal) >= threshold) {
+    return {
+      deliveryFee: 0,
+      distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
+      source: 'free_delivery_threshold',
+    };
+  }
 
   if (ranges.length > 0 && Number.isFinite(distanceKm)) {
     const matchedFee = matchFeeRange(ranges, distanceKm, (range) => Number(range.fee));
@@ -454,7 +474,11 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     );
   }
 
-  const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, { subtotal, distanceKm });
+  const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, {
+    subtotal,
+    distanceKm,
+    freeDeliveryAbove: restaurant.freeDeliveryAbove,
+  });
   const deliveryFee = round2(deliveryFeeResult.deliveryFee);
   distanceKm = deliveryFeeResult.distanceKm ?? distanceKm;
 

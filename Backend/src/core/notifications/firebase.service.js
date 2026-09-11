@@ -662,8 +662,13 @@ export const sendNotificationToOwner = async ({ ownerType, ownerId, payload, pla
                 );
             }
         }
+        // Name the failures. Without this the line read "Success=0, Failure=3"
+        // for weeks and looked like a delivery problem, when FCM had been
+        // answering "SenderId mismatch" on every single token all along.
+        const reasons = [...new Set((response.results || []).filter((r) => !r.ok).map((r) => r.error).filter(Boolean))];
         logger.info(
             `FCM push sent to ${ownerType}:${ownerId} (${platform || 'all'}). Success=${response.successCount}, Failure=${response.failureCount}`
+            + (reasons.length ? ` [${reasons.join('; ')}]` : '')
         );
         return response;
     } catch (error) {

@@ -48,6 +48,21 @@ test('an unknown distance quotes the cheapest band, never the flat fee', () => {
     assert.equal(quote.source, 'default');
 });
 
+test("a restaurant's free-delivery threshold overrides every band", () => {
+    // The card promises "Free delivery above ₹149", so a ₹149 subtotal must not
+    // be charged the 9 km band's ₹70.
+    const free = resolveUserDeliveryFee(settings, { distanceKm: 9, subtotal: 149, freeDeliveryAbove: 149 });
+    assert.equal(free.deliveryFee, 0);
+    assert.equal(free.source, 'free_delivery_threshold');
+
+    // A rupee short still pays.
+    const paid = resolveUserDeliveryFee(settings, { distanceKm: 9, subtotal: 148, freeDeliveryAbove: 149 });
+    assert.equal(paid.deliveryFee, 70);
+
+    // No threshold configured leaves pricing exactly as it was.
+    assert.equal(resolveUserDeliveryFee(settings, { distanceKm: 9, subtotal: 9999 }).deliveryFee, 70);
+});
+
 test('the flat fee is used only when no bands exist at all', () => {
     const quote = resolveUserDeliveryFee({ deliveryFee: 99, deliveryFeeRanges: [] }, { distanceKm: 5 });
     assert.equal(quote.deliveryFee, 99);

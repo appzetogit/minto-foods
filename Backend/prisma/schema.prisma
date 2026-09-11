@@ -761,6 +761,20 @@ model FoodRestaurant {
   featuredPrice Decimal? @db.Decimal(14, 2)
   offer         String?
 
+  /// Merchandising pill on the discovery card: "bestseller" or "popular".
+  /// Null means the card shows no pill. The app used to derive this from the
+  /// item's position in the list, so the same restaurant was a "Bestseller" or
+  /// merely "Popular" depending on how the feed happened to sort.
+  /// ponytail: a validated string, not an enum, because the set is admin copy
+  /// that will grow ("new", "trending"); the whitelist lives in
+  /// adminRestaurantWrite.helpers.js. Promote to an enum if it stops changing.
+  highlightBadge String? @db.VarChar(20)
+
+  /// Order subtotal at or above which delivery is free, in rupees. Null means
+  /// this restaurant has no free-delivery offer and the card hides the pill.
+  /// Honoured by resolveUserDeliveryFee, so the badge and the bill agree.
+  freeDeliveryAbove Decimal? @db.Decimal(14, 2)
+
   rating       Decimal @default(0) @db.Decimal(2, 1)
   totalRatings Int     @default(0)
 
