@@ -6,6 +6,8 @@ import { Button } from "@food/components/ui/button"
 import { Label } from "@food/components/ui/label"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { ArrowLeft, Loader2, Trash2, Upload } from "lucide-react"
+import RestaurantVideos from "@food/components/admin/restaurant/RestaurantVideos"
+import RestaurantOpeningHours from "@food/components/admin/restaurant/RestaurantOpeningHours"
 
 const debugError = (..._args) => {}
 
@@ -105,6 +107,8 @@ const normalizeDetailsFormFromRestaurant = (restaurant) => {
       restaurant?.estimatedDeliveryTime ??
       "",
     offer: restaurant?.offer || "",
+    aadhaarNumber: restaurant?.aadhaarNumber || "",
+    aadhaarImage: imageUrlOf(restaurant?.aadhaarImage) || "",
     highlightBadge: restaurant?.highlightBadge || "",
     freeDeliveryAbove:
       restaurant?.freeDeliveryAbove == null ? "" : String(restaurant.freeDeliveryAbove),
@@ -344,6 +348,8 @@ export default function EditRestaurant() {
             ? undefined
             : Number(detailsForm.estimatedDeliveryTimeMinutes),
         offer: detailsForm.offer,
+        aadhaarNumber: detailsForm.aadhaarNumber,
+        aadhaarImage: detailsForm.aadhaarImage,
         highlightBadge: detailsForm.highlightBadge,
         // "" clears the threshold; the API treats blank as "no free delivery".
         freeDeliveryAbove:
@@ -376,6 +382,18 @@ export default function EditRestaurant() {
     const url = imageUrlOf(res?.data?.data)
     if (!url) throw new Error("Upload did not return a URL")
     return url
+  }
+
+  const handleAadhaarUpload = async (file) => {
+    try {
+      setUploadingMedia("aadhaar")
+      const url = await uploadOne(file, "food/restaurants/aadhaar")
+      setDetailsForm((p) => ({ ...p, aadhaarImage: url }))
+    } catch (e) {
+      alert(e?.response?.data?.message || e?.message || "Aadhaar upload failed")
+    } finally {
+      setUploadingMedia("")
+    }
   }
 
   const handleCoverUpload = async (file) => {
@@ -639,6 +657,61 @@ export default function EditRestaurant() {
                     Blank = no free delivery. Orders at or above this subtotal are charged no delivery fee.
                   </p>
                 </div>
+                <div>
+                  <Label>Aadhaar Number</Label>
+                  <Input
+                    value={detailsForm.aadhaarNumber}
+                    onChange={(e) => setDetailsForm((p) => ({ ...p, aadhaarNumber: e.target.value }))}
+                    placeholder="12 digits"
+                  />
+                </div>
+                <div>
+                  <Label>Aadhaar Card</Label>
+                  <div className="mt-1 flex items-center gap-3">
+                    <label className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700 cursor-pointer">
+                      {uploadingMedia === "aadhaar" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Upload className="w-4 h-4" />
+                      )}
+                      <span>{detailsForm.aadhaarImage ? "Replace" : "Upload"}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={uploadingMedia === "aadhaar"}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) handleAadhaarUpload(file)
+                          e.target.value = ""
+                        }}
+                      />
+                    </label>
+                    {detailsForm.aadhaarImage ? (
+                      <>
+                        <a
+                          href={detailsForm.aadhaarImage}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="h-12 w-20 rounded border border-slate-200 overflow-hidden bg-slate-50"
+                        >
+                          <img src={detailsForm.aadhaarImage} alt="Aadhaar" className="w-full h-full object-cover" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setDetailsForm((p) => ({ ...p, aadhaarImage: "" }))}
+                          className="p-1 text-slate-400 hover:text-red-600"
+                          title="Remove"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-500">Not uploaded</span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">Saved with Save Details.</p>
+                </div>
               </div>
             </section>
 
@@ -788,7 +861,11 @@ export default function EditRestaurant() {
                   </div>
                 </div>
               )}
+
+              <RestaurantVideos restaurantId={restaurantId} />
             </section>
+
+            <RestaurantOpeningHours restaurantId={restaurantId} />
 
             <section className="bg-white rounded-xl border border-slate-200 p-6">
               <div className="flex items-center justify-between gap-3 mb-4">

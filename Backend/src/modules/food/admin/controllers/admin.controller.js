@@ -1,4 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
+import { getOutletTimingsForRestaurant, upsertOutletTimingsForRestaurant } from '../../restaurant/services/outletTimings.service.js';
+import { listRestaurantVideos, uploadRestaurantVideos, deleteRestaurantVideo } from '../../restaurant/services/restaurantBanner.service.js';
 import { isId } from '../../../../utils/helpers.js';
 import * as adminService from '../services/admin.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
@@ -1915,6 +1917,62 @@ export async function updateFeatureSetting(req, res, next) {
             return res.status(404).json({ success: false, message: 'Feature not found' });
         }
         res.status(200).json({ success: true, message: 'Feature setting updated successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/**
+ * Restaurant opening hours, edited by an admin.
+ *
+ * The same service the restaurant's own screen uses. A day holds a list of
+ * slots, so a kitchen that shuts between lunch and dinner can say so; the first
+ * slot is mirrored into openingTime/closingTime for everything still reading
+ * those two fields.
+ */
+export async function getRestaurantOutletTimings(req, res, next) {
+    try {
+        const data = await getOutletTimingsForRestaurant(req.params.id);
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateRestaurantOutletTimings(req, res, next) {
+    try {
+        const data = await upsertOutletTimingsForRestaurant(req.params.id, req.body?.outletTimings ?? req.body);
+        res.status(200).json({ success: true, message: 'Outlet timings updated', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/** Storefront videos, edited by an admin rather than by the restaurant. */
+export async function listRestaurantVideosAdmin(req, res, next) {
+    try {
+        const data = await listRestaurantVideos(req.params.id);
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function uploadRestaurantVideosAdmin(req, res, next) {
+    try {
+        const data = await uploadRestaurantVideos(req.params.id, req.files || []);
+        res.status(201).json({ success: true, message: 'Video uploaded', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function deleteRestaurantVideoAdmin(req, res, next) {
+    try {
+        // The path, not the signed url: urls expire within the hour, so one sent
+        // back by the browser may no longer match what is stored.
+        const data = await deleteRestaurantVideo(req.params.id, req.body?.path || req.query?.path);
+        res.status(200).json({ success: true, message: 'Video removed', data });
     } catch (error) {
         next(error);
     }

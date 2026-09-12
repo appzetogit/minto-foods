@@ -1171,6 +1171,33 @@ export const adminAPI = {
   deleteCuisine: (id) =>
     apiClient.delete(`/food/admin/cuisines/${String(id)}`, { contextModule: "admin" }),
 
+  /** Opening hours, admin side. A day may hold more than one slot. */
+  getRestaurantOutletTimings: (id) =>
+    apiClient.get(`/food/admin/restaurants/${String(id)}/outlet-timings`, { contextModule: "admin" }),
+  updateRestaurantOutletTimings: (id, outletTimings) =>
+    apiClient.put(
+      `/food/admin/restaurants/${String(id)}/outlet-timings`,
+      { outletTimings },
+      { contextModule: "admin" },
+    ),
+
+  /** Storefront videos, admin side. The server keeps paths; urls expire. */
+  getRestaurantVideos: (id) =>
+    apiClient.get(`/food/admin/restaurants/${String(id)}/videos`, { contextModule: "admin" }),
+  uploadRestaurantVideos: (id, files = []) => {
+    const form = new FormData()
+    for (const file of files) form.append("files", file)
+    return apiClient.post(`/food/admin/restaurants/${String(id)}/videos`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+      contextModule: "admin",
+    })
+  },
+  deleteRestaurantVideo: (id, path) =>
+    apiClient.delete(`/food/admin/restaurants/${String(id)}/videos`, {
+      data: { path },
+      contextModule: "admin",
+    }),
+
   /** Cities that have zones, for the zone filter. */
   getZoneCities: () =>
     apiClient.get("/food/admin/zones/cities", { contextModule: "admin" }),

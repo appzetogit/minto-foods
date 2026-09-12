@@ -245,6 +245,14 @@ router.patch('/restaurants/:id', adminController.updateRestaurantById);
 router.patch('/restaurants/:id/status', adminController.updateRestaurantStatus);
 router.patch('/restaurants/:id/location', adminController.updateRestaurantLocation);
 router.patch('/restaurants/:id/menu', adminController.updateRestaurantMenuById);
+
+// Opening hours and storefront videos. Both reuse the restaurant-side services;
+// only the way in is new, since those routes require a restaurant login.
+router.get('/restaurants/:id/outlet-timings', adminController.getRestaurantOutletTimings);
+router.put('/restaurants/:id/outlet-timings', adminController.updateRestaurantOutletTimings);
+router.get('/restaurants/:id/videos', adminController.listRestaurantVideosAdmin);
+router.post('/restaurants/:id/videos', upload.array('files', 3), adminController.uploadRestaurantVideosAdmin);
+router.delete('/restaurants/:id/videos', adminController.deleteRestaurantVideoAdmin);
 router.patch('/restaurants/:id/approve', adminController.approveRestaurant);
 router.patch('/restaurants/:id/reject', adminController.rejectRestaurant);
 router.delete('/restaurants/:id', adminController.deleteRestaurant);
