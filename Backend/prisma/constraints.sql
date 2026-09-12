@@ -74,7 +74,7 @@ ALTER TABLE "delivery_fee_bands" ADD CONSTRAINT "delivery_fee_band_range_valid"
 
 ALTER TABLE "delivery_fee_bands" DROP CONSTRAINT IF EXISTS "delivery_fee_band_amounts_non_negative";
 ALTER TABLE "delivery_fee_bands" ADD CONSTRAINT "delivery_fee_band_amounts_non_negative"
-  CHECK ("fee" >= 0 AND "deliveryBoyBasePay" >= 0 AND "deliveryBoyPerKm" >= 0);
+  CHECK ("fee" >= 0 AND "feePerKm" >= 0 AND "deliveryBoyBasePay" >= 0 AND "deliveryBoyPerKm" >= 0);
 
 -- basePay and perKm are alternatives, never both. calculateRiderEarning already
 -- treats a non-zero basePay as the winner, so a row with both set has one value

@@ -108,3 +108,44 @@ test('delivery-fee GST is charged only at a configured rate', () => {
     assert.equal(resolveDeliveryFeeGstRate({}), 0);
     assert.equal(computeDeliveryFeeGst(40, 0), 0);
 });
+
+/**
+ * A band can carry a per-km rate as well as a flat fee, so a tariff like
+ * "Rs 20 up to 2 km, then Rs 5 per km" is two bands and stays exact for
+ * fractional distances instead of rounding up to the next whole-km band.
+ */
+const perKmSettings = {
+    deliveryFeeRanges: [
+        { min: 0, max: 2, fee: 20, feePerKm: 0 },
+        { min: 2, max: 20, fee: 20, feePerKm: 5 },
+    ],
+};
+
+test('a per-km band charges the flat fee until its own start', () => {
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 0.4 }).deliveryFee, 20);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 1.9 }).deliveryFee, 20);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 2 }).deliveryFee, 20);
+});
+
+test('past the free distance it is base + rate * the kilometres beyond', () => {
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 3 }).deliveryFee, 25);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 7 }).deliveryFee, 45);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 20 }).deliveryFee, 110);
+});
+
+test('fractional distances are charged exactly, not rounded to a whole km', () => {
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 7.5 }).deliveryFee, 47.5);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 2.1 }).deliveryFee, 20.5);
+    // 20 + 5 * (7.3 - 2) is 46.50000000000001 in binary floating point.
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 7.3 }).deliveryFee, 46.5);
+});
+
+test('a trip past the last band keeps accruing the rate, not the start price', () => {
+    const quote = resolveUserDeliveryFee(perKmSettings, { distanceKm: 25 });
+    assert.equal(quote.source, 'distance_over_range');
+    assert.equal(quote.deliveryFee, 135);
+});
+
+test('bands with no rate price exactly as before', () => {
+    assert.equal(resolveUserDeliveryFee(settings, { distanceKm: 9 }).deliveryFee, 70);
+});

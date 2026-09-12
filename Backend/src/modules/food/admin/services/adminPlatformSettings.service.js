@@ -24,6 +24,7 @@ const toFeeRanges = (bands = []) =>
         min: Number(band.minDistanceKm),
         max: Number(band.maxDistanceKm),
         fee: Number(band.fee),
+        feePerKm: Number(band.feePerKm),
         deliveryBoyBasePay: Number(band.deliveryBoyBasePay),
         deliveryBoyPerKm: Number(band.deliveryBoyPerKm),
     }));
@@ -94,6 +95,7 @@ const bandRows = (ranges = []) =>
         minDistanceKm: Number(range.min ?? range.minDistanceKm) || 0,
         maxDistanceKm: Number(range.max ?? range.maxDistanceKm) || 0,
         fee: Number(range.fee) || 0,
+        feePerKm: Number(range.feePerKm) || 0,
         deliveryBoyBasePay: Number(range.deliveryBoyBasePay) || 0,
         deliveryBoyPerKm: Number(range.deliveryBoyPerKm) || 0,
     }));

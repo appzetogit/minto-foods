@@ -2218,6 +2218,13 @@ model DeliveryFeeBand {
   /// What the customer pays for a trip in this band.
   fee Decimal @db.Decimal(14, 2)
 
+  /// Optional per-km rate on top of `fee`, charged on the distance past this
+  /// band's own start: fee + feePerKm * (distanceKm - minDistanceKm). Zero
+  /// keeps the band a flat fee, which is what every band was before this.
+  /// It exists because "Rs 20 up to 2 km then Rs 5/km" cannot be written as
+  /// flat bands without rounding every fractional km to a whole one.
+  feePerKm Decimal @default(0) @db.Decimal(14, 2)
+
   /// Rider pay. A flat basePay wins; otherwise perKm multiplies the real
   /// distance. They are mutually exclusive — enforced by a CHECK, not just by
   /// the admin UI that used to be the only thing asserting it.

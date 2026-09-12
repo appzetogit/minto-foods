@@ -163,11 +163,32 @@ function resolveBaseDeliveryFee(feeSettings = {}) {
  * cheapest band for it would undercharge the longest deliveries, so use the
  * widest band — the same fallback calculateRiderEarning already uses for pay.
  */
-function widestBandFee(feeSettings = {}) {
+/**
+ * What one band charges for a trip.
+ *
+ * `fee` is the price at the band's own start; `feePerKm` then accrues over the
+ * distance past that start, so "Rs 20 up to 2 km, Rs 5/km after" is two bands
+ * rather than eighteen, and 7.5 km costs 47.50 instead of being rounded up to
+ * the next whole-km band. A band with no rate is a flat fee, as all were.
+ *
+ * Rounded to paise because the rate times a fractional distance is binary
+ * floating point: 20 + 5 * (7.3 - 2) lands on 46.50000000000001.
+ */
+function bandFee(range = {}, distanceKm = null) {
+  const flat = Number(range.fee);
+  const perKm = Number(range.feePerKm || 0);
+  if (!Number.isFinite(flat)) return null;
+  if (!perKm || !Number.isFinite(distanceKm)) return flat;
+
+  const past = Math.max(0, Number(distanceKm) - Number(range.min ?? 0));
+  return Math.round((flat + perKm * past) * 100) / 100;
+}
+
+function widestBandFee(feeSettings = {}, distanceKm = null) {
   const bands = deliveryFeeBands(feeSettings);
   if (bands.length === 0) return null;
   const widest = [...bands].sort((a, b) => Number(a?.max ?? 0) - Number(b?.max ?? 0)).pop();
-  return Number(widest.fee);
+  return bandFee(widest, distanceKm);
 }
 
 /**
@@ -227,6 +248,7 @@ const toFeeRanges = (bands = []) =>
     min: Number(band.minDistanceKm),
     max: Number(band.maxDistanceKm),
     fee: Number(band.fee),
+    feePerKm: Number(band.feePerKm || 0),
     deliveryBoyBasePay: Number(band.deliveryBoyBasePay),
     deliveryBoyPerKm: Number(band.deliveryBoyPerKm),
   }));
@@ -321,7 +343,7 @@ export function resolveUserDeliveryFee(
   }
 
   if (ranges.length > 0 && Number.isFinite(distanceKm)) {
-    const matchedFee = matchFeeRange(ranges, distanceKm, (range) => Number(range.fee));
+    const matchedFee = matchFeeRange(ranges, distanceKm, (range) => bandFee(range, distanceKm));
     if (Number.isFinite(matchedFee)) {
       return {
         deliveryFee: matchedFee,
@@ -333,7 +355,7 @@ export function resolveUserDeliveryFee(
 
   // Distance known but past the last band — price it as the longest band.
   if (Number.isFinite(distanceKm)) {
-    const overRangeFee = widestBandFee(feeSettings);
+    const overRangeFee = widestBandFee(feeSettings, distanceKm);
     if (overRangeFee != null) {
       return {
         deliveryFee: overRangeFee,

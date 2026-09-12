@@ -36,6 +36,7 @@ export default function FeeSettings() {
     min: '', 
     max: '', 
     fee: '0', 
+    feePerKm: '0',
     deliveryBoyPerKm: '0', 
     deliveryBoyBasePay: '0' 
   })
@@ -121,6 +122,7 @@ export default function FeeSettings() {
         deliveryFee: settingsToSave.deliveryFee === "" ? undefined : Number(settingsToSave.deliveryFee),
         deliveryFeeRanges: settingsToSave.deliveryFeeRanges.map(r => ({
           ...r,
+          feePerKm: r.feePerKm === "" || r.feePerKm === undefined ? 0 : Number(r.feePerKm),
           deliveryBoyPerKm: r.deliveryBoyPerKm === "" ? 0 : Number(r.deliveryBoyPerKm),
           deliveryBoyBasePay: r.deliveryBoyBasePay === "" ? 0 : Number(r.deliveryBoyBasePay),
         })),
@@ -217,15 +219,16 @@ export default function FeeSettings() {
     const min = Number(minRaw)
     const max = Number(maxRaw)
     const fee = Number(feeRaw)
+    const userPerKm = Number(newRange.feePerKm || 0)
     const dbPerKm = Number(newRange.deliveryBoyPerKm || 0)
     const dbBasePay = Number(newRange.deliveryBoyBasePay || 0)
 
-    if (isNaN(min) || isNaN(max) || isNaN(fee) || isNaN(dbPerKm) || isNaN(dbBasePay)) {
+    if (isNaN(min) || isNaN(max) || isNaN(fee) || isNaN(userPerKm) || isNaN(dbPerKm) || isNaN(dbBasePay)) {
       toast.error('Please enter valid numbers')
       return
     }
 
-    if (min < 0 || max < 0 || fee < 0 || dbPerKm < 0 || dbBasePay < 0) {
+    if (min < 0 || max < 0 || fee < 0 || userPerKm < 0 || dbPerKm < 0 || dbBasePay < 0) {
       toast.error('All values must be positive numbers')
       return
     }
@@ -267,6 +270,7 @@ export default function FeeSettings() {
       min, 
       max, 
       fee, 
+      feePerKm: userPerKm,
       deliveryBoyPerKm: dbPerKm, 
       deliveryBoyBasePay: dbBasePay 
     }]
@@ -283,7 +287,7 @@ export default function FeeSettings() {
     await saveSettings(updatedSettings)
 
     // Reset state
-    setNewRange({ min: '', max: '', fee: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' })
+    setNewRange({ min: '', max: '', fee: '0', feePerKm: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' })
   }
 
   // Delete delivery fee range
@@ -304,6 +308,7 @@ export default function FeeSettings() {
       min: range.min, 
       max: range.max, 
       fee: range.fee || '0',
+      feePerKm: range.feePerKm ?? '0',
       deliveryBoyPerKm: range.deliveryBoyPerKm ?? '0',
       deliveryBoyBasePay: range.deliveryBoyBasePay ?? '0'
     })
@@ -320,10 +325,11 @@ export default function FeeSettings() {
     const min = Number(newRange.min)
     const max = Number(newRange.max)
     const fee = Number(newRange.fee)
+    const userPerKm = Number(newRange.feePerKm || 0)
     const dbPerKm = Number(newRange.deliveryBoyPerKm || 0)
     const dbBasePay = Number(newRange.deliveryBoyBasePay || 0)
 
-    if (min < 0 || max < 0 || fee < 0 || dbPerKm < 0 || dbBasePay < 0) {
+    if (min < 0 || max < 0 || fee < 0 || userPerKm < 0 || dbPerKm < 0 || dbBasePay < 0) {
       toast.error('All values must be positive numbers')
       return
     }
@@ -362,6 +368,7 @@ export default function FeeSettings() {
       min, 
       max, 
       fee, 
+      feePerKm: userPerKm,
       deliveryBoyPerKm: dbPerKm, 
       deliveryBoyBasePay: dbBasePay 
     })
@@ -375,13 +382,13 @@ export default function FeeSettings() {
     setFeeSettings(updatedSettings)
     await saveSettings(updatedSettings)
 
-    setNewRange({ min: '', max: '', fee: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' })
+    setNewRange({ min: '', max: '', fee: '0', feePerKm: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' })
     setEditingRangeIndex(null)
   }
 
   // Cancel edit
   const handleCancelEdit = () => {
-    setNewRange({ min: '', max: '', fee: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' })
+    setNewRange({ min: '', max: '', fee: '0', feePerKm: '0', deliveryBoyPerKm: '0', deliveryBoyBasePay: '0' })
     setEditingRangeIndex(null)
   }
 
@@ -494,6 +501,7 @@ export default function FeeSettings() {
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Min Distance (km)</th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Max Distance (km)</th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">User Delivery Fee (₹)</th>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">User ₹/km</th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">DB Per KM (₹)</th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">DB Base Pay (₹)</th>
                           <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 border-b border-slate-200">Actions</th>
@@ -550,6 +558,23 @@ export default function FeeSettings() {
                                     </div>
                                   ) : (
                                     <>₹{range.fee}</>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-sm font-medium text-green-600 border-b border-slate-100">
+                                  {isEditing ? (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-slate-400">₹</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.5"
+                                        value={newRange.feePerKm}
+                                        onChange={(e) => setNewRange({ ...newRange, feePerKm: e.target.value })}
+                                        className="w-20 px-2 py-1 border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-green-600 font-medium"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <>{Number(range.feePerKm) > 0 ? `₹${range.feePerKm}/km` : '-'}</>
                                   )}
                                 </td>
                                 <td className="px-4 py-3 text-sm text-slate-900 border-b border-slate-100">
@@ -681,6 +706,19 @@ export default function FeeSettings() {
                         className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
                         placeholder="0"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">User ₹/km</label>
+                      <input
+                        type="number"
+                        value={newRange.feePerKm}
+                        onChange={(e) => setNewRange({ ...newRange, feePerKm: e.target.value })}
+                        min="0"
+                        step="0.5"
+                        className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
+                        placeholder="0"
+                      />
+                      <p className="mt-1 text-xs text-slate-500">Charged on the distance past this band start. 0 means a flat fee.</p>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">DB Per KM (₹)</label>
