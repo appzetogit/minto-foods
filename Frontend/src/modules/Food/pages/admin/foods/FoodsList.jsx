@@ -816,73 +816,81 @@ export default function FoodsList() {
           <h1 className="text-2xl font-bold text-slate-900">Food</h1>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-slate-900">Food List</h2>
-            <span className="px-3 py-1 rounded-full text-sm font-semibold bg-slate-100 text-slate-700">
-              {totalFoods}
-            </span>
-          </div>
+        {/* Two rows: what this is and what you can do, then what you can filter
+            by. One row could not hold five controls without the last of them
+            sliding off the right edge. */}
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-slate-900">Food List</h2>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
+                {totalFoods}
+              </span>
+            </div>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              type="button"
-              onClick={openAddFoodModal}
-              className="px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Food</span>
-            </button>
-            <button
-              type="button"
-              onClick={openBulkUploadModal}
-              className="px-4 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 inline-flex items-center gap-2"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Bulk Upload</span>
-            </button>
-            {isRestaurantSelected && selectedDeleteCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={handleBulkDelete}
-                disabled={isBulkDeleting}
-                className="px-4 py-2.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-60 inline-flex items-center gap-2"
+                onClick={openAddFoodModal}
+                className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-2"
               >
-                {isBulkDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                <span>Delete Selected ({selectedDeleteCount})</span>
+                <Plus className="w-4 h-4" />
+                <span>Add Food</span>
               </button>
-            )}
-            <div className="relative flex-1 sm:flex-initial min-w-[200px]">
+              <button
+                type="button"
+                onClick={openBulkUploadModal}
+                className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 inline-flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Bulk Upload</span>
+              </button>
+              {isRestaurantSelected && selectedDeleteCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={isBulkDeleting}
+                  className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-60 inline-flex items-center gap-2"
+                >
+                  {isBulkDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  <span>Delete Selected ({selectedDeleteCount})</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="relative">
               <input
                 type="text"
-                placeholder="Ex : Foods"
+                placeholder="Search food name"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-2.5 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+                className="pl-9 pr-3 py-2 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             </div>
-            <div className="flex flex-col gap-2 min-w-[240px]">
-              <input
-                type="text"
-                placeholder="Search restaurant..."
-                value={restaurantFilterSearch}
-                onChange={(e) => setRestaurantFilterSearch(e.target.value)}
-                className="px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-              />
-              <select
-                value={selectedRestaurant}
-                onChange={(e) => setSelectedRestaurant(e.target.value)}
-                className="px-4 py-2.5 min-w-[240px] text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
-              >
-                <option value="all">All Restaurants</option>
-                {filteredRestaurantOptions.map((restaurant) => (
-                  <option key={restaurant.id} value={restaurant.id}>
-                    {restaurant.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+
+            <input
+              type="text"
+              placeholder="Search restaurant..."
+              value={restaurantFilterSearch}
+              onChange={(e) => setRestaurantFilterSearch(e.target.value)}
+              className="px-3 py-2 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+            />
+
+            <select
+              value={selectedRestaurant}
+              onChange={(e) => setSelectedRestaurant(e.target.value)}
+              className="px-3 py-2 w-full text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400"
+            >
+              <option value="all">All Restaurants</option>
+              {filteredRestaurantOptions.map((restaurant) => (
+                <option key={restaurant.id} value={restaurant.id}>
+                  {restaurant.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
