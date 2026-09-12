@@ -77,6 +77,8 @@ export async function loadRestaurantForOrdering(restaurantId) {
       openDays: true,
       // The card advertises "Free delivery above ₹N"; pricing has to honour it.
       freeDeliveryAbove: true,
+      // This restaurant's own delivery radius, if it overrides the platform's.
+      deliveryRadiusKm: true,
     },
   });
 
@@ -205,6 +207,61 @@ export function serviceableRadiusKm(feeSettings = {}) {
     .map((range) => Number(range?.max))
     .filter((max) => Number.isFinite(max) && max > 0);
   return maxima.length > 0 ? Math.max(...maxima) : null;
+}
+
+/**
+ * A stored radius as a usable number, or null for "not set".
+ *
+ * Non-positive counts as unset: the columns are Decimal, so an empty admin
+ * field can land as 0, and taking that literally would hide a restaurant from
+ * everyone rather than leave it on the platform default.
+ */
+const radiusValue = (value) => {
+  const km = Number(value);
+  return Number.isFinite(km) && km > 0 ? km : null;
+};
+
+/**
+ * Is a customer this far away inside the radius a restaurant delivers to?
+ *
+ * Two knobs, because one number cannot fit a dense metro and a highway town at
+ * once: the platform's `discoveryRadiusKm` applies to every restaurant, and a
+ * restaurant's own `deliveryRadiusKm` replaces it outright — including when it
+ * is the wider of the two, which is the whole point of an override. Both unset
+ * means no limit, which is how the platform behaved before the setting existed.
+ *
+ * The boundary itself is inside, so a radius of 10 km still serves the customer
+ * measured at exactly 10 km.
+ *
+ * An unknown distance passes: a cart with no address yet, or a restaurant with
+ * no coordinates, is not evidence of a long trip, and refusing on it would
+ * break checkouts that are simply not ready to be priced.
+ *
+ * Pure on purpose — both the discovery feed and order placement have to reach
+ * the same verdict, and this is the only place that decides it.
+ *
+ * @returns {{ withinRadius: boolean, limitKm: number|null }}
+ */
+export function checkDeliveryRadius({
+  distanceKm = null,
+  restaurantRadiusKm = null,
+  platformRadiusKm = null,
+} = {}) {
+  const limitKm = radiusValue(restaurantRadiusKm) ?? radiusValue(platformRadiusKm);
+  const distance = Number(distanceKm);
+
+  if (limitKm === null || !Number.isFinite(distance)) {
+    return { withinRadius: true, limitKm };
+  }
+  return { withinRadius: distance <= limitKm, limitKm };
+}
+
+/** The platform-wide delivery radius, or null when the admin set no limit. */
+export async function loadPlatformDeliveryRadiusKm() {
+  const settings = await prisma.foodBusinessSettings.findFirst({
+    select: { discoveryRadiusKm: true },
+  });
+  return settings?.discoveryRadiusKm ?? null;
 }
 
 function matchFeeRange(ranges, distanceKm, pickValue) {
@@ -493,6 +550,23 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       `${restaurant.restaurantName || 'This restaurant'} is ${distanceKm.toFixed(
         1,
       )} km away and only delivers within ${radiusKm} km. Please choose a closer restaurant or a different address.`,
+    );
+  }
+
+  // The band-derived limit above says what the platform can price; this one says
+  // what an admin chose to cover, and the two are set independently. Enforced
+  // here as well as in the discovery feed because a cart outlives the listing it
+  // came from — and because the API can be called without ever opening the feed.
+  const coverage = checkDeliveryRadius({
+    distanceKm,
+    restaurantRadiusKm: restaurant.deliveryRadiusKm,
+    platformRadiusKm: await loadPlatformDeliveryRadiusKm(),
+  });
+  if (!coverage.withinRadius) {
+    throw new ValidationError(
+      `${restaurant.restaurantName || 'This restaurant'} is ${distanceKm.toFixed(
+        1,
+      )} km away and delivers within ${coverage.limitKm} km. Please choose a closer restaurant or a different address.`,
     );
   }
 

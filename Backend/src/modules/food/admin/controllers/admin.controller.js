@@ -14,6 +14,12 @@ import { validateDeliveryEmergencyHelpUpsertDto } from '../validators/deliveryEm
 import { validateReferralSettingsUpsertDto } from '../validators/referralSettings.validator.js';
 import { ADMIN_ACTIONS, ADMIN_PERMISSION_SECTIONS, sanitizeAdminPermissions } from '../../../../constants/permissions.js';
 import {
+    effectiveCod,
+    parseZoneCodSettings,
+    resolvePlatformCodEnabled,
+    setPlatformCodEnabled,
+} from '../../orders/services/codAvailability.service.js';
+import {
     deassignAndResendEmergencyOrder,
     deassignAndResendOrderAdmin,
     getOrderEmergencyRequestAdmin,
@@ -1712,6 +1718,87 @@ export async function deleteZone(req, res, next) {
             success: true,
             message: 'Zone deleted successfully',
             data: result
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// ----- COD & User Payments -----
+// The screen shows the platform switch and every zone's own setting side by
+// side, because "why can this customer not pay cash" is a question about all
+// three inputs at once.
+export async function getCodSettings(req, res, next) {
+    try {
+        const platformEnabled = await resolvePlatformCodEnabled();
+        // Every zone, inactive ones included: a zone that is off today still
+        // carries the COD setting it will come back with.
+        const zones = await prisma.foodZone.findMany({
+            select: { id: true, name: true, city: true, codEnabled: true, codMinDeliveredOrders: true },
+            orderBy: [{ city: 'asc' }, { name: 'asc' }],
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'COD settings fetched successfully',
+            data: {
+                platformCodEnabled: platformEnabled,
+                zones: zones.map((zone) => ({
+                    ...zone,
+                    effective: effectiveCod(zone, platformEnabled),
+                })),
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateCodSettings(req, res, next) {
+    try {
+        const raw = req.body?.codEnabled;
+        const codEnabled = raw === true || raw === 'true' ? true
+            : raw === false || raw === 'false' ? false
+                : null;
+        if (codEnabled === null) {
+            return res.status(400).json({ success: false, message: 'codEnabled must be true or false' });
+        }
+
+        const saved = await setPlatformCodEnabled(codEnabled);
+        res.status(200).json({
+            success: true,
+            message: 'COD settings updated successfully',
+            data: { platformCodEnabled: saved },
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function updateZoneCodSettings(req, res, next) {
+    try {
+        const { data, error } = parseZoneCodSettings(req.body || {});
+        if (error) {
+            return res.status(400).json({ success: false, message: error });
+        }
+
+        const id = String(req.params.id || '');
+        const exists = await prisma.foodZone.findUnique({ where: { id }, select: { id: true } });
+        if (!exists) {
+            return res.status(404).json({ success: false, message: 'Zone not found' });
+        }
+
+        const zone = await prisma.foodZone.update({
+            where: { id },
+            data,
+            select: { id: true, name: true, city: true, codEnabled: true, codMinDeliveredOrders: true },
+        });
+
+        const platformEnabled = await resolvePlatformCodEnabled();
+        res.status(200).json({
+            success: true,
+            message: 'Zone COD settings updated successfully',
+            data: { zone: { ...zone, effective: effectiveCod(zone, platformEnabled) } },
         });
     } catch (error) {
         next(error);

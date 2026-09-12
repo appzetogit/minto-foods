@@ -55,6 +55,9 @@ export const adminSectionLabel = (key) =>
     .replace(/\b\w/g, (ch) => ch.toUpperCase());
 
 const PATH_PREFIX_TO_SECTION = [
+  // The screen reads /cod-settings, which the API guards with system_settings.
+  // Mapping it anywhere else would show a sub-admin a link that 401s on open.
+  { prefix: "/admin/food/cod-payments", section: "system_settings" },
   { prefix: "/admin/food/point-of-sale", section: "point_of_sale" },
   { prefix: "/admin/food/fee-settings", section: "delivery_management" },
   { prefix: "/admin/food/delivery-cash-limit", section: "delivery_management" },
@@ -68,7 +71,8 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/foods", section: "food_management" },
   { prefix: "/admin/food/addons", section: "food_management" },
   { prefix: "/admin/food/categories", section: "food_management" },
-  { prefix: "/admin/food/zone-setup", section: "restaurant_management" },
+  { prefix: "/admin/food/zone-setup", section: "restaurant_management" },
+
   { prefix: "/admin/food/cuisines", section: "restaurant_management" },
   { prefix: "/admin/food/restaurants", section: "restaurant_management" },
   { prefix: "/admin/food/orders", section: "order_management" },

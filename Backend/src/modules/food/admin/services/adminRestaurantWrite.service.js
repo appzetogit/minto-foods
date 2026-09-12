@@ -9,6 +9,7 @@ import {
     normalizeRestaurantTime,
     parseBooleanLike,
     toFiniteNumber,
+    toDeliveryRadiusKm,
     toFreeDeliveryAbove,
     toHighlightBadge,
     validateOpeningClosingTimes,
@@ -186,6 +187,12 @@ export async function updateRestaurantById(id, body = {}) {
     if (body.featuredDish !== undefined) data.featuredDish = toStr(body.featuredDish);
     if (body.featuredPrice !== undefined) data.featuredPrice = toFiniteNumber(body.featuredPrice);
 
+    // Blank follows the platform default; zero would hide the restaurant from
+    // everyone, so it is refused the same way the platform setting is.
+    if (body.deliveryRadiusKm !== undefined) {
+        data.deliveryRadiusKm = toDeliveryRadiusKm(body.deliveryRadiusKm);
+    }
+
     // Discovery-card merchandising.
     if (body.highlightBadge !== undefined) data.highlightBadge = toHighlightBadge(body.highlightBadge);
     if (body.freeDeliveryAbove !== undefined) {
@@ -352,6 +359,7 @@ export async function createRestaurantByAdmin(body = {}) {
                 featuredDish: toStr(body.featuredDish),
                 featuredPrice: toFiniteNumber(body.featuredPrice),
                 offer: toStr(body.offer),
+                deliveryRadiusKm: toDeliveryRadiusKm(body.deliveryRadiusKm),
                 highlightBadge: toHighlightBadge(body.highlightBadge),
                 freeDeliveryAbove: toFreeDeliveryAbove(body.freeDeliveryAbove),
                 ...dining,

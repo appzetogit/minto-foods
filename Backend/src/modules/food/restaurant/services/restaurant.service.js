@@ -24,6 +24,9 @@ import {
     isRazorpayConfigured,
     confirmRazorpayPayment,
 } from '../../orders/helpers/razorpay.helper.js';
+// One rule decides who a restaurant is visible to and who it will accept an
+// order from, so the feed reads it from the same place order pricing does.
+import { checkDeliveryRadius } from '../../orders/services/order-pricing.service.js';
 
 const normalizeName = (value) =>
     String(value || '')
@@ -1721,6 +1724,41 @@ const toPublicCard = (r) => ({
     highlightBadge: r.highlightBadge || null,
 });
 
+/**
+ * The delivery-radius settings a listing has to respect, read once per request.
+ *
+ * `outerBoundKm` is the coarse bound for the PostGIS query, and it is the widest
+ * radius any approved row could claim rather than the platform default: a
+ * restaurant's own deliveryRadiusKm is allowed to be wider than the default, and
+ * bounding by the default alone would drop that restaurant before the per-row
+ * check ever saw it. Null when the platform sets no limit — rows without an
+ * override then have nothing to inherit, which is the pre-setting behaviour.
+ *
+ * ponytail: the _max scans the approved restaurants on every geo request, on an
+ * unindexed Decimal column. Fine at this catalogue size; an index on
+ * deliveryRadiusKm, or caching this with the settings row, is the fix.
+ */
+const loadDeliveryRadiusBounds = async () => {
+    const [settings, widest] = await Promise.all([
+        prisma.foodBusinessSettings.findFirst({ select: { discoveryRadiusKm: true } }),
+        prisma.foodRestaurant.aggregate({
+            where: { status: 'approved', deliveryRadiusKm: { not: null } },
+            _max: { deliveryRadiusKm: true },
+        }),
+    ]);
+
+    const platformRadiusKm = toFiniteNumber(settings?.discoveryRadiusKm);
+    if (platformRadiusKm === null || platformRadiusKm <= 0) {
+        return { platformRadiusKm: null, outerBoundKm: null };
+    }
+
+    const widestOverrideKm = toFiniteNumber(widest?._max?.deliveryRadiusKm) ?? 0;
+    return {
+        platformRadiusKm,
+        outerBoundKm: Math.max(platformRadiusKm, widestOverrideKm),
+    };
+};
+
 export const listApprovedRestaurants = async (query = {}) => {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -1835,10 +1873,17 @@ export const listApprovedRestaurants = async (query = {}) => {
     };
 
     if (lat !== null && lng !== null && wantsGeo) {
+        // The radius in the query string is a request, not a permission: the app
+        // has always been free to ask for 100 km. A customer may narrow the
+        // search, never widen it past what the admin configured.
+        const { platformRadiusKm, outerBoundKm } = await loadDeliveryRadiusBounds();
+        const boundKm =
+            outerBoundKm === null ? radiusKm : Math.min(radiusKm ?? outerBoundKm, outerBoundKm);
+
         // $geoNear became an indexed ST_DWithin. Postgres cannot order by a
         // distance this query did not compute, so the neighbourhood is resolved
         // first and the remaining filters applied to it.
-        const near = await restaurantsNearPoint(lat, lng, radiusKm);
+        const near = await restaurantsNearPoint(lat, lng, boundKm);
         if (!near.length) return { restaurants: [], total: 0, page, limit };
 
         const distanceById = new Map(near.map((row) => [row.id, row.distanceInKm]));
@@ -1849,8 +1894,23 @@ export const listApprovedRestaurants = async (query = {}) => {
         // holds more than that, this wants a materialised distance column.
         const rows = await prisma.foodRestaurant.findMany({
             where: { ...where, id: { in: [...distanceById.keys()] } },
-            select: PUBLIC_CARD_SELECT,
+            select: { ...PUBLIC_CARD_SELECT, deliveryRadiusKm: true },
         });
+
+        // The bound above is only as tight as the widest override on the
+        // platform, so every row is still measured against its own limit.
+        // deliveryRadiusKm is destructured away rather than carried into the
+        // card: toPublicCard spreads the row, and a Decimal would reach the app.
+        const inRange = [];
+        for (const { deliveryRadiusKm, ...row } of rows) {
+            const { withinRadius } = checkDeliveryRadius({
+                distanceKm: distanceById.get(row.id),
+                restaurantRadiusKm: deliveryRadiusKm,
+                platformRadiusKm,
+            });
+            if (withinRadius) inRange.push(row);
+        }
+        if (!inRange.length) return { restaurants: [], total: 0, page, limit };
 
         const byDistance = (a, b) =>
             (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
@@ -1869,7 +1929,7 @@ export const listApprovedRestaurants = async (query = {}) => {
                     (b.estimatedDeliveryTimeMinutes ?? Infinity) || byDistance(a, b),
         };
 
-        const sorted = rows
+        const sorted = inRange
             .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
             .sort(sorters[sortBy] || byDistance);
 

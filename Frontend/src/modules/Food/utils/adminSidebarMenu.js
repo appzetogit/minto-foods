@@ -134,6 +134,12 @@ export const adminSidebarMenu = [
       },
       {
         type: "link",
+        label: "COD & User Payments",
+        path: "/admin/food/cod-payments",
+        icon: "Wallet",
+      },
+      {
+        type: "link",
         label: "Live Chat",
         path: "/admin/food/chattings",
         icon: "MessagesSquare",

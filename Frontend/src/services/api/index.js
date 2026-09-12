@@ -1198,6 +1198,14 @@ export const adminAPI = {
       contextModule: "admin",
     }),
 
+  /** Cash on delivery: the platform switch and every zone's own setting. */
+  getCodSettings: () =>
+    apiClient.get("/food/admin/cod-settings", { contextModule: "admin" }),
+  updateCodSettings: (body) =>
+    apiClient.patch("/food/admin/cod-settings", body ?? {}, { contextModule: "admin" }),
+  updateZoneCod: (id, body) =>
+    apiClient.patch(`/food/admin/zones/${String(id)}/cod`, body ?? {}, { contextModule: "admin" }),
+
   /** Cities that have zones, for the zone filter. */
   getZoneCities: () =>
     apiClient.get("/food/admin/zones/cities", { contextModule: "admin" }),

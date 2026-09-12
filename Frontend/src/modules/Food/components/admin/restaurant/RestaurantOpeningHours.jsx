@@ -14,8 +14,10 @@ import { Loader2, Plus, Trash2 } from "lucide-react"
  * anything still reading those two fields keeps working.
  */
 
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-const label = (d) => d.charAt(0).toUpperCase() + d.slice(1)
+// Capitalised, because that is how the server keys a day; a lowercase key is
+// simply not found, and saving one would reset every day to the defaults.
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+const label = (d) => d
 const MAX_SLOTS = 4
 
 const emptyDay = () => ({ isOpen: true, slots: [{ openingTime: "09:00", closingTime: "22:00" }] })
@@ -26,7 +28,8 @@ const toEditable = (map = {}) => {
   for (const day of DAYS) {
     const src = map?.[day] || {}
     const slots = Array.isArray(src.slots) && src.slots.length
-      ? src.slots.map((s) => ({ openingTime: s.openingTime || "09:00", closingTime: s.closingTime || "22:00" }))
+      // The server sends open/close; the legacy pair is still accepted on write.
+      ? src.slots.map((s) => ({ openingTime: s.open || s.openingTime || "09:00", closingTime: s.close || s.closingTime || "22:00" }))
       : [{ openingTime: src.openingTime || "09:00", closingTime: src.closingTime || "22:00" }]
     out[day] = { isOpen: src.isOpen !== false, slots }
   }
@@ -99,7 +102,9 @@ export default function RestaurantOpeningHours({ restaurantId }) {
       if (!d.isOpen) continue
       for (const s of d.slots) {
         if (!s.openingTime || !s.closingTime) return setError(`${label(day)}: fill both times in every slot.`)
-        if (s.closingTime <= s.openingTime) return setError(`${label(day)}: closing time must be after opening time.`)
+        // A close earlier than the open runs past midnight, which is a real
+        // shift; only the two being identical says nothing at all.
+        if (s.closingTime === s.openingTime) return setError(`${label(day)}: opening and closing time cannot be the same.`)
       }
     }
     try {
@@ -107,7 +112,7 @@ export default function RestaurantOpeningHours({ restaurantId }) {
       const payload = {}
       for (const day of DAYS) {
         payload[day] = timings[day].isOpen
-          ? { isOpen: true, slots: timings[day].slots }
+          ? { isOpen: true, slots: timings[day].slots.map((s) => ({ open: s.openingTime, close: s.closingTime })) }
           : { isOpen: false, slots: [] }
       }
       await adminAPI.updateRestaurantOutletTimings(restaurantId, payload)

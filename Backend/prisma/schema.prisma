@@ -770,6 +770,10 @@ model FoodRestaurant {
   /// adminRestaurantWrite.helpers.js. Promote to an enum if it stops changing.
   highlightBadge String? @db.VarChar(20)
 
+  /// How far this restaurant delivers, in km. Null follows the platform's
+  /// discoveryRadiusKm; a value here wins for this restaurant alone.
+  deliveryRadiusKm Decimal? @db.Decimal(6, 2)
+
   /// Order subtotal at or above which delivery is free, in rupees. Null means
   /// this restaurant has no free-delivery offer and the card hides the pill.
   /// Honoured by resolveUserDeliveryFee, so the badge and the bill agree.
@@ -2265,6 +2269,14 @@ model FoodBusinessSettings {
   deliveryLogoPublicId      String @default("")
   deliveryFaviconUrl        String @default("")
   deliveryFaviconPublicId   String @default("")
+
+  /// Platform-wide cash-on-delivery switch. Off here means off in every zone,
+  /// whatever a zone says. Lived in COD_ENABLED, which needed a deploy to change.
+  codEnabled Boolean @default(true)
+
+  /// How far a customer may see and order from, in km. Null means no limit.
+  /// A restaurant's own deliveryRadiusKm overrides this for that restaurant.
+  discoveryRadiusKm Decimal? @db.Decimal(6, 2)
 
   userThemeColor       String @default("#FA0272")
   userFontFamily       String @default("Poppins")

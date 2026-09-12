@@ -51,6 +51,7 @@ export default function BusinessSetup() {
     state: "",
     pincode: "",
     region: "",
+    discoveryRadiusKm: "",
   });
 
   // Fetch business settings on mount
@@ -74,6 +75,8 @@ export default function BusinessSetup() {
           state: settings.state || "",
           pincode: settings.pincode || "",
           region: settings.region || "India",
+          discoveryRadiusKm:
+            settings.discoveryRadiusKm == null ? "" : String(settings.discoveryRadiusKm),
         });
 
         // Set logo and favicon previews if they exist
@@ -148,6 +151,14 @@ export default function BusinessSetup() {
         return;
       }
 
+      const radiusInput = formData.discoveryRadiusKm.trim();
+      if (radiusInput && !(Number(radiusInput) > 0)) {
+        // A radius of 0 would put every restaurant out of range, so it is
+        // rejected rather than saved as if it meant "no limit".
+        toast.error("Delivery radius must be greater than 0, or left blank for no limit");
+        return;
+      }
+
       setSaving(true);
 
       // Prepare form data
@@ -160,6 +171,9 @@ export default function BusinessSetup() {
         state: formData.state.trim(),
         pincode: formData.pincode.trim(),
         region: formData.region,
+        // Blank is "no limit", which has to travel as null — 0 would read as a
+        // radius nobody can order inside.
+        discoveryRadiusKm: radiusInput ? Number(radiusInput) : null,
       };
 
       // Prepare files
@@ -416,6 +430,25 @@ export default function BusinessSetup() {
                   }}
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Delivery radius (km)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  placeholder="Leave blank for no limit"
+                  value={formData.discoveryRadiusKm}
+                  onChange={(e) => handleInputChange("discoveryRadiusKm", e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  How far from a customer restaurants may be shown and ordered from. Blank means no
+                  limit.
+                </p>
               </div>
             </div>
 

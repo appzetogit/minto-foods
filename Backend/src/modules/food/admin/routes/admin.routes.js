@@ -83,7 +83,9 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/withdrawals')) return 'transaction_management';
     if (path.startsWith('/feedback-experiences')) return 'report_management';
     if (path.startsWith('/reports')) return 'report_management';
-    if (path.startsWith('/feature-settings') || path.startsWith('/business-settings') || path.startsWith('/power-scanning') || path.startsWith('/notifications')) return 'system_settings';
+    // COD & User Payments sits with the other platform-wide switches: the
+    // platform row it writes is the same business-settings row.
+    if (path.startsWith('/feature-settings') || path.startsWith('/business-settings') || path.startsWith('/power-scanning') || path.startsWith('/notifications') || path.startsWith('/cod-settings')) return 'system_settings';
     if (path.startsWith('/pages-social-media')) return 'pages_social_media';
     // These four sections were grantable in the role editor but appeared in no
     // guard, so ticking their boxes did nothing at all. The sidebar hid the menu
@@ -504,6 +506,14 @@ router.get(
 router.post('/zones', adminController.createZone);
 router.patch('/zones/:id', adminController.updateZone);
 router.delete('/zones/:id', adminController.deleteZone);
+
+// ----- COD & User Payments -----
+// The platform switch is filed under system_settings and the per-zone one under
+// restaurant_management, both by resolveSectionFromRequest above: whoever edits
+// a zone already decides what that zone does.
+router.get('/cod-settings', adminController.getCodSettings);
+router.patch('/cod-settings', adminController.updateCodSettings);
+router.patch('/zones/:id/cod', adminController.updateZoneCodSettings);
 
 // ----- Dining -----
 router.get('/dining/categories', diningAdminController.getDiningCategories);

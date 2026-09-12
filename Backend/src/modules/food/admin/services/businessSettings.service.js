@@ -75,6 +75,9 @@ const serialize = (row) => ({
     deliveryLogo: { url: row.deliveryLogoUrl, publicId: row.deliveryLogoPublicId },
     deliveryFavicon: { url: row.deliveryFaviconUrl, publicId: row.deliveryFaviconPublicId },
     powerScanning: toPowerScanning(row),
+    // Decimal reaches JSON as a string, and the screen puts it straight into a
+    // number input that then compares it as text.
+    discoveryRadiusKm: row.discoveryRadiusKm == null ? null : Number(row.discoveryRadiusKm),
 });
 
 /** The settings row, created on first read. There is only ever one. */
@@ -161,6 +164,21 @@ export const updateBusinessSettings = async (body = {}, files = null) => {
     if (body.state !== undefined) data.state = String(body.state || '');
     if (body.pincode !== undefined) data.pincode = String(body.pincode || '');
     if (body.region) data.region = String(body.region);
+
+    // Blank clears the limit. Zero is refused rather than stored: it would read
+    // as "no restaurant is within range" and empty the app for everyone.
+    if (body.discoveryRadiusKm !== undefined) {
+        const raw = body.discoveryRadiusKm;
+        if (raw === null || String(raw).trim() === '') {
+            data.discoveryRadiusKm = null;
+        } else {
+            const km = Number(raw);
+            if (!Number.isFinite(km) || km <= 0) {
+                throw new ValidationError('Delivery radius must be a number above 0, or blank for no limit');
+            }
+            data.discoveryRadiusKm = km;
+        }
+    }
 
     // Uploaded one at a time on purpose: six parallel uploads of the same
     // multipart request is a lot of outbound bandwidth for a settings save.

@@ -115,3 +115,19 @@ export const toFreeDeliveryAbove = (value) => {
     if (amount < 0) throw new ValidationError('freeDeliveryAbove must be >= 0');
     return amount;
 };
+
+/**
+ * How far this restaurant delivers, in km.
+ *
+ * Blank means "follow the platform default", which is not the same as zero:
+ * zero is a radius nobody is inside, so it would hide the restaurant from every
+ * customer while looking like a configured value.
+ */
+export const toDeliveryRadiusKm = (value) => {
+    if (value === '' || value === null || value === undefined) return null;
+    const km = toFiniteNumber(value);
+    if (km === null || km <= 0) {
+        throw new ValidationError('Delivery radius must be a number above 0, or blank to follow the platform default');
+    }
+    return km;
+};

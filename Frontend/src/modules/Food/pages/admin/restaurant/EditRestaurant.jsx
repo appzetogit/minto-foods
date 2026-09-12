@@ -112,6 +112,8 @@ const normalizeDetailsFormFromRestaurant = (restaurant) => {
     highlightBadge: restaurant?.highlightBadge || "",
     freeDeliveryAbove:
       restaurant?.freeDeliveryAbove == null ? "" : String(restaurant.freeDeliveryAbove),
+    deliveryRadiusKm:
+      restaurant?.deliveryRadiusKm == null ? "" : String(restaurant.deliveryRadiusKm),
     openingTime: restaurant?.openingTime || restaurant?.deliveryTimings?.openingTime || "",
     closingTime: restaurant?.closingTime || restaurant?.deliveryTimings?.closingTime || "",
     isActive: restaurant?.isActive !== false,
@@ -354,6 +356,10 @@ export default function EditRestaurant() {
         // "" clears the threshold; the API treats blank as "no free delivery".
         freeDeliveryAbove:
           detailsForm.freeDeliveryAbove === "" ? "" : Number(detailsForm.freeDeliveryAbove),
+        // "" hands the restaurant back to the platform-wide radius; a number
+        // overrides it for this restaurant only.
+        deliveryRadiusKm:
+          detailsForm.deliveryRadiusKm === "" ? "" : Number(detailsForm.deliveryRadiusKm),
         openingTime: detailsForm.openingTime,
         closingTime: detailsForm.closingTime,
         isActive: detailsForm.isActive !== false,
@@ -655,6 +661,20 @@ export default function EditRestaurant() {
                   />
                   <p className="mt-1 text-xs text-slate-500">
                     Blank = no free delivery. Orders at or above this subtotal are charged no delivery fee.
+                  </p>
+                </div>
+                <div>
+                  <Label>Delivery radius (km)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder="Blank = platform default"
+                    value={detailsForm.deliveryRadiusKm}
+                    onChange={(e) => setDetailsForm((p) => ({ ...p, deliveryRadiusKm: e.target.value }))}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    How far this restaurant will deliver. Blank follows the platform default.
                   </p>
                 </div>
                 <div>
