@@ -213,20 +213,51 @@ export async function sendMessage(sender, dto) {
             ? String(orderId)
             : buildConversationId(senderToken, recipientToken, orderId);
 
-    const message = await prisma.foodChatMessage.create({
-        data: {
-            conversationId,
-            orderId,
-            senderRole: sender.role,
-            senderId: String(sender.id),
-            senderToken,
-            recipientRole: peerRole,
-            recipientId: peerRole === 'ADMIN' ? null : String(peerId),
-            recipientToken,
-            participants: [senderToken, recipientToken],
-            text,
-            attachments,
-        },
+    // The thread row is written here, not only by createConversation.
+    //
+    // The inbox is derived from the messages, so a thread whose row was missing
+    // still appeared and could be replied to -- and then assigning or closing it
+    // failed with "Conversation not found", because the apps send a message
+    // without ever calling createConversation first.
+    //
+    // Both writes or neither: a message without its thread is what caused this,
+    // and a thread with no message would show an empty row in every inbox.
+    const message = await prisma.$transaction(async (tx) => {
+        const created = await tx.foodChatMessage.create({
+            data: {
+                conversationId,
+                orderId,
+                senderRole: sender.role,
+                senderId: String(sender.id),
+                senderToken,
+                recipientRole: peerRole,
+                recipientId: peerRole === 'ADMIN' ? null : String(peerId),
+                recipientToken,
+                participants: [senderToken, recipientToken],
+                text,
+                attachments,
+            },
+        });
+
+        // update: conversationId is a no-op that keeps Prisma emitting
+        // INSERT ... ON CONFLICT, so two people typing at once cannot collide.
+        // Nothing else is touched, or a reply would reopen a closed thread.
+        await tx.foodChatConversation.upsert({
+            where: { conversationId },
+            create: {
+                conversationId,
+                orderId: orderId || null,
+                title: '',
+                peerToken: recipientToken,
+                openedByToken: senderToken,
+                participants: [senderToken, recipientToken].sort(),
+                status: 'open',
+                closedAt: null,
+            },
+            update: { conversationId },
+        });
+
+        return created;
     });
 
     // Named here as well as in the history. A reply that reaches a colleague
