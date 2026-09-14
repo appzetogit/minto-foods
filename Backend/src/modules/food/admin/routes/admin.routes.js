@@ -23,6 +23,7 @@ import { requireAdminPermission, requireAnyAdminPermission } from '../../../../c
 import * as driverRegField from '../../delivery/controllers/driverRegistrationField.controller.js';
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
+import * as offerBanner from '../controllers/offerBanner.controller.js';
 
 const router = express.Router();
 
@@ -93,7 +94,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     // who called it directly.
     if (path.startsWith('/referral-settings')) return 'referral_rewards';
     if (path.startsWith('/contact-messages') || path.startsWith('/safety-emergency-reports')) return 'support_management';
-    if (path.startsWith('/hero-banners') || path.startsWith('/top-banners') || path.startsWith('/promotion-banners')) return 'banner_management';
+    if (path.startsWith('/hero-banners') || path.startsWith('/top-banners') || path.startsWith('/promotion-banners') || path.startsWith('/offer-banners')) return 'banner_management';
     if (path.startsWith('/point-of-sale') || path.startsWith('/pos')) return 'point_of_sale';
     if (path.startsWith('/sidebar-badges') || path.startsWith('/dashboard-stats')) return 'dashboard';
     return null;
@@ -369,6 +370,15 @@ router.patch('/restaurant-app-banners/order', restaurantAppBanner.reorderBanners
 router.patch('/restaurant-app-banners/:id/status', restaurantAppBanner.toggleBannerStatusController);
 router.patch('/restaurant-app-banners/:id', upload.single('file'), restaurantAppBanner.updateBannerController);
 router.delete('/restaurant-app-banners/:id', restaurantAppBanner.deleteBannerController);
+
+// Offer banners. Ordering and status come before /:id so "order" is not read as
+// a banner id.
+router.get('/offer-banners', offerBanner.listOfferBannersController);
+router.post('/offer-banners', upload.single('file'), offerBanner.createOfferBannerController);
+router.patch('/offer-banners/order', offerBanner.reorderOfferBannersController);
+router.patch('/offer-banners/:id/status', offerBanner.toggleOfferBannerStatusController);
+router.patch('/offer-banners/:id', upload.single('file'), offerBanner.updateOfferBannerController);
+router.delete('/offer-banners/:id', offerBanner.deleteOfferBannerController);
 
 // ----- Cashback Settings -----
 router.get('/cashback-settings', cashbackSettings.getCashbackSettingsController);

@@ -113,6 +113,12 @@ export const adminSidebarMenu = [
         path: "/admin/food/coupons",
         icon: "Gift",
       },
+      {
+        type: "link",
+        label: "Offer Banners",
+        path: "/admin/food/offer-banners",
+        icon: "Megaphone",
+      },
     ],
   },
   {

@@ -256,6 +256,22 @@ export const notificationAPI = {
     apiClient.delete("/food/notifications/inbox/all", config),
 };
 
+/**
+ * Offer banner create/update share a body shape, and both have to go as
+ * multipart because of the image. Blank dates are sent as empty strings rather
+ * than skipped: on an edit, omitting the field would leave the old date in
+ * place, and "no end date" has to be expressible.
+ */
+const buildOfferBannerFormData = ({ file, title, ctaLink, startDate, endDate } = {}) => {
+  const formData = new FormData();
+  if (file) formData.append("file", file);
+  formData.append("title", String(title ?? ""));
+  formData.append("ctaLink", String(ctaLink ?? ""));
+  formData.append("startDate", String(startDate ?? ""));
+  formData.append("endDate", String(endDate ?? ""));
+  return formData;
+};
+
 /** Admin API - new backend only (GET /auth/me, PATCH /auth/admin/profile, POST /auth/admin/change-password) */
 export const adminAPI = {
   getSidebarBadges: () =>
@@ -1341,6 +1357,41 @@ export const adminAPI = {
     apiClient.put("/food/admin/delivery-emergency-help", body ?? {}, {
       contextModule: "admin",
     }),
+
+  /** Offer Banners (admin) */
+  getOfferBanners: () =>
+    apiClient.get("/food/admin/offer-banners", { contextModule: "admin" }),
+  createOfferBanner: (body = {}) =>
+    apiClient.post("/food/admin/offer-banners", buildOfferBannerFormData(body), {
+      headers: { "Content-Type": "multipart/form-data" },
+      contextModule: "admin",
+    }),
+  updateOfferBanner: (id, body = {}) =>
+    apiClient.patch(
+      `/food/admin/offer-banners/${String(id)}`,
+      buildOfferBannerFormData(body),
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        contextModule: "admin",
+      },
+    ),
+  deleteOfferBanner: (id) =>
+    apiClient.delete(`/food/admin/offer-banners/${String(id)}`, {
+      contextModule: "admin",
+    }),
+  updateOfferBannerStatus: (id, isActive) =>
+    apiClient.patch(
+      `/food/admin/offer-banners/${String(id)}/status`,
+      { isActive: isActive !== false },
+      { contextModule: "admin" },
+    ),
+  /** Ids in their new order; position in the array becomes sortOrder. */
+  reorderOfferBanners: (bannerIds) =>
+    apiClient.patch(
+      "/food/admin/offer-banners/order",
+      { banners: Array.isArray(bannerIds) ? bannerIds.map(String) : [] },
+      { contextModule: "admin" },
+    ),
 
   /** Restaurant add-ons approval (admin) */
   getRestaurantAddons: (params = {}) =>

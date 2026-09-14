@@ -3302,6 +3302,35 @@ model HomePromotionBanner {
 /// FoodHeroBanner (customer app) and from a restaurant's own coverImages.
 /// Design size is 350x100 (3.5:1) — the API reports the ratio so clients do not
 /// hardcode it.
+/// Offer banners, managed on their own screen under Promotions.
+///
+/// Deliberately not the home promotion banners: those are a merchandising strip
+/// the landing screen owns, while these are the offer artwork the apps show,
+/// and sharing one table would mean every edit to one moved the other.
+model FoodOfferBanner {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  imageUrl String
+  publicId String @default("")
+  title    String @default("")
+  /// Optional deep link opened on tap. Blank = not tappable.
+  ctaLink  String @default("")
+
+  /// An offer runs for a while. Null on either side means open-ended, so a
+  /// banner with neither is simply always on while isActive is true.
+  startDate DateTime?
+  endDate   DateTime?
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@map("food_offer_banners")
+}
+
 model FoodRestaurantAppBanner {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
