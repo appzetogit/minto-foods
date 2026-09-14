@@ -22,6 +22,8 @@ const serialize = (b) => ({
     ctaLink: b.ctaLink || '',
     startDate: b.startDate,
     endDate: b.endDate,
+    zoneId: b.zoneId || null,
+    zoneName: b.zone?.name || null,
     sortOrder: b.sortOrder,
     isActive: b.isActive,
     createdAt: b.createdAt,
@@ -35,6 +37,15 @@ const assertId = (id) => {
 // Multipart carries no booleans, so the form sends the strings. Anything that
 // is not an explicit false means visible.
 const toActive = (value) => !(value === false || value === 'false');
+
+/** Blank, or the word all, means every zone. */
+const toZoneId = (value) => {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (!raw || raw === 'all' || raw === 'null') return null;
+    if (!isId(raw)) throw new ValidationError('Invalid zone');
+    return raw;
+};
 
 /** Blank clears the date; a value has to be a real one. */
 const toDate = (value) => {
@@ -63,7 +74,10 @@ export const isBannerLive = (banner = {}, now = new Date()) => {
 
 /** Admin: every banner, whatever its state, in display order. */
 export const listBannersAdmin = async () => {
-    const banners = await prisma.foodOfferBanner.findMany({ orderBy: ORDER });
+    const banners = await prisma.foodOfferBanner.findMany({
+        orderBy: ORDER,
+        include: { zone: { select: { name: true } } },
+    });
     return { banners: banners.map(serialize) };
 };
 
@@ -73,14 +87,19 @@ export const listBannersAdmin = async () => {
  * Filtered in the query rather than in JS so a long list never travels just to
  * be discarded, and ordered here so the app can render what it receives.
  */
-export const listLiveBanners = async () => {
+export const listLiveBanners = async (zoneId = null) => {
     const now = new Date();
+    // An unknown or missing zone still gets the everywhere banners rather than
+    // an empty strip: a customer who has not set an address yet is the common
+    // case, not an error.
+    const zone = isId(zoneId) ? String(zoneId) : null;
     const banners = await prisma.foodOfferBanner.findMany({
         where: {
             isActive: true,
             AND: [
                 { OR: [{ startDate: null }, { startDate: { lte: now } }] },
                 { OR: [{ endDate: null }, { endDate: { gte: now } }] },
+                { OR: [{ zoneId: null }, ...(zone ? [{ zoneId: zone }] : [])] },
             ],
         },
         orderBy: ORDER,
@@ -124,6 +143,7 @@ export const createBanner = async (file, body = {}) => {
             ctaLink: String(body.ctaLink || '').trim(),
             startDate,
             endDate,
+            zoneId: toZoneId(body.zoneId),
             sortOrder: (last?.sortOrder ?? -1) + 1,
             isActive: body.isActive === undefined ? true : toActive(body.isActive),
         },
@@ -147,6 +167,7 @@ export const updateBanner = async (id, body = {}, file = null) => {
     if (body.ctaLink !== undefined) data.ctaLink = String(body.ctaLink || '').trim();
     if (body.startDate !== undefined) data.startDate = toDate(body.startDate);
     if (body.endDate !== undefined) data.endDate = toDate(body.endDate);
+    if (body.zoneId !== undefined) data.zoneId = toZoneId(body.zoneId);
     if (body.isActive !== undefined) data.isActive = toActive(body.isActive);
 
     // Checked against what the row will be, not only against what was sent:
@@ -157,7 +178,11 @@ export const updateBanner = async (id, body = {}, file = null) => {
         throw new ValidationError('The end date cannot be before the start date');
     }
 
-    return serialize(await prisma.foodOfferBanner.update({ where: { id }, data }));
+    return serialize(await prisma.foodOfferBanner.update({
+        where: { id },
+        data,
+        include: { zone: { select: { name: true } } },
+    }));
 };
 
 export const deleteBanner = async (id) => {

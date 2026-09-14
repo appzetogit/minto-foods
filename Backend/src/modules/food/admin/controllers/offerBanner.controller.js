@@ -42,8 +42,10 @@ export async function reorderOfferBannersController(req, res, next) {
 }
 
 // ── The apps, no login ──
-export async function listLiveOfferBannersController(_req, res, next) {
+export async function listLiveOfferBannersController(req, res, next) {
     try {
-        return sendResponse(res, 200, 'Offer banners fetched', await svc.listLiveBanners());
+        // ?zoneId= is optional: without it the apps get the banners meant for
+        // every zone, which is the right answer before an address is chosen.
+        return sendResponse(res, 200, 'Offer banners fetched', await svc.listLiveBanners(req.query?.zoneId));
     } catch (e) { next(e); }
 }

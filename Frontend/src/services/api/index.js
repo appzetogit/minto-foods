@@ -262,13 +262,15 @@ export const notificationAPI = {
  * than skipped: on an edit, omitting the field would leave the old date in
  * place, and "no end date" has to be expressible.
  */
-const buildOfferBannerFormData = ({ file, title, ctaLink, startDate, endDate } = {}) => {
+const buildOfferBannerFormData = ({ file, title, ctaLink, startDate, endDate, zoneId } = {}) => {
   const formData = new FormData();
   if (file) formData.append("file", file);
   formData.append("title", String(title ?? ""));
   formData.append("ctaLink", String(ctaLink ?? ""));
   formData.append("startDate", String(startDate ?? ""));
   formData.append("endDate", String(endDate ?? ""));
+  // Empty means every zone. Sent rather than skipped so an edit can clear it.
+  formData.append("zoneId", String(zoneId ?? ""));
   return formData;
 };
 

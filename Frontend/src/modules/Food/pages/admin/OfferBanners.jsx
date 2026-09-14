@@ -12,7 +12,7 @@ import { ArrowDown, ArrowUp, Image as ImageIcon, Loader2, Pencil, Plus, Trash2, 
 
 const MAX_MB = 5
 
-const emptyForm = { file: null, preview: "", title: "", ctaLink: "", startDate: "", endDate: "" }
+const emptyForm = { file: null, preview: "", title: "", ctaLink: "", startDate: "", endDate: "", zoneId: "" }
 
 /** A date from the API as the value an <input type="date"> wants. */
 const toDateInput = (value) => {
@@ -48,6 +48,7 @@ export default function OfferBanners() {
   const [busy, setBusy] = useState("")
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
+  const [zones, setZones] = useState([])
   const fileRef = useRef(null)
 
   const load = async () => {
@@ -66,6 +67,15 @@ export default function OfferBanners() {
 
   useEffect(() => {
     load()
+    // A zone list failing is not worth blocking the screen for: the picker
+    // simply offers "every zone", which is the default anyway.
+    adminAPI
+      .getZones()
+      .then((res) => {
+        const data = res?.data?.data ?? res?.data ?? {}
+        setZones(Array.isArray(data.zones) ? data.zones : Array.isArray(data) ? data : [])
+      })
+      .catch(() => setZones([]))
     // Object URLs are held for the preview; release the last one on unmount.
     return () => setForm((f) => {
       if (f.preview) URL.revokeObjectURL(f.preview)
@@ -109,6 +119,7 @@ export default function OfferBanners() {
         ctaLink: form.ctaLink,
         startDate: form.startDate,
         endDate: form.endDate,
+        zoneId: form.zoneId,
       }
       if (isEditing) await adminAPI.updateOfferBanner(editingId, payload)
       else await adminAPI.createOfferBanner(payload)
@@ -130,6 +141,7 @@ export default function OfferBanners() {
       ctaLink: banner.ctaLink || "",
       startDate: toDateInput(banner.startDate),
       endDate: toDateInput(banner.endDate),
+      zoneId: banner.zoneId || "",
     })
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
@@ -289,6 +301,26 @@ export default function OfferBanners() {
                 <p className="mt-1 text-xs text-slate-500">Blank = until switched off.</p>
               </div>
 
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Zone</label>
+                <select
+                  value={form.zoneId}
+                  onChange={(e) => setForm((f) => ({ ...f, zoneId: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  <option value="">Every zone</option>
+                  {zones.map((z) => (
+                    <option key={z.id || z._id} value={z.id || z._id}>
+                      {z.name}
+                      {z.city ? ` — ${z.city}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Pick a zone to show this banner only to customers ordering there. Every zone is the default.
+                </p>
+              </div>
+
               <div className="sm:col-span-2 flex justify-end">
                 <button
                   type="button"
@@ -339,7 +371,9 @@ export default function OfferBanners() {
                         {banner.ctaLink ? `Opens ${banner.ctaLink}` : "Not tappable"}
                       </p>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {banner.startDate ? `From ${readableDate(banner.startDate)}` : "No start date"}
+                        {banner.zoneName ? `${banner.zoneName} only` : "Every zone"}
+                        {" · "}
+                        {banner.startDate ? `from ${readableDate(banner.startDate)}` : "no start date"}
                         {" · "}
                         {banner.endDate ? `until ${readableDate(banner.endDate)}` : "no end date"}
                       </p>

@@ -2007,6 +2007,7 @@ model FoodZone {
   orders                  FoodOrder[]
   categories              FoodCategory[]
   promotionBanners        HomePromotionBanner[]
+  offerBanners            FoodOfferBanner[]
   foodFeeSettings         FoodFeeSettings[]
   topBanners              TopBanner[]
   foodLandingZoneSettings FoodLandingZoneSettings?
@@ -3321,13 +3322,21 @@ model FoodOfferBanner {
   startDate DateTime?
   endDate   DateTime?
 
+  /// The zone this banner is for. Null means every zone, which is what an
+  /// admin who did not choose one means -- not "no zone", which would show it
+  /// to nobody.
+  zoneId String? @db.VarChar(24)
+
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  zone FoodZone? @relation(fields: [zoneId], references: [id])
+
   @@index([isActive, sortOrder])
+  @@index([zoneId])
   @@map("food_offer_banners")
 }
 
