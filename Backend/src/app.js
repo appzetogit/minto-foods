@@ -6,6 +6,7 @@ import mongoSanitize from 'mongo-sanitize';
 import xssClean from 'xss-clean';
 import routes from './routes/index.js';
 import { signMediaResponses } from './middleware/signMedia.js';
+import { stripIncomingSignatures } from './middleware/stripIncomingSignatures.js';
 import shareLinksRoutes from './modules/food/public/shareLinks.routes.js';
 import errorHandler from './middleware/errorHandler.js';
 import { apiRateLimiter } from './middleware/rateLimit.js';
@@ -90,6 +91,10 @@ app.use(xssClean());
 // Signs S3 media urls on the way out. Before the routes so it wraps res.json
 // for every handler, including the ones that never touch sendResponse.
 app.use('/api', signMediaResponses);
+
+// ...and takes our signatures back off on the way in, so a client that posts
+// back a url we signed for it cannot freeze a dead one into the database.
+app.use('/api', stripIncomingSignatures);
 
 // Global rate limiting for API routes
 app.use('/api', apiRateLimiter);

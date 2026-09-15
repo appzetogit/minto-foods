@@ -53,6 +53,28 @@ const isOwnBucketHost = (hostname) => {
         || hostname === `${bucket}.s3.amazonaws.com`;
 };
 
+/**
+ * A url of ours with its signature taken off, or the value untouched.
+ *
+ * Split out of normalizeMediaUrlForStorage so the request middleware can apply
+ * this one rule without also rewriting /uploads/ paths, which would change the
+ * meaning of fields that are not media at all.
+ *
+ * Only our own bucket: an external signed url is someone else's contract and
+ * stripping its query would break it.
+ */
+export const stripOwnBucketSignature = (value) => {
+    if (typeof value !== 'string' || !value.startsWith('http')) return value;
+    if (!value.includes('X-Amz-Signature')) return value;
+    try {
+        const parsed = new URL(value);
+        if (!isOwnBucketHost(parsed.hostname)) return value;
+        return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+        return value;
+    }
+};
+
 export const buildPublicUrl = (relativePath) => {
     const cleanPath = String(relativePath || '').replace(/^\/+/, '');
     const base = fixMediaUrlProtocol(String(config.uploadBaseUrl || '').replace(/\/+$/, ''));
@@ -98,11 +120,8 @@ export const normalizeMediaUrlForStorage = (url) => {
         if (parsed.pathname.startsWith('/uploads/')) {
             return fixMediaUrlProtocol(parsed.toString());
         }
-        // Only our own bucket: an external signed url is someone else's
-        // contract and stripping its query would break it.
-        if (parsed.searchParams.has('X-Amz-Signature') && isOwnBucketHost(parsed.hostname)) {
-            return `${parsed.origin}${parsed.pathname}`;
-        }
+        const unsigned = stripOwnBucketSignature(trimmed);
+        if (unsigned !== trimmed) return unsigned;
     } catch {
         /* not a full URL */
     }
