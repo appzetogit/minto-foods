@@ -1,5 +1,6 @@
 import express from 'express';
 import { listLiveOfferBannersController } from '../modules/food/admin/controllers/offerBanner.controller.js';
+import { getPublicTipConfigController } from '../modules/food/admin/controllers/tipSurge.controller.js';
 import authRoutes from '../core/auth/auth.routes.js';
 import deliveryRoutes from '../modules/food/delivery/routes/delivery.routes.js';
 import restaurantRoutes from '../modules/food/restaurant/routes/restaurant.routes.js';
@@ -55,6 +56,8 @@ router.use('/v1/uploads', uploadRoutes);
 // Offer banner artwork for the user, delivery and restaurant apps. Public on
 // purpose: it is shown before anyone signs in.
 router.get('/v1/food/offer-banners/public', listLiveOfferBannersController);
+// The tip amounts the apps may offer. Public: shown at checkout.
+router.get('/v1/food/tips/config', getPublicTipConfigController);
 router.get('/v1/food/admin/business-settings/public', businessSettingsController.getBusinessSettings);
 router.get('/v1/food/admin/power-scanning/public', businessSettingsController.getPowerScanningSettings);
 router.get('/v1/food/admin/restaurant-subscription-settings/public', adminController.getRestaurantSubscriptionSettings);

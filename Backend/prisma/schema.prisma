@@ -1294,6 +1294,9 @@ model FoodOrder {
   packagingFee         Decimal      @default(0) @db.Decimal(14, 2)
   deliveryFee          Decimal      @default(0) @db.Decimal(14, 2)
   deliveryFeeGst       Decimal      @default(0) @db.Decimal(14, 2)
+  /// What the customer tipped the rider. Paid through to the rider on top of
+  /// their earning, so it is kept apart from the fee the platform collects.
+  tipAmount            Decimal      @default(0) @db.Decimal(14, 2)
   platformFee          Decimal      @default(0) @db.Decimal(14, 2)
   /// Quick Mode surcharge; also included in platformFee.
   quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)
@@ -2008,6 +2011,7 @@ model FoodZone {
   categories              FoodCategory[]
   promotionBanners        HomePromotionBanner[]
   offerBanners            FoodOfferBanner[]
+  surgeRules              FoodSurgeRule[]
   foodFeeSettings         FoodFeeSettings[]
   topBanners              TopBanner[]
   foodLandingZoneSettings FoodLandingZoneSettings?
@@ -2270,6 +2274,13 @@ model FoodBusinessSettings {
   deliveryLogoPublicId      String @default("")
   deliveryFaviconUrl        String @default("")
   deliveryFaviconPublicId   String @default("")
+
+  /// Tipping, set here and nowhere else: the app offers exactly these amounts,
+  /// so a customer can never be shown a tip the platform did not sanction.
+  tipsEnabled  Boolean @default(true)
+  tipPresets   Int[]   @default([10, 20, 30])
+  /// A ceiling on a custom amount. Null means no ceiling.
+  tipMaxAmount Decimal? @db.Decimal(14, 2)
 
   /// Platform-wide cash-on-delivery switch. Off here means off in every zone,
   /// whatever a zone says. Lived in COD_ENABLED, which needed a deploy to change.
@@ -3308,6 +3319,39 @@ model HomePromotionBanner {
 /// Deliberately not the home promotion banners: those are a merchandising strip
 /// the landing screen owns, while these are the offer artwork the apps show,
 /// and sharing one table would mean every edit to one moved the other.
+/// A flat amount added to the delivery fee while it is running.
+///
+/// Flat rather than a multiplier on purpose: a customer can be told "delivery
+/// is Rs 15 more in the rain", where a multiplier means a different surcharge
+/// on every order and an unexplainable bill on long trips.
+model FoodSurgeRule {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  /// Shown to admins, never to customers. "Friday night", "Heavy rain".
+  label     String  @default("")
+  /// Rupees added to the delivery fee. Never touches the rider's pay.
+  surgeFee  Decimal @db.Decimal(14, 2)
+
+  /// Null is every zone, the same meaning it carries on an offer banner.
+  zoneId String? @db.VarChar(24)
+
+  /// Null on both means "on right now, until switched off" -- the immediate
+  /// case. A window makes it scheduled, and it applies only inside that window.
+  startAt DateTime?
+  endAt   DateTime?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zone FoodZone? @relation(fields: [zoneId], references: [id])
+
+  @@index([isActive, startAt, endAt])
+  @@index([zoneId])
+  @@map("food_surge_rules")
+}
+
 model FoodOfferBanner {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 

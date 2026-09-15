@@ -59,6 +59,8 @@ const PATH_PREFIX_TO_SECTION = [
   // Mapping it anywhere else would show a sub-admin a link that 401s on open.
   { prefix: "/admin/food/cod-payments", section: "system_settings" },
   { prefix: "/admin/food/offer-banners", section: "banner_management" },
+  { prefix: "/admin/food/tip-management", section: "delivery_management" },
+  { prefix: "/admin/food/surge-pricing", section: "delivery_management" },
   { prefix: "/admin/food/point-of-sale", section: "point_of_sale" },
   { prefix: "/admin/food/fee-settings", section: "delivery_management" },
   { prefix: "/admin/food/delivery-cash-limit", section: "delivery_management" },

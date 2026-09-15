@@ -359,6 +359,16 @@ export async function loadActiveFeeSettings(zoneId = null) {
   const inherit = (field) =>
     feeDoc[field] === null || feeDoc[field] === undefined ? global?.[field] ?? null : feeDoc[field];
 
+  // One read per request, the same way the bands are read: the rules are few
+  // and the alternative is a query inside a pure pricing function.
+  const surgeRules = await prisma.foodSurgeRule.findMany({
+    where: {
+      isActive: true,
+      OR: [{ zoneId: null }, ...(isId(zoneId) ? [{ zoneId: String(zoneId) }] : [])],
+    },
+    select: { surgeFee: true, startAt: true, endAt: true, isActive: true },
+  });
+
   const ownRanges = toFeeRanges(feeDoc.deliveryFeeBands);
   // No bands of its own means the zone did not override the ladder either.
   const ranges = ownRanges.length > 0 ? ownRanges : toFeeRanges(global?.deliveryFeeBands);
@@ -371,9 +381,48 @@ export async function loadActiveFeeSettings(zoneId = null) {
     gstRate: inherit('gstRate'),
     deliveryFeeGstRate: inherit('deliveryFeeGstRate'),
     deliveryFeeRanges: ranges,
+    /// Rupees the running surge adds to a charged delivery fee. 0 when nothing
+    /// is running, which is the normal state.
+    surgeFee: resolveSurgeFee(surgeRules),
     /// Which row actually priced this, so callers can report it.
     resolvedFromZone: Boolean(zoned),
   };
+}
+
+/**
+ * The surge running for a zone at a moment, in rupees.
+ *
+ * A rule with no window is on until switched off -- the immediate case. A rule
+ * with one applies only inside it. Rules for a zone and rules for everywhere
+ * both count, and the largest wins rather than the sum: two overlapping rules
+ * are an admin mistake, and charging their total would surprise a customer far
+ * more than charging the higher one.
+ */
+/**
+ * A fee with the surge already on it.
+ *
+ * loadActiveFeeSettings resolves the amount once per request, so this only
+ * adds it -- every path that charges for delivery goes through here, and one
+ * that forgot would quietly undercharge.
+ */
+const withSurge = (fee, feeSettings = {}) => {
+  const surge = Number(feeSettings.surgeFee) || 0;
+  if (!Number.isFinite(fee) || surge <= 0) return fee;
+  return Math.round((Number(fee) + surge) * 100) / 100;
+};
+
+export function resolveSurgeFee(rules = [], at = new Date()) {
+  const now = at instanceof Date ? at.getTime() : new Date(at).getTime();
+  if (!Array.isArray(rules) || !Number.isFinite(now)) return 0;
+
+  const live = rules.filter((rule) => {
+    if (!rule || rule.isActive === false) return false;
+    if (rule.startAt && new Date(rule.startAt).getTime() > now) return false;
+    if (rule.endAt && new Date(rule.endAt).getTime() < now) return false;
+    return Number(rule.surgeFee) > 0;
+  });
+
+  return live.reduce((most, rule) => Math.max(most, Number(rule.surgeFee) || 0), 0);
 }
 
 export function resolveUserDeliveryFee(
@@ -392,6 +441,8 @@ export function resolveUserDeliveryFee(
   // threshold read as "free above ₹0" and made every delivery free.
   const threshold = freeDeliveryAbove == null ? NaN : Number(freeDeliveryAbove);
   if (Number.isFinite(threshold) && Number(subtotal) >= threshold) {
+    // Free delivery stays free. Adding surge here would charge for a delivery
+    // the restaurant has just promised to give away.
     return {
       deliveryFee: 0,
       distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
@@ -403,7 +454,7 @@ export function resolveUserDeliveryFee(
     const matchedFee = matchFeeRange(ranges, distanceKm, (range) => bandFee(range, distanceKm));
     if (Number.isFinite(matchedFee)) {
       return {
-        deliveryFee: matchedFee,
+        deliveryFee: withSurge(matchedFee, feeSettings),
         distanceKm: Number(distanceKm.toFixed(2)),
         source: 'distance',
       };
@@ -415,7 +466,7 @@ export function resolveUserDeliveryFee(
     const overRangeFee = widestBandFee(feeSettings, distanceKm);
     if (overRangeFee != null) {
       return {
-        deliveryFee: overRangeFee,
+        deliveryFee: withSurge(overRangeFee, feeSettings),
         distanceKm: Number(distanceKm.toFixed(2)),
         source: 'distance_over_range',
       };
@@ -424,7 +475,7 @@ export function resolveUserDeliveryFee(
 
   const fallbackFee = resolveBaseDeliveryFee(feeSettings);
   return {
-    deliveryFee: fallbackFee,
+    deliveryFee: withSurge(fallbackFee, feeSettings),
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     source: Number.isFinite(distanceKm) ? 'default_unmatched_range' : 'default',
   };
@@ -677,14 +728,19 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const deliveryFeeGstRate = resolveDeliveryFeeGstRate(feeSettings);
   const deliveryFeeGst = computeDeliveryFeeGst(deliveryFee, deliveryFeeGstRate);
 
+  // The tip is the customer's money for the rider: added to what they pay, and
+  // never folded into a fee, so it cannot be mistaken for platform income.
+  const tipAmount = Math.max(0, round2(Number(dto?.tipAmount) || 0));
+
   const total = round2(
     Math.max(
       0,
       subtotal + packagingFee + deliveryFee + deliveryFeeGst + platformFee + tax - discount,
-    ),
+    ) + tipAmount,
   );
 
   const basePricing = {
+    tipAmount,
     subtotal,
     tax,
     packagingFee,

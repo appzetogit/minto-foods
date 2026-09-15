@@ -1216,6 +1216,24 @@ export const adminAPI = {
       contextModule: "admin",
     }),
 
+  /** Tips: the amounts customers may choose, and what riders were given. */
+  getTipSettings: () =>
+    apiClient.get("/food/admin/tip-settings", { contextModule: "admin" }),
+  updateTipSettings: (body) =>
+    apiClient.patch("/food/admin/tip-settings", body ?? {}, { contextModule: "admin" }),
+  getTipReport: (days = 30) =>
+    apiClient.get("/food/admin/tips/report", { params: { days }, contextModule: "admin" }),
+
+  /** Surge: a flat amount added to the delivery fee while a rule runs. */
+  getSurgeRules: () =>
+    apiClient.get("/food/admin/surge-rules", { contextModule: "admin" }),
+  createSurgeRule: (body) =>
+    apiClient.post("/food/admin/surge-rules", body ?? {}, { contextModule: "admin" }),
+  updateSurgeRule: (id, body) =>
+    apiClient.patch(`/food/admin/surge-rules/${String(id)}`, body ?? {}, { contextModule: "admin" }),
+  deleteSurgeRule: (id) =>
+    apiClient.delete(`/food/admin/surge-rules/${String(id)}`, { contextModule: "admin" }),
+
   /** Cash on delivery: the platform switch and every zone's own setting. */
   getCodSettings: () =>
     apiClient.get("/food/admin/cod-settings", { contextModule: "admin" }),

@@ -24,6 +24,7 @@ import * as driverRegField from '../../delivery/controllers/driverRegistrationFi
 import * as cashbackSettings from '../controllers/cashbackSettings.controller.js';
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
 import * as offerBanner from '../controllers/offerBanner.controller.js';
+import * as tipSurge from '../controllers/tipSurge.controller.js';
 
 const router = express.Router();
 
@@ -86,6 +87,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/reports')) return 'report_management';
     // COD & User Payments sits with the other platform-wide switches: the
     // platform row it writes is the same business-settings row.
+    if (path.startsWith('/tip-settings') || path.startsWith('/tips')) return 'delivery_management';
+    if (path.startsWith('/surge-rules')) return 'delivery_management';
     if (path.startsWith('/feature-settings') || path.startsWith('/business-settings') || path.startsWith('/power-scanning') || path.startsWith('/notifications') || path.startsWith('/cod-settings')) return 'system_settings';
     if (path.startsWith('/pages-social-media')) return 'pages_social_media';
     // These four sections were grantable in the role editor but appeared in no
@@ -379,6 +382,17 @@ router.patch('/offer-banners/order', offerBanner.reorderOfferBannersController);
 router.patch('/offer-banners/:id/status', offerBanner.toggleOfferBannerStatusController);
 router.patch('/offer-banners/:id', upload.single('file'), offerBanner.updateOfferBannerController);
 router.delete('/offer-banners/:id', offerBanner.deleteOfferBannerController);
+
+// Tips a customer leaves for a rider, and the amounts they may choose from.
+router.get('/tip-settings', tipSurge.getTipSettingsController);
+router.patch('/tip-settings', tipSurge.updateTipSettingsController);
+router.get('/tips/report', tipSurge.getTipReportController);
+
+// Surge: a flat amount on the delivery fee, now or on a schedule.
+router.get('/surge-rules', tipSurge.listSurgeRulesController);
+router.post('/surge-rules', tipSurge.createSurgeRuleController);
+router.patch('/surge-rules/:id', tipSurge.updateSurgeRuleController);
+router.delete('/surge-rules/:id', tipSurge.deleteSurgeRuleController);
 
 // ----- Cashback Settings -----
 router.get('/cashback-settings', cashbackSettings.getCashbackSettingsController);

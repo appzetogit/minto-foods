@@ -512,6 +512,7 @@ export async function createOrder(userId, dto) {
       deliveryFeeGst: Number(pricingResult.pricing?.deliveryFeeGst) || 0,
       platformFee: Number(pricingResult.pricing?.platformFee) || 0,
       quickDeliveryFee: Number(pricingResult.pricing?.quickDeliveryFee) || 0,
+      tipAmount: Number(pricingResult.pricing?.tipAmount) || 0,
       deliveryMode:
         pricingResult.pricing?.deliveryMode === "quick" || dto.deliveryMode === "quick"
           ? "quick"
@@ -556,7 +557,11 @@ export async function createOrder(userId, dto) {
     // Same zone the order is about to be stamped with, a few lines below.
     const orderZoneId = dto.zoneId || restaurant.zoneId || null;
     const feeSettings = await loadActiveFeeSettings(orderZoneId);
-    const riderEarning = calculateRiderEarning(feeSettings, distanceKm) || 0;
+    // The tip belongs to the rider, so it is added to what they are owed. It is
+    // also kept on the order in its own column, so a payout can always show how
+    // much of an earning was tip rather than delivery pay.
+    const tipAmount = Number(normalizedPricing.tipAmount) || 0;
+    const riderEarning = (calculateRiderEarning(feeSettings, distanceKm) || 0) + tipAmount;
 
     let restaurantCommission = 0;
     try {
@@ -577,7 +582,9 @@ export async function createOrder(userId, dto) {
       (Number.isFinite(normalizedPricing.deliveryFeeGst) ? normalizedPricing.deliveryFeeGst : 0) +
       (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
       restaurantCommission -
-      riderEarning;
+      // Net of the tip: it was never platform income, so subtracting it with the
+      // rest of the earning would read as the platform losing money per tip.
+      (riderEarning - tipAmount);
 
     const isAwaitingOnlinePayment = isAwaitingOnlinePaymentMethod(paymentMethod);
     const initialStatus = isAwaitingOnlinePayment ? "pending_payment" : "created";
@@ -601,6 +608,7 @@ export async function createOrder(userId, dto) {
       deliveryFleet: String(dto.deliveryFleet || "standard"),
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
       riderEarning: Number(riderEarning) || 0,
+      tipAmount,
       platformProfit: Number(platformProfit) || 0,
       items: {
         create: resolvedItems.map((item) => ({
