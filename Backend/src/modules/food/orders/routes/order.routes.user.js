@@ -12,7 +12,9 @@ import {
     getOrderDropOtpUserController,
     updateOrderInstructionsController,
     getOrderRouteUserController,
-  tipOrderAfterDeliveryController,
+    tipOrderAfterDeliveryController,
+    getOrderInvoiceController,
+    getOrderInvoiceHtmlController,
 } from '../controllers/order.controller.js';
 
 const router = express.Router();
@@ -29,6 +31,9 @@ router.get('/', listOrdersUserController);
 router.get('/:orderId/payments', getOrderPaymentsUserController);
 router.get('/:orderId/drop-otp', getOrderDropOtpUserController);
 // Live route from the rider's current position to their next stop, for the tracking map.
+// The customer's bill. Both before `/:orderId`, which would swallow them.
+router.get('/:orderId/invoice', getOrderInvoiceController);
+router.get('/:orderId/invoice.html', getOrderInvoiceHtmlController);
 router.get('/:orderId/route', getOrderRouteUserController);
 router.get('/:orderId', getOrderByIdUserController);
 router.patch('/:orderId/cancel', cancelOrderController);

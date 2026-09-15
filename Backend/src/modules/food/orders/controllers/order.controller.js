@@ -1,4 +1,5 @@
 import { sendResponse } from '../../../../utils/response.js';
+import { getOrderInvoice, renderInvoiceHtml } from '../services/invoice.service.js';
 import { tipAfterDelivery } from '../services/orderTip.service.js';
 import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
@@ -514,6 +515,40 @@ export async function tipOrderAfterDeliveryController(req, res, next) {
             amount: req.body?.tipAmount ?? req.body?.amount,
         });
         return res.status(200).json({ success: true, message: 'Thanks — your tip has been added', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/** The bill for an order, as data. */
+export async function getOrderInvoiceController(req, res, next) {
+    try {
+        const invoice = await getOrderInvoice({
+            orderId: req.params.orderId,
+            userId: req.user?.userId,
+        });
+        return res.status(200).json({ success: true, message: 'Invoice fetched', data: invoice });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/**
+ * The same bill as a printable page, for "download bill".
+ *
+ * Sent as html so the phone's own share sheet can turn it into a PDF; running
+ * Chrome on the server to do that would cost more than the feature is worth.
+ */
+export async function getOrderInvoiceHtmlController(req, res, next) {
+    try {
+        const invoice = await getOrderInvoice({
+            orderId: req.params.orderId,
+            userId: req.user?.userId,
+        });
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        // A bill is the customer's own record; no shared cache should hold it.
+        res.set('Cache-Control', 'private, no-store');
+        return res.status(200).send(renderInvoiceHtml(invoice));
     } catch (error) {
         next(error);
     }
