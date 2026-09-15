@@ -474,7 +474,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     const [earningsAgg, cashAgg, bonusAgg, paymentTxList, bonusTxList] = await Promise.all([
         prisma.foodOrder.aggregate({
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
-            _sum: { riderEarning: true },
+            _sum: { riderEarning: true, tipAmount: true },
         }),
         prisma.foodOrder.aggregate({
             where: {
@@ -493,7 +493,7 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
             where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
             orderBy: [{ deliveredAt: 'desc' }, { createdAt: 'desc' }],
             select: {
-                id: true, orderId: true, riderEarning: true, paymentMethod: true,
+                id: true, orderId: true, riderEarning: true, tipAmount: true, paymentMethod: true,
                 orderStatus: true, deliveredAt: true, createdAt: true,
             },
             take: 2000,
@@ -506,22 +506,31 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
     ]);
 
     const totalEarned = num(earningsAgg?._sum?.riderEarning);
+    const totalTipsEarned = num(earningsAgg?._sum?.tipAmount);
     const cashInHand = num(cashAgg?._sum?.riderEarning);
     const totalBonus = num(bonusAgg?._sum?.amount);
 
     const paymentTransactions = (paymentTxList || []).map((o) => {
         const date = o.deliveredAt || o.createdAt || new Date();
+        const tip = num(o.tipAmount);
         return {
             _id: o.id,
             type: 'payment',
             amount: num(o.riderEarning),
+            /// The same amount, split: what the delivery paid and what the
+            /// customer added. A rider who was tipped should be able to see it
+            /// on the order it came from, not only in a monthly total.
+            deliveryAmount: Math.round((num(o.riderEarning) - tip) * 100) / 100,
+            tipAmount: tip,
             status: 'Completed',
             date,
             createdAt: date,
             orderId: o.orderId || o.id,
             paymentMethod: o.paymentMethod || '',
             metadata: { orderId: o.orderId || o.id },
-            description: o.paymentMethod === 'cash' ? 'COD delivery earning' : 'Online delivery earning',
+            description: tip > 0
+                ? `${o.paymentMethod === 'cash' ? 'COD' : 'Online'} delivery earning (includes \u20b9${tip} tip)`
+                : (o.paymentMethod === 'cash' ? 'COD delivery earning' : 'Online delivery earning'),
         };
     });
 
@@ -645,7 +654,7 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
 
     const [totalOrders, agg, sessions] = await Promise.all([
         prisma.foodOrder.count({ where }),
-        prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true } }),
+        prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true, tipAmount: true } }),
         prisma.foodDeliveryPartnerSession.findMany({
             where: sessionWhere,
             select: { wentOnlineAt: true, wentOfflineAt: true },
@@ -653,6 +662,10 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
     ]);
 
     const totalEarnings = num(agg?._sum?.riderEarning);
+    // riderEarning already contains the tip, so the delivery part is what is
+    // left after taking it out. Adding them would count every tip twice.
+    const totalTips = num(agg?._sum?.tipAmount);
+    const deliveryEarning = Math.round((totalEarnings - totalTips) * 100) / 100;
 
     // Reported as 0 before the duty log existed, because nothing recorded when
     // a rider went on or off shift. Clipped to the window so only the part of
@@ -680,7 +693,11 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
             /// Whole minutes on shift, for callers that would rather not
             /// recombine hours and minutes.
             totalOnlineMinutes: onlineMinutesTotal,
-            orderEarning: totalEarnings,
+            /// Delivery pay only. Tips used to be folded in here, which made a
+            /// generous week look like better delivery rates; the parts now add
+            /// up to totalEarnings instead of overlapping it.
+            orderEarning: deliveryEarning,
+            tips: totalTips,
             incentive: 0,
             otherEarnings: 0,
         },
