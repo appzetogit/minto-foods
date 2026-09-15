@@ -1961,6 +1961,50 @@ export const listApprovedRestaurants = async (query = {}) => {
     return finish(rows.map(toPublicCard), total);
 };
 
+/**
+ * What an anonymous caller may see of a restaurant.
+ *
+ * This endpoint has no auth: anyone with a restaurant id -- and the public list
+ * hands those out -- gets whatever it returns. It used to select nothing at all,
+ * so it returned the whole row: PAN and Aadhaar numbers and their document
+ * scans, bank account and IFSC, the owner's personal email and phone, FCM push
+ * tokens, and tokenVersion. Signing the media urls did not help, because the
+ * response handed the caller a freshly signed one.
+ *
+ * So it is an allow-list, not a blocklist. A column added to the schema later is
+ * private until someone deliberately names it here, which is the right default
+ * for a table that holds identity documents.
+ *
+ * fssaiNumber stays: a food business licence number is meant to be displayed,
+ * and the apps show it. The licence *scan* does not.
+ */
+const PUBLIC_RESTAURANT_SELECT = {
+    id: true, restaurantName: true, restaurantNameNormalized: true,
+    profileImage: true, coverImage: true, coverImages: true,
+    galleryImages: true, menuImages: true, videos: true,
+    cuisines: true, pureVegRestaurant: true, rating: true, totalRatings: true,
+    featuredDish: true, featuredPrice: true, offer: true, highlightBadge: true,
+    menuSections: true,
+
+    // Where it is, and when it is open.
+    addressLine1: true, addressLine2: true, area: true, city: true, state: true,
+    pincode: true, landmark: true, formattedAddress: true,
+    latitude: true, longitude: true, zoneId: true,
+    openingTime: true, closingTime: true, openDays: true,
+    isAcceptingOrders: true, outsideHoursOverride: true,
+
+    // What ordering from it costs and how long it takes.
+    estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
+    deliveryRadiusKm: true, freeDeliveryAbove: true,
+
+    diningEnabled: true, diningMaxGuests: true, diningType: true,
+
+    // Displayed on the listing, as the licence requires.
+    fssaiNumber: true,
+
+    status: true, createdAt: true,
+};
+
 export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
     const value = String(idOrSlug || '').trim();
     if (!value) return null;
@@ -1973,7 +2017,7 @@ export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
 
     if (!isId(value) && !where.restaurantNameNormalized) return null;
 
-    const doc = await prisma.foodRestaurant.findFirst({ where });
+    const doc = await prisma.foodRestaurant.findFirst({ where, select: PUBLIC_RESTAURANT_SELECT });
     if (!doc) return null;
 
     const [withTimings] = await attachOutletTimingsToRestaurants([
