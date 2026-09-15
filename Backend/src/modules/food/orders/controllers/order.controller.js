@@ -1,4 +1,5 @@
 import { sendResponse } from '../../../../utils/response.js';
+import { tipAfterDelivery } from '../services/orderTip.service.js';
 import * as orderService from '../services/order.service.js';
 import * as foodOrderPaymentService from '../services/foodOrderPayment.service.js';
 import {
@@ -497,5 +498,23 @@ export async function getOrderRouteUserController(req, res, next) {
         return sendResponse(res, 200, 'Route fetched', result);
     } catch (err) {
         next(err);
+    }
+}
+
+/**
+ * Tip a rider after the order arrived.
+ *
+ * Paid from the customer's wallet, because the order itself is already settled.
+ */
+export async function tipOrderAfterDeliveryController(req, res, next) {
+    try {
+        const data = await tipAfterDelivery({
+            userId: req.user?.userId,
+            orderId: req.params.orderId,
+            amount: req.body?.tipAmount ?? req.body?.amount,
+        });
+        return res.status(200).json({ success: true, message: 'Thanks — your tip has been added', data });
+    } catch (error) {
+        next(error);
     }
 }

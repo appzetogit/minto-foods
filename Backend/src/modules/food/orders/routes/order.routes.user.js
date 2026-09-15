@@ -11,13 +11,18 @@ import {
     submitOrderRatingsController,
     getOrderDropOtpUserController,
     updateOrderInstructionsController,
-    getOrderRouteUserController
+    getOrderRouteUserController,
+  tipOrderAfterDeliveryController,
 } from '../controllers/order.controller.js';
 
 const router = express.Router();
 
 router.post('/calculate', calculateOrderController);
 router.post('/', createOrderController);
+
+// Tipping after the food arrived. Separate from the tip at checkout, which is
+// part of the order total and paid with it.
+router.post('/:orderId/tip', tipOrderAfterDeliveryController);
 router.post('/verify-payment', verifyPaymentController);
 router.delete('/:orderId/pending-payment', abandonOnlinePaymentController);
 router.get('/', listOrdersUserController);
