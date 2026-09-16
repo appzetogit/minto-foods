@@ -504,6 +504,16 @@ export async function createOrder(userId, dto) {
       { at: orderAt, restaurant, skipAvailabilityCheck: true },
     );
 
+    // A coupon the customer saw applied must still apply now. Between the cart
+    // preview and this call its hours can end or its last redemption be taken,
+    // and the order used to go through at full price without a word -- charging
+    // more than the screen they confirmed. Refuse and say why instead.
+    const requestedCoupon = dto.pricing?.couponCode ? String(dto.pricing.couponCode).trim() : "";
+    if (requestedCoupon && !pricingResult.pricing?.appliedCoupon) {
+      const reason = pricingResult.pricing?.couponError?.message || "This coupon can no longer be applied";
+      throw new ValidationError(`${reason}. Remove the coupon or review your cart to continue.`);
+    }
+
     const resolvedItems = pricingResult.items || [];
     const normalizedPricing = {
       subtotal: Number(pricingResult.pricing?.subtotal) || 0,
