@@ -2053,6 +2053,16 @@ model FoodOffer {
   startDate        DateTime?
   endDate          DateTime?
   isFirstOrderOnly Boolean   @default(false)
+  /// Days the code works on, 0 = Sunday .. 6 = Saturday, in India time.
+  /// Empty means every day.
+  activeDays      Int[]     @default([])
+  /// A daily window, "HH:mm" in India time. Both or neither. A window whose
+  /// end is before its start runs overnight (22:00 -> 02:00).
+  activeFromTime  String?   @db.VarChar(5)
+  activeToTime    String?   @db.VarChar(5)
+  /// Only for customers who have never ordered from the restaurant the order
+  /// is for. Different from isFirstOrderOnly, which is first order anywhere.
+  newToRestaurantOnly Boolean @default(false)
 
   status     OfferStatus @default(active)
   showInCart Boolean     @default(true)

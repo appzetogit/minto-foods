@@ -27,6 +27,12 @@ import {
 // One rule decides who a restaurant is visible to and who it will accept an
 // order from, so the feed reads it from the same place order pricing does.
 import { checkDeliveryRadius } from '../../orders/services/order-pricing.service.js';
+import {
+    checkSchedule,
+    describeConditions,
+    describeDiscount,
+    offerLifecycle,
+} from '../../shared/offerRules.js';
 
 const normalizeName = (value) =>
     String(value || '')
@@ -2079,10 +2085,13 @@ export const listPublicOffers = async (query = {}) => {
         }
     }
 
-    const list = await prisma.foodOffer.findMany({
+    const listAll = await prisma.foodOffer.findMany({
         where: filter,
         orderBy: { createdAt: 'desc' },
     });
+    // A lunch-only code is not shown at dinner: checkout would refuse it, and
+    // advertising a coupon that fails at the till is worse than not showing it.
+    const list = listAll.filter((o) => checkSchedule(o, now).ok);
 
     // restaurantIds is a plain array column, so the second .populate() has no
     // relation to walk. Every named restaurant across every offer is fetched
@@ -2151,6 +2160,14 @@ export const listPublicOffers = async (query = {}) => {
             endDate: o.endDate || null,
             showInCart: o.showInCart !== false,
             minOrderValue: Number(o.minOrderValue) || 0,
+            // "50% OFF up to ₹100" and ["on orders above ₹199", "Mon-Fri", ...],
+            // worded once in offerRules so every screen says the same thing.
+            headline: describeDiscount(o),
+            conditions: describeConditions(o),
+            activeDays: o.activeDays || [],
+            activeFromTime: o.activeFromTime || null,
+            activeToTime: o.activeToTime || null,
+            newToRestaurantOnly: o.newToRestaurantOnly === true,
         };
     });
 
@@ -2179,95 +2196,238 @@ export const getRestaurantComplaints = async (restaurantId, query = {}) => {
 
 
 /**
+ * The columns a restaurant-created offer is written with, from a validated
+ * payload. Create and edit share it so an edit cannot quietly widen an offer
+ * past what creating one allows.
+ *
+ * A restaurant always funds its own offer, only for itself, and cannot aim it at
+ * named customers -- it has no way to know customer ids, and a platform-wide
+ * allow-list is the admin's tool.
+ */
+const restaurantOfferData = (restaurantId, payload) => {
+    if (payload.customerScope === 'specific') {
+        throw new ValidationError('Restaurant coupons can be for everyone, first orders, or new customers');
+    }
+    return {
+        couponCode: payload.couponCode,
+        discountType: payload.discountType,
+        discountValue: payload.discountValue,
+        customerScope: payload.customerScope || 'all',
+        customerIds: [],
+        restaurantScope: 'selected',
+        restaurantId: String(restaurantId),
+        restaurantIds: [String(restaurantId)],
+        minOrderValue: payload.minOrderValue ?? 0,
+        maxDiscount: payload.maxDiscount ?? null,
+        usageLimit: payload.usageLimit ?? null,
+        perUserLimit: payload.perUserLimit ?? null,
+        startDate: payload.startDate ?? null,
+        endDate: payload.endDate ?? null,
+        isFirstOrderOnly: payload.isFirstOrderOnly ?? false,
+        activeDays: payload.activeDays ?? [],
+        activeFromTime: payload.activeFromTime ?? null,
+        activeToTime: payload.activeToTime ?? null,
+        newToRestaurantOnly: payload.newToRestaurantOnly === true,
+        createdByRole: 'RESTAURANT',
+        // A restaurant-funded offer: the platform contributes nothing.
+        adminBearPercentage: 0,
+        restaurantBearPercentage: 100,
+    };
+};
+
+const OWNED_BY = (restaurantId, offerId) => ({
+    id: String(offerId),
+    restaurantId: String(restaurantId),
+    createdByRole: 'RESTAURANT',
+});
+
+/** Orders that count toward an offer's results: placed, paid for, not cancelled. */
+const COUNTED_ORDER_STATUSES = {
+    notIn: ['pending_payment', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'],
+};
+
+/**
  * Create a new offer for a restaurant.
  */
-export async function createRestaurantOffer(restaurantId, body) {
+export async function createRestaurantOffer(restaurantId, payload) {
+    const data = restaurantOfferData(restaurantId, payload);
     try {
         return await prisma.foodOffer.create({
             data: {
-                couponCode: body.couponCode,
-                discountType: body.discountType,
-                discountValue: body.discountValue,
-                customerScope: body.customerScope || 'all',
-                restaurantScope: 'selected',
-                restaurantId: String(restaurantId),
-                minOrderValue: body.minOrderValue ?? 0,
-                maxDiscount: body.maxDiscount ?? null,
-                usageLimit: body.usageLimit ?? null,
-                perUserLimit: body.perUserLimit ?? null,
-                startDate: body.startDate ? new Date(body.startDate) : null,
-                endDate: body.endDate ? new Date(body.endDate) : null,
-                isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                ...data,
+                showInCart: true,
                 // An offer created already expired starts inactive rather than
                 // appearing live for the instant before a job catches it.
-                status:
-                    body.endDate && new Date(body.endDate).getTime() <= Date.now()
-                        ? 'inactive'
-                        : 'active',
-                showInCart: true,
-                createdByRole: 'RESTAURANT',
-                // A restaurant-funded offer: the platform contributes nothing.
-                adminBearPercentage: 0,
-                restaurantBearPercentage: 100,
+                status: data.endDate && new Date(data.endDate).getTime() <= Date.now() ? 'inactive' : 'active',
             },
         });
     } catch (error) {
         // couponCode is unique in the database. Checking first and then
         // inserting let two restaurants claim the same code concurrently.
-        if (error?.code === 'P2002') throw new ValidationError('Coupon code already exists');
+        if (error?.code === 'P2002') throw new ValidationError('That coupon code is already taken. Try another.');
         throw error;
     }
 }
 
 /**
- * List offers for a specific restaurant.
+ * Edit an offer the restaurant owns.
+ *
+ * The code is fixed once anyone has redeemed it: customers were told that code,
+ * and it is what past orders are recorded under, so renaming it would orphan
+ * the offer's own history.
  */
-export async function listRestaurantOffers(restaurantId) {
-    const list = await prisma.foodOffer.findMany({
-        where: { restaurantId: String(restaurantId), restaurantScope: 'selected' },
-        orderBy: { createdAt: 'desc' },
+export async function updateRestaurantOffer(restaurantId, offerId, payload) {
+    if (!isId(offerId)) throw new NotFoundError('Offer not found or not owned by you');
+    const existing = await prisma.foodOffer.findFirst({
+        where: OWNED_BY(restaurantId, offerId),
+        select: { id: true, couponCode: true, usedCount: true },
     });
+    if (!existing) throw new NotFoundError('Offer not found or not owned by you');
 
-    return list.map((offer) => ({ ...offer, id: offer.id, offerId: offer.id }));
+    const data = restaurantOfferData(restaurantId, payload);
+    if (Number(existing.usedCount) > 0 && data.couponCode !== existing.couponCode) {
+        throw new ValidationError('The code cannot be changed after customers have used it');
+    }
+    if (Number(data.usageLimit) > 0 && Number(existing.usedCount) > Number(data.usageLimit)) {
+        throw new ValidationError(`It has already been used ${existing.usedCount} times; set the total limit to at least that`);
+    }
+
+    try {
+        const { count } = await prisma.foodOffer.updateMany({ where: OWNED_BY(restaurantId, offerId), data });
+        if (count === 0) throw new NotFoundError('Offer not found or not owned by you');
+    } catch (error) {
+        if (error?.code === 'P2002') throw new ValidationError('That coupon code is already taken. Try another.');
+        throw error;
+    }
+    return getRestaurantOffer(restaurantId, offerId);
 }
 
 /**
- * Delete a restaurant offer.
+ * Results for a set of offers: how often each was redeemed, by how many
+ * customers, what it cost the restaurant and what it sold.
+ */
+const offerResults = async (restaurantId, offers) => {
+    if (!offers.length) return new Map();
+    const codes = offers.map((o) => o.couponCode);
+    const [orders, customers] = await Promise.all([
+        prisma.foodOrder.groupBy({
+            by: ['couponCode'],
+            where: {
+                restaurantId: String(restaurantId),
+                couponCode: { in: codes },
+                discount: { gt: 0 },
+                orderStatus: COUNTED_ORDER_STATUSES,
+            },
+            _count: { _all: true },
+            _sum: { discount: true, subtotal: true },
+        }),
+        prisma.foodOfferUsage.groupBy({
+            by: ['offerId'],
+            where: { offerId: { in: offers.map((o) => o.id) } },
+            _count: { _all: true },
+        }),
+    ]);
+    const byCode = new Map(orders.map((r) => [r.couponCode, r]));
+    const customersByOffer = new Map(customers.map((r) => [r.offerId, r._count._all]));
+    return new Map(offers.map((o) => {
+        const row = byCode.get(o.couponCode);
+        return [o.id, {
+            orders: row?._count?._all || 0,
+            customers: customersByOffer.get(o.id) || 0,
+            discountGiven: Math.round((Number(row?._sum?.discount) || 0) * 100) / 100,
+            sales: Math.round((Number(row?._sum?.subtotal) || 0) * 100) / 100,
+        }];
+    }));
+};
+
+const presentOffer = (offer, results, now = new Date()) => ({
+    ...offer,
+    id: offer.id,
+    offerId: offer.id,
+    state: offerLifecycle(offer, now),
+    headline: describeDiscount(offer),
+    conditions: describeConditions(offer),
+    results: results || { orders: 0, customers: 0, discountGiven: 0, sales: 0 },
+    // Deleting is only for mistakes; a used offer is ended instead, so its
+    // results stay on the books.
+    canDelete: Number(offer.usedCount) === 0,
+    canChangeCode: Number(offer.usedCount) === 0,
+});
+
+/**
+ * List offers for a specific restaurant, with how each is doing.
+ */
+export async function listRestaurantOffers(restaurantId) {
+    const list = await prisma.foodOffer.findMany({
+        where: { restaurantId: String(restaurantId), restaurantScope: 'selected', createdByRole: 'RESTAURANT' },
+        orderBy: { createdAt: 'desc' },
+    });
+    const results = await offerResults(restaurantId, list);
+    const now = new Date();
+    return list.map((offer) => presentOffer(offer, results.get(offer.id), now));
+}
+
+/**
+ * One offer the restaurant owns, for the edit screen.
+ */
+export async function getRestaurantOffer(restaurantId, offerId) {
+    if (!isId(offerId)) throw new NotFoundError('Offer not found or not owned by you');
+    const offer = await prisma.foodOffer.findFirst({ where: OWNED_BY(restaurantId, offerId) });
+    if (!offer) throw new NotFoundError('Offer not found or not owned by you');
+    const results = await offerResults(restaurantId, [offer]);
+    return presentOffer(offer, results.get(offer.id));
+}
+
+/**
+ * Delete a restaurant offer that nobody has used.
  */
 export async function deleteRestaurantOffer(restaurantId, offerId) {
     if (!isId(offerId)) throw new NotFoundError('Offer not found or not owned by you');
 
-    // The ownership clause is part of the delete, not a lookup before it, so a
-    // restaurant cannot delete another's offer by racing the check.
+    // Ownership and never-used are part of the delete itself, so an order
+    // redeeming the code between a check and the delete cannot leave orders
+    // pointing at an offer that no longer exists.
     const { count } = await prisma.foodOffer.deleteMany({
-        where: {
-            id: String(offerId),
-            restaurantId: String(restaurantId),
-            createdByRole: 'RESTAURANT',
-        },
+        where: { ...OWNED_BY(restaurantId, offerId), usedCount: 0 },
     });
-    if (count === 0) throw new NotFoundError('Offer not found or not owned by you');
+    if (count === 0) {
+        const exists = await prisma.foodOffer.findFirst({
+            where: OWNED_BY(restaurantId, offerId),
+            select: { usedCount: true },
+        });
+        if (exists) {
+            const n = Number(exists.usedCount);
+            throw new ValidationError(`This offer has been used ${n} time${n === 1 ? '' : 's'}. End it instead, so its results are kept.`);
+        }
+        throw new NotFoundError('Offer not found or not owned by you');
+    }
     return true;
 }
 
 /**
- * Toggle status of a restaurant offer.
+ * Pause, resume or end a restaurant offer.
  */
 export async function updateRestaurantOfferStatus(restaurantId, offerId, status) {
     const allowedStatus = ['active', 'paused', 'inactive'];
     if (!allowedStatus.includes(status)) throw new ValidationError('Invalid status');
     if (!isId(offerId)) throw new NotFoundError('Offer not found or not owned by you');
 
-    const where = {
-        id: String(offerId),
-        restaurantId: String(restaurantId),
-        createdByRole: 'RESTAURANT',
-    };
+    const where = OWNED_BY(restaurantId, offerId);
+    if (status === 'active') {
+        const offer = await prisma.foodOffer.findFirst({ where, select: { endDate: true, usageLimit: true, usedCount: true } });
+        if (!offer) throw new NotFoundError('Offer not found or not owned by you');
+        // Resuming these would show "live" on a code checkout refuses.
+        if (offer.endDate && new Date(offer.endDate).getTime() <= Date.now()) {
+            throw new ValidationError('This offer has ended. Edit it and set a later end date to run it again.');
+        }
+        if (Number(offer.usageLimit) > 0 && Number(offer.usedCount) >= Number(offer.usageLimit)) {
+            throw new ValidationError('This offer has reached its redemption limit. Raise the limit to run it again.');
+        }
+    }
 
     const { count } = await prisma.foodOffer.updateMany({ where, data: { status } });
     if (count === 0) throw new NotFoundError('Offer not found or not owned by you');
-
-    return prisma.foodOffer.findUnique({ where: { id: String(offerId) } });
+    return getRestaurantOffer(restaurantId, offerId);
 }
 
 /**

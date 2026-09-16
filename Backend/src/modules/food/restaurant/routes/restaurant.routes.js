@@ -25,7 +25,9 @@ import {
     createRestaurantOfferController,
     listRestaurantOffersController,
     deleteRestaurantOfferController,
-    updateRestaurantOfferStatusController
+    updateRestaurantOfferStatusController,
+    getRestaurantOfferController,
+    updateRestaurantOfferController,
 } from '../controllers/restaurantOffer.controller.js';
 import {
     createRestaurantSupportTicketController,
@@ -299,6 +301,8 @@ router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurant
 router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);
 router.post('/my-offers', authMiddleware, requireRestaurant, createRestaurantOfferController);
 router.patch('/my-offers/:id/status', authMiddleware, requireRestaurant, updateRestaurantOfferStatusController);
+router.get('/my-offers/:id', authMiddleware, requireRestaurant, getRestaurantOfferController);
+router.put('/my-offers/:id', authMiddleware, requireRestaurant, updateRestaurantOfferController);
 router.delete('/my-offers/:id', authMiddleware, requireRestaurant, deleteRestaurantOfferController);
 
 export default router;

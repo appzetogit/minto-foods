@@ -10,6 +10,7 @@ import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
+import { checkOfferEligibility, computeOfferDiscount } from '../../shared/offerRules.js';
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -631,6 +632,9 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
 
   let discount = 0;
   let appliedCoupon = null;
+  // Why a code the customer typed did not apply, so the app can say "Add ₹40
+  // more" instead of silently showing no discount.
+  let couponError = null;
   const codeRaw = dto.couponCode
     ? String(dto.couponCode).trim().toUpperCase()
     : "";
@@ -638,83 +642,40 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   if (codeRaw) {
     const now = new Date();
     const offer = await prisma.foodOffer.findUnique({ where: { couponCode: codeRaw } });
-    if (offer) {
-      const offerEnd = offer.endDate ? new Date(offer.endDate) : null;
-      if (offerEnd && offerEnd.getHours() === 0 && offerEnd.getMinutes() === 0) {
-        offerEnd.setHours(23, 59, 59, 999);
-      }
-      const endOk = !offerEnd || now <= offerEnd;
-      const startOk = !offer.startDate || now >= new Date(offer.startDate);
-      const statusOk = offer.status === "active" && offer.showInCart !== false;
-      const selectedRestaurantIds = Array.isArray(offer.restaurantIds) && offer.restaurantIds.length > 0
-        ? offer.restaurantIds
-        : [offer.restaurantId].filter(Boolean);
-      const scopeOk =
-        offer.restaurantScope !== "selected" ||
-        selectedRestaurantIds.some((id) => String(id) === String(dto.restaurantId || ""));
-      const minOk = subtotal >= (Number(offer.minOrderValue) || 0);
-      let usageOk = true;
-      if (
-        Number(offer.usageLimit) > 0 &&
-        Number(offer.usedCount || 0) >= Number(offer.usageLimit)
-      ) {
-        usageOk = false;
-      }
+    const signedIn = isId(userId);
 
-      let perUserOk = true;
-      if (isId(userId) && Number(offer.perUserLimit) > 0) {
-        const usage = await prisma.foodOfferUsage.findUnique({
+    // Each count is fetched only when this offer has a rule that reads it.
+    const [usage, priorOrders, priorOrdersHere] = await Promise.all([
+      offer && signedIn && Number(offer.perUserLimit) > 0
+        ? prisma.foodOfferUsage.findUnique({
           where: { offerId_userId: { offerId: offer.id, userId: String(userId) } },
-        });
-        if (usage && Number(usage.count) >= Number(offer.perUserLimit)) {
-          perUserOk = false;
-        }
-      }
+          select: { count: true },
+        })
+        : null,
+      offer && signedIn && (offer.customerScope === "first_time" || offer.isFirstOrderOnly === true)
+        ? prisma.foodOrder.count({ where: { userId: String(userId) } })
+        : 0,
+      offer && signedIn && offer.newToRestaurantOnly === true && isId(dto.restaurantId)
+        ? prisma.foodOrder.count({ where: { userId: String(userId), restaurantId: String(dto.restaurantId) } })
+        : 0,
+    ]);
 
-      // A coupon issued to named customers is not usable by anyone else, even
-      // if they somehow learn the code -- which is the whole point of issuing
-      // one. An anonymous cart fails this too: without a user there is nobody
-      // to match against the list.
-      let audienceOk = true;
-      if (offer.customerScope === 'specific') {
-        const allowList = Array.isArray(offer.customerIds) ? offer.customerIds.map(String) : [];
-        audienceOk = isId(userId) && allowList.includes(String(userId));
-      }
+    const verdict = checkOfferEligibility({
+      offer,
+      subtotal,
+      restaurantId: dto.restaurantId,
+      userId: signedIn ? String(userId) : null,
+      now,
+      usageCount: Number(usage?.count) || 0,
+      priorOrders,
+      priorOrdersHere,
+    });
 
-      let firstOrderOk = true;
-      // Both flags mean the same thing — the customer must have no prior orders —
-      // so the count is fetched once instead of twice.
-      if (isId(userId) && (offer.customerScope === 'first_time' || offer.isFirstOrderOnly === true)) {
-        const priorOrders = await prisma.foodOrder.count({ where: { userId: String(userId) } });
-        firstOrderOk = priorOrders === 0;
-      }
-
-      const allowed =
-        statusOk &&
-        startOk &&
-        endOk &&
-        scopeOk &&
-        minOk &&
-        usageOk &&
-        perUserOk &&
-        audienceOk &&
-        firstOrderOk;
-
-      if (allowed) {
-        if (offer.discountType === "percentage") {
-          const raw = subtotal * (Number(offer.discountValue) / 100);
-          const capped = Number(offer.maxDiscount)
-            ? Math.min(raw, Number(offer.maxDiscount))
-            : raw;
-          discount = Math.max(0, Math.min(subtotal, Math.floor(capped)));
-        } else {
-          discount = Math.max(
-            0,
-            Math.min(subtotal, Math.floor(Number(offer.discountValue) || 0)),
-          );
-        }
-        appliedCoupon = { code: codeRaw, discount };
-      }
+    if (verdict.ok) {
+      discount = computeOfferDiscount(offer, subtotal);
+      appliedCoupon = { code: codeRaw, discount };
+    } else {
+      couponError = { code: verdict.code, message: verdict.message };
     }
   }
 
@@ -756,6 +717,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     currency: "INR",
     couponCode: appliedCoupon?.code || codeRaw || null,
     appliedCoupon,
+    couponError,
     distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     roadDistanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
     straightLineDistanceKm: Number.isFinite(straightLineKm)
