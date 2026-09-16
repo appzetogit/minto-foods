@@ -11,6 +11,22 @@ import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outl
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
 import { checkOfferEligibility, computeOfferDiscount } from '../../shared/offerRules.js';
+import { getTipSettings } from '../../admin/services/tip.service.js';
+
+/**
+ * Whether a tip given at checkout is allowed. Pure, so it is tested without a
+ * database; the after-delivery path applies the same two rules.
+ */
+export const checkCheckoutTip = (amount, settings = {}) => {
+  const tip = Number(amount) || 0;
+  if (tip <= 0) return { ok: true };
+  if (settings.tipsEnabled === false) return { ok: false, message: 'Tipping is switched off' };
+  const ceiling = Number(settings.tipMaxAmount);
+  if (Number.isFinite(ceiling) && ceiling > 0 && tip > ceiling) {
+    return { ok: false, message: `The most you can tip is \u20b9${ceiling}` };
+  }
+  return { ok: true };
+};
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -692,6 +708,12 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   // The tip is the customer's money for the rider: added to what they pay, and
   // never folded into a fee, so it cannot be mistaken for platform income.
   const tipAmount = Math.max(0, round2(Number(dto?.tipAmount) || 0));
+  if (tipAmount > 0) {
+    // The same rules the after-delivery tip enforces. Settings are only read
+    // when a tip is actually being added, so an untipped cart costs nothing.
+    const verdict = checkCheckoutTip(tipAmount, await getTipSettings());
+    if (!verdict.ok) throw new ValidationError(verdict.message);
+  }
 
   const total = round2(
     Math.max(

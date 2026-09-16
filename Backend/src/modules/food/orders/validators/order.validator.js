@@ -76,6 +76,9 @@ export function validateCalculateOrderDto(body) {
         deliveryAddressId: z.string().optional(),
         zoneId: z.string().optional(),
         couponCode: z.string().optional(),
+        // Zod drops keys a schema does not name. Without this line the tip
+        // was silently removed before pricing ever saw it.
+        tipAmount: z.number().min(0, 'Tip cannot be negative').optional(),
         deliveryFleet: z.string().optional(),
         deliveryMode: z.enum(['basic', 'quick']).optional(),
         deliveryAddress: z
@@ -109,6 +112,7 @@ export function validateCreateOrderDto(body) {
         customerName: z.string().optional(),
         customerPhone: z.string().optional(),
         pricing: pricingSchema,
+        tipAmount: z.number().min(0, 'Tip cannot be negative').optional(),
         deliveryFleet: z.string().optional(),
         note: z.string().optional(),
         deliveryInstructions: z.string().optional(),

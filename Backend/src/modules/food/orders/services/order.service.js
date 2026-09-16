@@ -498,6 +498,7 @@ export async function createOrder(userId, dto) {
         items: dto.items || [],
         deliveryAddress,
         couponCode: dto.pricing?.couponCode || undefined,
+        tipAmount: dto.tipAmount,
         deliveryMode: dto.deliveryMode || "basic",
       },
       { at: orderAt, restaurant, skipAvailabilityCheck: true },
