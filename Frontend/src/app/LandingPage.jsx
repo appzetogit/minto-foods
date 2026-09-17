@@ -282,7 +282,7 @@ export default function LandingPage() {
 
             <div className="overflow-hidden mt-4 lg:mt-6 max-w-xl">
               <motion.p custom={3} initial="hidden" animate="visible" variants={textReveal} className="text-base lg:text-lg text-slate-600 font-light leading-relaxed">
-                Minto Foods is a next-generation food delivery platform built with a mission to create fairness and transparency in the food ecosystem. Unlike traditional platforms, we operate on a lifetime 0% commission model, ensuring that restaurant partners keep every hard-earned penny of their revenue.
+                Minto Foods is a next-generation food delivery platform built with a mission to create fairness and transparency in the food ecosystem. We give restaurant partners transparent, flexible billing: a per-order commission or a fixed monthly plan, so they always know what they pay.
               </motion.p>
             </div>
 
@@ -351,7 +351,7 @@ export default function LandingPage() {
               Empowering partners, <br /><span className="italic text-slate-500 font-light">restoring trust.</span>
             </h3>
             <p className="text-lg md:text-xl text-slate-600 leading-relaxed font-light max-w-lg">
-              Unlike traditional delivery apps that squeeze restaurant margins, Minto Foods works on a lifetime 0% commission model. We believe in creating a balanced, fair, and growth-oriented food ecosystem.
+              Minto Foods offers restaurants a choice of billing: a per-order commission, or a fixed monthly subscription instead. We believe in creating a balanced, fair, and growth-oriented food ecosystem.
             </p>
             <div className="pt-2">
               <button
@@ -363,12 +363,12 @@ export default function LandingPage() {
             </div>
             <div className="pt-8 grid grid-cols-2 gap-8 border-t border-slate-200">
               <div>
-                <p className="text-4xl font-black text-slate-950">0%</p>
-                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mt-2">Lifetime Commission</p>
+                <p className="text-4xl font-black text-slate-950">2</p>
+                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mt-2">Billing Plans</p>
               </div>
               <div>
-                <p className="text-4xl font-black text-slate-950">100%</p>
-                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mt-2">Revenue Retained</p>
+                <p className="text-4xl font-black text-slate-950">3</p>
+                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mt-2">Live Hubs</p>
               </div>
             </div>
           </div>
@@ -794,7 +794,7 @@ export default function LandingPage() {
                 <div>
                   <h4 className="font-bold text-slate-900 mb-1">Indore Launchpad (Active)</h4>
                   <p className="text-sm text-slate-500 font-light">
-                    Our central headquarters and active delivery operations. Reclaiming restaurant revenues with 0% lifetime commission.
+                    Our first live delivery hub, alongside Vapi and Bhiwandi.
                   </p>
                 </div>
               </div>
@@ -806,7 +806,7 @@ export default function LandingPage() {
                 <div>
                   <h4 className="font-bold text-slate-900 mb-1">Empowering Tier 2 & 3 Cities</h4>
                   <p className="text-sm text-slate-500 font-light">
-                    Taking modern, commission-free food commerce to growing towns and communities that traditional giants ignore or overcharge.
+                    Bringing modern food delivery, with clear and flexible restaurant billing, to growing towns and communities.
                   </p>
                 </div>
               </div>
@@ -1156,15 +1156,15 @@ export default function LandingPage() {
               {/* Dynamic Value Story Grid */}
               <div className="grid md:grid-cols-2 gap-8 lg:gap-12 shrink-0">
 
-                {/* Story Card 1: 0% Commission */}
+                {/* Story Card 1: Flexible billing */}
                 <div className="group bg-white border border-slate-200/60 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
                   <div>
                     <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Percent className="w-7 h-7" />
                     </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Lifetime 0% Commission</h3>
+                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Flexible, Transparent Billing</h3>
                     <p className="text-slate-600 font-light leading-relaxed">
-                      We operate on a lifetime 0% commission model. This ensures that our restaurant partners keep every hard-earned penny of their revenue, giving them the financial breathing room to grow, sustain jobs, and thrive in a digital economy.
+                      Restaurants choose how they pay: a per-order commission, or a fixed monthly subscription instead. Every charge is shown upfront, giving partners the clarity to plan, grow, sustain jobs, and thrive in a digital economy.
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
@@ -1299,11 +1299,11 @@ export default function LandingPage() {
                   <Store className="w-4 h-4 text-[#008078]" /> Restaurant Empowerment Initiative
                 </span>
                 <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-slate-900">
-                  Earn Commission-Free. <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-[#E02477] font-extrabold italic font-light">Reclaim 100% of Your Revenue.</span>
+                  Grow Your Restaurant. <br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-[#E02477] font-extrabold italic font-light">Pay the Way That Suits You.</span>
                 </h1>
                 <p className="text-xl text-slate-700 font-light leading-relaxed max-w-3xl mx-auto">
-                  Say goodbye to standard 25%-30% commissions that wipe out restaurant profit margins. With Minto Foods, you gain access to a powerful digital ordering system on a <strong>lifetime 0% commission model</strong>.
+                  With Minto Foods, you gain access to a powerful digital ordering system with <strong>flexible billing</strong>: a per-order commission, or a fixed monthly plan instead.
                 </p>
               </div>
 
@@ -1317,7 +1317,7 @@ export default function LandingPage() {
                   </div>
                   <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Setup Your Live Digital Kitchen</h2>
                   <p className="text-slate-400 font-light max-w-xl leading-relaxed text-sm md:text-base">
-                    Register your business profile, customize your digital menu, and start receiving commission-free orders directly on your phone or tablet in minutes.
+                    Register your business profile, customize your digital menu, and start receiving orders directly on your phone or tablet in minutes.
                   </p>
 
                   <div className="flex flex-col sm:flex-row gap-4 pt-2">
@@ -1348,14 +1348,14 @@ export default function LandingPage() {
                     {/* Middle: Comparison metric */}
                     <div className="grid grid-cols-2 gap-3 py-2 flex-1 items-center">
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-center">
-                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">With Minto Foods</div>
+                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Today&apos;s Sales</div>
                         <div className="text-sm font-black text-[#008078] mt-0.5">₹18,450.00</div>
-                        <div className="text-[7px] text-slate-400 mt-0.5">0% Commission Paid</div>
+                        <div className="text-[7px] text-slate-400 mt-0.5">42 orders</div>
                       </div>
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-center relative opacity-80">
-                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Traditional Apps</div>
-                        <div className="text-sm font-black text-slate-400 mt-0.5 line-through">₹12,915.00</div>
-                        <div className="text-[7px] text-[#008078] mt-0.5 font-bold">30% Aggregator Cut</div>
+                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Avg. Order</div>
+                        <div className="text-sm font-black text-slate-300 mt-0.5">₹439.29</div>
+                        <div className="text-[7px] text-[#008078] mt-0.5 font-bold">Today</div>
                       </div>
                     </div>
 
@@ -1376,9 +1376,9 @@ export default function LandingPage() {
                     <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
                       <Percent className="w-7 h-7" />
                     </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Lifetime 0% Commission</h3>
+                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Choose Your Billing Plan</h3>
                     <p className="text-slate-600 font-light leading-relaxed">
-                      Every order processed through our platform incurs exactly 0% commission. You keep 100% of your earnings to scale your business, hire culinary talents, and maintain operational margins.
+                      Pay a per-order commission, or switch to a fixed monthly subscription instead. Every charge is visible in your dashboard, so you can scale your business, hire culinary talent, and plan your margins.
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
