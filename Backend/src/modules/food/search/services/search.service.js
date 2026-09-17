@@ -1,10 +1,13 @@
 import { prisma } from '../../../../config/prisma.js';
+import { loadRadiusSettings, withinDeliveryRadius } from '../../shared/deliveryRadius.js';
 import { isId } from '../../../../utils/helpers.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
 
 /** Columns the search cards need, plus the address columns toRestaurant() rebuilds `location` from. */
 const RESTAURANT_SEARCH_SELECT = {
+    // Read to apply the delivery radius, and removed before the response.
+    deliveryRadiusKm: true,
     id: true, restaurantName: true, restaurantNameNormalized: true,
     cuisines: true, profileImage: true, coverImages: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
@@ -179,6 +182,16 @@ export const searchUnified = async (query = {}, options = {}) => {
 
     let results = [...found.values()];
 
+    // Search surfaces restaurants the feed would hide just as easily, so a
+    // located search respects the same delivery radius.
+    if (hasGeoSorting && results.length) {
+        const radius = await loadRadiusSettings();
+        if (radius.inForce) {
+            results = results.filter((r) =>
+                withinDeliveryRadius(r, userLat, userLng, radius.platformRadiusKm));
+        }
+    }
+
     if (hasGeoSorting && results.length) {
         results = results
             .map((restaurant) => addDistanceScore(restaurant, userLat, userLng))
@@ -189,7 +202,9 @@ export const searchUnified = async (query = {}, options = {}) => {
         success: true,
         data: {
             // toRestaurant rebuilds the nested `location` the cards read.
-            restaurants: results.slice(skip, skip + limitNumber).map(toRestaurant),
+            restaurants: results
+                .slice(skip, skip + limitNumber)
+                .map(({ deliveryRadiusKm, ...restaurant }) => toRestaurant(restaurant)),
             total: results.length,
             page: pageNumber,
             limit: limitNumber,

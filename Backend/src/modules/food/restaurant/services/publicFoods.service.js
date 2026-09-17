@@ -6,6 +6,7 @@ import {
     serializeFoodVariants,
 } from '../../admin/services/foodVariant.service.js';
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
+import { loadRadiusSettings, withinDeliveryRadius } from '../../shared/deliveryRadius.js';
 
 const buildCategoryKeywords = (categorySlug) => {
     const raw = String(categorySlug || '').trim().toLowerCase();
@@ -25,7 +26,7 @@ export async function listPublicFoods(query = {}) {
     const promo = String(query.promo || query.promoSlug || '').trim().toLowerCase();
     const isSwitch99Promo = promo === 'switch99' || promo === 'under-250' || promo === 'under250';
 
-    const restaurants = await prisma.foodRestaurant.findMany({
+    let restaurants = await prisma.foodRestaurant.findMany({
         where: {
             status: 'approved',
             ...(isId(zoneIdRaw) ? { zoneId: zoneIdRaw } : {}),
@@ -37,8 +38,21 @@ export async function listPublicFoods(query = {}) {
             latitude: true, longitude: true,
             coverImages: true, menuImages: true,
             isAcceptingOrders: true, openDays: true, openingTime: true, closingTime: true,
+            deliveryRadiusKm: true,
         },
     });
+
+    // A dish is only worth showing if its restaurant delivers to the customer.
+    // Applied when the app sends a location and a radius is set anywhere.
+    const lat = Number(query.lat);
+    const lng = Number(query.lng);
+    if (query.lat != null && query.lng != null && Number.isFinite(lat) && Number.isFinite(lng) && restaurants.length) {
+        const radius = await loadRadiusSettings();
+        if (radius.inForce) {
+            restaurants = restaurants.filter((r) =>
+                withinDeliveryRadius(r, lat, lng, radius.platformRadiusKm));
+        }
+    }
 
     if (!restaurants.length) return { foods: [], total: 0 };
 
