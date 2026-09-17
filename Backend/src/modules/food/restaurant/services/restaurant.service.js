@@ -2081,7 +2081,10 @@ export const listPublicOffers = async (query = {}) => {
     if (subtotal !== undefined && subtotal !== null && subtotal !== '' && Number.isFinite(Number(subtotal))) {
         const numericSubtotal = Math.min(Number(subtotal), 10_000_000);
         if (numericSubtotal > 0) {
-            filter.AND.push({ OR: [{ minOrderValue: null }, { minOrderValue: { lte: numericSubtotal } }] });
+            // minOrderValue is never null (it defaults to 0), and Prisma refuses a
+            // null test on a required column -- which failed every request that
+            // passed a subtotal. "No minimum" is simply 0, which lte already covers.
+            filter.AND.push({ minOrderValue: { lte: numericSubtotal } });
         }
     }
 
