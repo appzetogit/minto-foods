@@ -1,6 +1,7 @@
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { MAX_UPLOAD_MB } from './upload.js';
+import { toPublicError } from '../utils/publicError.js';
 
 const errorHandler = (err, req, res, next) => {
     let statusCode = err.statusCode || 500;
@@ -29,10 +30,24 @@ const errorHandler = (err, req, res, next) => {
 
     const requestId = req.requestId || '-';
 
-    logger.error(
-        `[${requestId}] ${req.method} ${req.originalUrl} ${statusCode} - ${err.name || 'Error'} - ${message}`
-    );
-    if (config.nodeEnv === 'development' && err.stack) {
+    // Upload errors above are already worded for people. Anything else passes
+    // through toPublicError: errors raised on purpose keep their message, and
+    // unexpected ones -- a failed query, a crash -- are withheld from the
+    // response and logged in full here instead.
+    let internal = false;
+    if (err.name !== 'MulterError') {
+        const pub = toPublicError(err);
+        internal = pub.internal;
+        logger.error(
+            `[${requestId}] ${req.method} ${req.originalUrl} ${pub.statusCode} - ${err.name || 'Error'} - ${message}`
+        );
+        statusCode = pub.statusCode;
+        message = pub.message;
+    } else {
+        logger.error(`[${requestId}] ${req.method} ${req.originalUrl} ${statusCode} - ${err.name} - ${message}`);
+    }
+    // A withheld error is only useful to whoever fixes it if its stack is kept.
+    if ((internal || config.nodeEnv === 'development') && err.stack) {
         logger.error(`[${requestId}] ${err.stack}`);
     }
 
@@ -42,6 +57,8 @@ const errorHandler = (err, req, res, next) => {
         // data.message see thrown-error text (ValidationError, NotFoundError, ...) too.
         message,
         error: message, // retained for clients already reading this key
+        // A reference the person can quote, which finds the full error in the log.
+        ...(internal ? { requestId } : {}),
         ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {})
     });
 };
