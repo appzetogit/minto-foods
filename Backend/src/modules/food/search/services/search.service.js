@@ -74,9 +74,14 @@ export const searchUnified = async (query = {}, options = {}) => {
     const where = { status: 'approved' };
     if (zoneFiltered) where.zoneId = String(zoneId);
     if (isVeg === 'true') where.pureVegRestaurant = true;
-    if (minRating) where.rating = { gte: parseFloat(minRating) };
-    if (maxDeliveryTime) {
-        where.estimatedDeliveryTimeMinutes = { lte: parseInt(maxDeliveryTime, 10) };
+    // Filters from the URL are only applied when they are real numbers. A value
+    // like `minRating=abc` used to reach the query as NaN, which the database
+    // rejects, so the whole search failed instead of ignoring one bad filter.
+    const rating = Number.parseFloat(minRating);
+    if (Number.isFinite(rating) && rating > 0) where.rating = { gte: Math.min(rating, 5) };
+    const minutes = Number.parseInt(maxDeliveryTime, 10);
+    if (Number.isFinite(minutes) && minutes > 0) {
+        where.estimatedDeliveryTimeMinutes = { lte: minutes };
     }
 
     // 2. Category filter — restaurants have no category, their dishes do.
