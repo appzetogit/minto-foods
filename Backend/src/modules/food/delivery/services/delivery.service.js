@@ -768,6 +768,11 @@ const toTripDto = (order) => {
         deliveryEarning: earningAmount,
         earningAmount,
         amount: earningAmount, // legacy fallback
+        // The same earning, split: what the trip paid and what the customer
+        // tipped. The rider app already labels a trip "incl. ₹N tip", but trip
+        // history never sent the tip, so the label could not appear.
+        tipAmount: num(order?.tipAmount),
+        deliveryAmount: Math.round((earningAmount - num(order?.tipAmount)) * 100) / 100,
         createdAt: order?.createdAt,
         deliveredAt,
         completedAt: deliveredAt,
