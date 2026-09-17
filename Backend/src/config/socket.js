@@ -3,6 +3,12 @@ import { config } from './env.js';
 import { logger } from '../utils/logger.js';
 import { verifyAccessToken } from '../core/auth/token.util.js';
 import { getFirebaseDB } from './firebase.js';
+import { createRiderFixTracker } from '../modules/food/delivery/services/riderFix.js';
+import { saveRiderPosition } from '../modules/food/delivery/services/riderPosition.service.js';
+
+// One for the process, so a rider who reconnects is judged against where they
+// really were, not a fresh socket that has never seen them.
+const riderFixes = createRiderFixTracker();
 
 let io = null;
 
@@ -254,8 +260,20 @@ export const initSocket = async (server) => {
             const speed = Number.isFinite(Number(data.speed)) ? Number(data.speed) : 0;
             const accuracy = Number.isFinite(Number(data.accuracy)) ? Number(data.accuracy) : null;
 
-            // Throttle: max one broadcast per 2s per orderId
             const now = Date.now();
+
+            // Drop fixes a bike could not have produced -- a 150 m accuracy
+            // reading under a flyover, a jump across town in two seconds --
+            // before they reach the customer's map, Firebase or the database.
+            // Checked before the throttle, so a rejected fix never uses up a
+            // broadcast slot that the next good one needs.
+            const verdict = riderFixes.accept(data.orderId, { lat, lng, accuracy, at: now });
+            if (!verdict.ok) {
+                logger.debug(`Rider fix dropped for order ${data.orderId}: ${verdict.reason} (accuracy ${accuracy ?? 'n/a'})`);
+                return;
+            }
+
+            // Throttle: max one broadcast per 2s per orderId
             const lastTS = _lastLocationBroadcast[data.orderId] || 0;
             if (now - lastTS < 2000) return;
             _lastLocationBroadcast[data.orderId] = now;
@@ -320,6 +338,10 @@ export const initSocket = async (server) => {
                         { userId, orderId: data.orderId }, 
                         { jobId: syncJobId, delay: 30000, removeOnComplete: true }
                     ).catch(e => logger.error(`BullMQ sync schedule failed: ${e.message}`));
+                } else if (riderFixes.shouldSave(data.orderId, now)) {
+                    // No queue to do it: save directly, a few times a minute.
+                    saveRiderPosition({ orderId: data.orderId, riderId: userId, lat, lng, at: new Date(now) })
+                        .catch((e) => logger.error(`Rider position save failed: ${e.message}`));
                 }
             } catch (err) {
                 logger.error(`Real-time persistence layer error: ${err.message}`);
