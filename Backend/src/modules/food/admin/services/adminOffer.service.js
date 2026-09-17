@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
@@ -158,7 +159,7 @@ export async function createAdminOffer(body = {}) {
                 {
                     title: 'New Campaign Invitation!',
                     body: `You have been invited to join a new campaign: "${offer.couponCode}". Check it out now!`,
-                    image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                    image: BRAND_IMAGE_URL,
                     data: {
                         type: 'campaign_invitation',
                         offerId: offer.id,

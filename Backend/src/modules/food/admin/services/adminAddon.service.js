@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
@@ -183,7 +184,7 @@ export async function approveRestaurantAddon(addonId) {
             {
                 title: 'Addon Approved!',
                 body: `Your addon "${updated.published?.name || 'New Addon'}" has been approved and is now live.`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: BRAND_IMAGE_URL,
                 data: {
                     type: 'addon_approved',
                     addonId: updated.id,
@@ -223,7 +224,7 @@ export async function rejectRestaurantAddon(addonId, reason) {
             {
                 title: 'Addon Rejected',
                 body: `Your addon request for "${updated.draft?.name || 'New Addon'}" was rejected. Reason: ${rejectionReason}`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: BRAND_IMAGE_URL,
                 data: {
                     type: 'addon_rejected',
                     addonId: updated.id,

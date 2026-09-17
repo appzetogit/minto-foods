@@ -1,4 +1,5 @@
 import { logger } from '../../../../utils/logger.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -18,7 +19,6 @@ import {
  * with an `entityType` discriminator.
  */
 
-const FALLBACK_IMAGE = 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png';
 
 /** The short id the approval table shows instead of the full 24 characters. */
 const toRestaurantDisplayId = (id) => {
@@ -163,7 +163,7 @@ const decideFoodItem = async (id, decision, reason = '') => {
             body: approved
                 ? `Your dish "${food.name}" has been approved and is now visible to customers.`
                 : `Your dish "${food.name}" was rejected. Reason: ${reason}`,
-            image: food.image || FALLBACK_IMAGE,
+            image: food.image || BRAND_IMAGE_URL,
             data: {
                 type: approved ? 'food_approved' : 'food_rejected',
                 foodId: food.id,

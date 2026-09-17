@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
@@ -206,7 +207,7 @@ export async function addDeliveryPartnerBonus(body, adminUser) {
             {
                 title: 'Bonus Credited!',
                 body: `You have received a bonus of ₹${amountToCredit}. ${body.reference || 'Great job!'}`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: BRAND_IMAGE_URL,
                 data: {
                     type: 'bonus_credited',
                     amount: String(amountToCredit),

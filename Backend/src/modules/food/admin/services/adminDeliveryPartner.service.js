@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { isId } from '../../../../utils/helpers.js';
 import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
@@ -469,7 +470,7 @@ export async function approveDeliveryPartner(id) {
             {
                 title: 'Welcome Aboard!',
                 body: 'Your delivery partner application has been approved. You can now go online and start earning!',
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: BRAND_IMAGE_URL,
                 data: {
                     type: 'delivery_partner_approved',
                     eventType: 'delivery_partner_approved',
@@ -507,7 +508,7 @@ export async function rejectDeliveryPartner(id, reason) {
             {
                 title: 'Onboarding Update',
                 body: `Your application to join as a delivery partner was rejected. Reason: ${rejectionReason || 'Incomplete documents'}.`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: BRAND_IMAGE_URL,
                 data: {
                     type: 'onboarding_rejected',
                     partnerId: partner.id,

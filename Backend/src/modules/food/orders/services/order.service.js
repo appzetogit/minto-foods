@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
 import { logger } from '../../../../utils/logger.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
@@ -730,7 +731,7 @@ export async function createOrder(userId, dto) {
         await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
           title: "Order Confirmed! 🍔",
           body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.`,
-          image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
+          image: BRAND_IMAGE_URL,
           data: {
             type: "order_created",
             orderId: order.id,
@@ -1424,7 +1425,7 @@ export async function cancelOrder(orderId, userId, reason) {
     {
       title: "Order Cancelled ❌",
       body: `Order #${updated.order_id || updated.id} has been cancelled successfully.${refundDetail}`,
-      image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
+      image: BRAND_IMAGE_URL,
       data: { type: "order_cancelled", orderId: updated.id, orderMongoId: updated.id },
     },
   );
@@ -1881,7 +1882,7 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       void notifyOwnersSafely(notifyList, {
         title,
         body,
-        image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
+        image: BRAND_IMAGE_URL,
         data: {
           type: "order_status_update",
           orderId: updated.id,
@@ -2596,7 +2597,7 @@ export async function processRefundAdmin(orderId, amount, adminId) {
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
       title: "Refund Processed! 💸",
       body: `Your refund of ₹${refundAmount} for Order #${updated.order_id || updated.id} has been processed successfully.`,
-      image: "https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png",
+      image: BRAND_IMAGE_URL,
       data: {
         type: "refund_processed",
         orderId: String(updated.order_id || updated.id),

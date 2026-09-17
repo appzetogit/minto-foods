@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { fromRestaurantLocation, toRestaurant } from '../../restaurant/restaurant.mapper.js';
@@ -206,7 +207,7 @@ export async function approveRestaurant(id) {
             {
                 title: 'Congratulations!',
                 body: `Your restaurant "${updated.restaurantName}" has been approved.`,
-                image: updated.profileImage || 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: updated.profileImage || BRAND_IMAGE_URL,
                 data: { type: 'restaurant_approved', restaurantId: updated.id },
             },
         );
@@ -260,7 +261,7 @@ export async function rejectRestaurant(id, reason) {
             {
                 title: 'Update on Registration',
                 body: `Your restaurant registration for "${updated.restaurantName}" has been rejected. Reason: ${rejectionReason || 'Incomplete documents'}.`,
-                image: 'https://i.ibb.co/5GzXz7r/Switcheats-Brand-Image.png',
+                image: BRAND_IMAGE_URL,
                 data: {
                     type: 'restaurant_rejected',
                     restaurantId: updated.id,

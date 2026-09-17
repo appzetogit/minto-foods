@@ -10,6 +10,34 @@ import {
 import { APP_CONFIG } from "../config/constants"; // Adjust path if needed
 import apiClient, { restaurantAPI } from "../services/api";
 
+// Minto's own store listings and social pages. Empty until they are published:
+// a missing link renders as "Coming soon" instead of sending people somewhere
+// else. These used to point at another company's apps and accounts, left over
+// from the codebase Minto was built from.
+const STORE_LINKS = {
+  customer: { ios: "", android: "" },
+  restaurant: { ios: "", android: "" },
+  delivery: { ios: "", android: "" },
+};
+const SOCIAL_LINKS = [
+  // { network: "instagram", url: "https://www.instagram.com/..." },
+];
+
+function StoreLink({ href, className, children }) {
+  if (!href) {
+    return (
+      <span className={`${className} opacity-60 cursor-default`} aria-disabled="true" title="Coming soon">
+        {children} <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">Soon</span>
+      </span>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+      {children}
+    </a>
+  );
+}
+
 // --- Animation Variants for Cinematic Reveals ---
 const textReveal = {
   hidden: { y: "120%" },
@@ -413,22 +441,12 @@ export default function LandingPage() {
               Live tracking that actually updates. Beautifully designed interface. Zero friction. Download the app to experience food delivery designed for the modern era.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 pt-4">
-              <a
-                href="https://apps.apple.com/in/app/switcheats/id6766444150"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-3 bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md shadow-slate-900/10 cursor-pointer"
-              >
+              <StoreLink href={STORE_LINKS.customer.ios} className="flex items-center justify-center gap-3 bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md shadow-slate-900/10">
                 <Apple className="w-5 h-5" /> App Store
-              </a>
-              <a
-                href="https://play.google.com/store/apps/details?id=com.switcheats.user1"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-sm cursor-pointer"
-              >
+              </StoreLink>
+              <StoreLink href={STORE_LINKS.customer.android} className="flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-sm">
                 <Play className="w-5 h-5" /> Google Play
-              </a>
+              </StoreLink>
             </div>
           </div>
         </div>
@@ -763,7 +781,7 @@ export default function LandingPage() {
                 <span className="text-transparent bg-clip-text bg-gradient-to-br from-slate-900 to-slate-500 italic font-light">Operating.</span>
               </h3>
               <p className="text-lg text-slate-600 font-light leading-relaxed">
-                Starting our journey from the progressive landscape of <strong>Telangana</strong>, Minto Foods is engineered to scale across India, specifically focusing on empowering Tier-2 and Tier-3 cities.
+                Starting our journey from <strong>Indore</strong>, Minto Foods is engineered to scale across India, specifically focusing on empowering Tier-2 and Tier-3 cities.
               </p>
             </div>
 
@@ -774,7 +792,7 @@ export default function LandingPage() {
                   <Award className="w-6 h-6" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-slate-900 mb-1">Telangana Launchpad (Active)</h4>
+                  <h4 className="font-bold text-slate-900 mb-1">Indore Launchpad (Active)</h4>
                   <p className="text-sm text-slate-500 font-light">
                     Our central headquarters and active delivery operations. Reclaiming restaurant revenues with 0% lifetime commission.
                   </p>
@@ -823,14 +841,14 @@ export default function LandingPage() {
                   <span className="text-[10px] uppercase tracking-widest font-black text-slate-400">Live Network Operations</span>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 text-[10px] text-slate-400 font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                  Region: Telangana
+                  Hubs: Indore · Vapi · Bhiwandi
                 </div>
               </div>
 
               {/* The Map Graph Wrapper with Masked Image and Premium Overlays */}
               <div className="relative z-10 flex-1 flex items-center justify-center py-4 overflow-hidden select-none pointer-events-none">
                 <img 
-                  src="/india-map-operations.jpg" 
+                  src="/india-map-operations-minto.jpg" 
                   alt="Minto Foods Operational Map" 
                   className="w-full h-full object-contain filter brightness-110 contrast-105 saturate-110 transform scale-[1.18]"
                   style={{
@@ -841,12 +859,12 @@ export default function LandingPage() {
 
                 {/* Horizontal glowing pointer connector line */}
                 <div 
-                  className="hidden lg:block absolute top-[61.5%] left-[46.8%] w-[10.2%] h-[1.5px] bg-gradient-to-r from-[#008078] to-[#008078]/40 z-20 pointer-events-none"
+                  className="hidden lg:block absolute top-[47.4%] left-[39.6%] w-[17.4%] h-[1.5px] bg-gradient-to-r from-[#008078] to-[#008078]/40 z-20 pointer-events-none"
                   style={{ transform: "translateY(-50%)" }}
                 />
 
-                {/* Animated Pulsing Pin on top of Telangana in the image */}
-                <div className="absolute top-[61.5%] left-[46.8%] -translate-x-1/2 -translate-y-1/2 z-20">
+                {/* Animated pulsing pin on Indore */}
+                <div className="absolute top-[47.4%] left-[39.6%] -translate-x-1/2 -translate-y-1/2 z-20">
                   {/* Super tight ping beacon */}
                   <span className="absolute inline-flex h-5 w-5 -top-2.5 -left-2.5 rounded-full bg-[#008078]/85 animate-ping" />
                   
@@ -855,9 +873,9 @@ export default function LandingPage() {
                 </div>
 
                 {/* Floating Active Info Tag over the beacon, centered above it on mobile, shifted right on desktop */}
-                <div className="absolute top-[61.5%] left-[48%] lg:left-[57%] -translate-x-1/2 lg:translate-x-0 -translate-y-[280%] lg:-translate-y-1/2 bg-slate-900/95 border border-[#008078]/50 text-[9px] font-black text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-2xl shadow-pink-500/20 whitespace-nowrap z-30">
+                <div className="absolute top-[47.4%] left-[39.6%] lg:left-[57%] -translate-x-1/2 lg:translate-x-0 -translate-y-[280%] lg:-translate-y-1/2 bg-slate-900/95 border border-[#008078]/50 text-[9px] font-black text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-2xl shadow-pink-500/20 whitespace-nowrap z-30">
                   <span className="w-2 h-2 rounded-full bg-[#008078] animate-ping" />
-                  TELANGANA (ACTIVE HUB)
+                  INDORE (ACTIVE HUB)
                 </div>
               </div>
 
@@ -999,13 +1017,12 @@ export default function LandingPage() {
               <p className="text-slate-500 text-lg font-light leading-relaxed max-w-sm mb-8">
                 Elevating the dining experience. Premium food delivery for those who expect more.
               </p>
+              {SOCIAL_LINKS.length > 0 && (
               <div className="flex gap-4">
-                {[
-                  { Icon: Facebook, url: "https://www.facebook.com/share/1J8C8U4wnK/?mibextid=wwXIfr" },
-                  { Icon: Youtube, url: "https://youtube.com/@switcheats?si=EzceIs61zBwz3SGO" },
-                  { Icon: Instagram, url: "https://www.instagram.com/switcheats?igsh=MTA3eXJnMTRlMTF5Zw%3D%3D&utm_source=qr" },
-                  { Icon: Linkedin, url: "https://www.linkedin.com/company/switcheats/" }
-                ].map(({ Icon, url }, i) => (
+                {SOCIAL_LINKS.map(({ network, url }) => ({
+                  Icon: { facebook: Facebook, youtube: Youtube, instagram: Instagram, linkedin: Linkedin }[network],
+                  url,
+                })).filter(({ Icon }) => Icon).map(({ Icon, url }, i) => (
                   <a 
                     key={i} 
                     href={url} 
@@ -1017,6 +1034,7 @@ export default function LandingPage() {
                   </a>
                 ))}
               </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-5 text-sm font-medium">
@@ -1178,9 +1196,9 @@ export default function LandingPage() {
                     <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-6 group-hover:scale-110 transition-transform">
                       <MapPin className="w-7 h-7" />
                     </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Telangana to Tier 2 & 3 Cities</h3>
+                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Indore to Tier 2 & 3 Cities</h3>
                     <p className="text-slate-600 font-light leading-relaxed">
-                      Minto Foods is starting its journey from Telangana, with a strategic focus on expanding across Tier 2 and Tier 3 cities in India. We aim to empower local businesses in these growing regions and integrate them into the digital market.
+                      Minto Foods is starting its journey from Indore, with a strategic focus on expanding across Tier 2 and Tier 3 cities in India. We aim to empower local businesses in these growing regions and integrate them into the digital market.
                     </p>
                   </div>
                   <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
@@ -1295,7 +1313,7 @@ export default function LandingPage() {
 
                 <div className="flex-1 space-y-6 relative z-10">
                   <div className="inline-block text-[10px] uppercase tracking-widest font-black text-pink-500 bg-[#008078]/10 border border-[#008078]/20 px-3 py-1.5 rounded-full">
-                    Active Operations: Telangana Region
+                    Active Operations: Indore · Vapi · Bhiwandi
                   </div>
                   <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Setup Your Live Digital Kitchen</h2>
                   <p className="text-slate-400 font-light max-w-xl leading-relaxed text-sm md:text-base">
@@ -1303,22 +1321,12 @@ export default function LandingPage() {
                   </p>
 
                   <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                    <a
-                      href="https://apps.apple.com/in/app/switcheats-partner/id6766466794"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
-                    >
+                    <StoreLink href={STORE_LINKS.restaurant.ios} className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
                       <Apple className="w-5 h-5" /> iOS App Store
-                    </a>
-                    <a
-                      href="https://play.google.com/store/apps/details?id=com.switcheats.restaurant1"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-700 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
-                    >
+                    </StoreLink>
+                    <StoreLink href={STORE_LINKS.restaurant.android} className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-700 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
                       <Play className="w-5 h-5" /> Android Play Store
-                    </a>
+                    </StoreLink>
                   </div>
                 </div>
 
@@ -1518,7 +1526,7 @@ export default function LandingPage() {
                       <input
                         type="text"
                         required
-                        placeholder="Ex: Madhapur, Hyderabad, Telangana"
+                        placeholder="Ex: Vijay Nagar, Indore, Madhya Pradesh"
                         value={leadForm.location}
                         onChange={(e) => setLeadForm({ ...leadForm, location: e.target.value })}
                         className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
@@ -1614,7 +1622,7 @@ export default function LandingPage() {
 
                 <div className="flex-1 space-y-6 relative z-10">
                   <div className="inline-block text-[10px] uppercase tracking-widest font-black text-[#008078] bg-[#008078]/10 border border-[#008078]/20 px-3 py-1.5 rounded-full">
-                    Squad Expanding: Telangana Core Hubs
+                    Squad Expanding: Indore · Vapi · Bhiwandi
                   </div>
                   <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Join the active delivery crew</h2>
                   <p className="text-slate-400 font-light max-w-xl leading-relaxed text-sm md:text-base">
@@ -1622,22 +1630,12 @@ export default function LandingPage() {
                   </p>
 
                   <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                    <a
-                      href="https://apps.apple.com/in/app/switcheats-captain/id6766778164"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
-                    >
+                    <StoreLink href={STORE_LINKS.delivery.ios} className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
                       <Apple className="w-5 h-5" /> iOS App Store
-                    </a>
-                    <a
-                      href="https://play.google.com/store/apps/details?id=com.switcheats.delivery1"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-800 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md cursor-pointer text-center"
-                    >
+                    </StoreLink>
+                    <StoreLink href={STORE_LINKS.delivery.android} className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-800 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
                       <Play className="w-5 h-5" /> Android Play Store
-                    </a>
+                    </StoreLink>
                   </div>
                 </div>
 
