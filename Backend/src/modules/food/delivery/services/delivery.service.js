@@ -797,17 +797,18 @@ export const getDeliveryPartnerTripHistory = async (deliveryPartnerId, query = {
         OR: withinRange(start, end),
     };
 
+    // orderStatus is an enum, so it can only be matched against its values:
+    // `startsWith: 'cancelled'` is a string filter Prisma rejects, and it made
+    // the rider app's Cancelled and Pending tabs fail with a raw query error.
+    const CANCELLED = ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'];
     const sf = String(statusFilter || '').toLowerCase();
     if (sf === 'completed') {
         where.orderStatus = 'delivered';
     } else if (sf === 'cancelled') {
-        where.orderStatus = { startsWith: 'cancelled' };
+        where.orderStatus = { in: CANCELLED };
     } else if (sf === 'pending') {
         // Pending = neither delivered nor cancelled.
-        where.AND = [
-            { orderStatus: { not: 'delivered' } },
-            { NOT: { orderStatus: { startsWith: 'cancelled' } } },
-        ];
+        where.orderStatus = { notIn: ['delivered', ...CANCELLED] };
     }
 
     const orders = await prisma.foodOrder.findMany({
