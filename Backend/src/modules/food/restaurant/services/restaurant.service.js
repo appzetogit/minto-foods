@@ -1856,8 +1856,15 @@ export const listApprovedRestaurants = async (query = {}) => {
         // has always been free to ask for 100 km. A customer may narrow the
         // search, never widen it past what the admin configured.
         const { platformRadiusKm, outerBoundKm } = radius;
-        const boundKm =
-            outerBoundKm === null ? radiusKm : Math.min(radiusKm ?? outerBoundKm, outerBoundKm);
+        // When the caller did not ask for a distance ranking, this query exists
+        // only to apply the radius. With no platform radius, a restaurant without
+        // its own override has no limit at all, so the neighbourhood must not be
+        // capped -- restaurantsNearPoint's default 100 km would silently drop
+        // every restaurant in another city.
+        const UNBOUNDED_KM = 20_000;
+        const boundKm = !askedForGeo
+            ? (outerBoundKm ?? UNBOUNDED_KM)
+            : outerBoundKm === null ? radiusKm : Math.min(radiusKm ?? outerBoundKm, outerBoundKm);
 
         // $geoNear became an indexed ST_DWithin. Postgres cannot order by a
         // distance this query did not compute, so the neighbourhood is resolved
