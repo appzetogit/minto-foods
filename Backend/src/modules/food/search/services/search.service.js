@@ -81,7 +81,7 @@ export const searchUnified = async (query = {}, options = {}) => {
     if (Number.isFinite(rating) && rating > 0) where.rating = { gte: Math.min(rating, 5) };
     const minutes = Number.parseInt(maxDeliveryTime, 10);
     if (Number.isFinite(minutes) && minutes > 0) {
-        where.estimatedDeliveryTimeMinutes = { lte: minutes };
+        where.estimatedDeliveryTimeMinutes = { lte: Math.min(minutes, 1440) };
     }
 
     // 2. Category filter — restaurants have no category, their dishes do.

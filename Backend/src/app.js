@@ -81,10 +81,22 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true }));
 
 // Protect against NoSQL injection and XSS
+// A NUL character in any text value makes Postgres refuse the whole query, so
+// a request carrying one (`?search=%00`) failed with a 500 wherever it was used.
+// No real input contains one; they are removed before anything reads them.
+const stripNul = (value) => {
+    if (typeof value === 'string') return value.includes('\u0000') ? value.replace(/\u0000/g, '') : value;
+    if (Array.isArray(value)) return value.map(stripNul);
+    if (value && typeof value === 'object') {
+        for (const key of Object.keys(value)) value[key] = stripNul(value[key]);
+    }
+    return value;
+};
+
 app.use((req, _res, next) => {
-    req.body = mongoSanitize(req.body);
-    req.query = mongoSanitize(req.query);
-    req.params = mongoSanitize(req.params);
+    req.body = stripNul(mongoSanitize(req.body));
+    req.query = stripNul(mongoSanitize(req.query));
+    req.params = stripNul(mongoSanitize(req.params));
     next();
 });
 app.use(xssClean());

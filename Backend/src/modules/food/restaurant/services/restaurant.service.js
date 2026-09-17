@@ -2075,8 +2075,11 @@ export const listPublicOffers = async (query = {}) => {
         }
     }
 
-    if (subtotal !== undefined && subtotal !== null && subtotal !== '' && !isNaN(Number(subtotal))) {
-        const numericSubtotal = Number(subtotal);
+    // Infinity (`1e999`) and absurdly large values used to reach the query and
+    // fail it. Any real cart is far below the ceiling, and a larger value means
+    // the same thing for a minimum-order check: every offer qualifies.
+    if (subtotal !== undefined && subtotal !== null && subtotal !== '' && Number.isFinite(Number(subtotal))) {
+        const numericSubtotal = Math.min(Number(subtotal), 10_000_000);
         if (numericSubtotal > 0) {
             filter.AND.push({ OR: [{ minOrderValue: null }, { minOrderValue: { lte: numericSubtotal } }] });
         }
