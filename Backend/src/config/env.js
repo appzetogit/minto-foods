@@ -85,9 +85,9 @@ export const config = {
     uploadRateLimitMax: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 60),
     uploadRateLimitDevMax: Number(process.env.UPLOAD_RATE_LIMIT_DEV_MAX || 200),
     /** WebP output quality (1–100). 90 = high quality, small size reduction. */
-    uploadWebpQuality: Number(process.env.UPLOAD_WEBP_QUALITY || 90),
+    uploadWebpQuality: Number(process.env.UPLOAD_WEBP_QUALITY || 80),
     /** Max width in px; larger images are resized (aspect ratio kept). */
-    uploadWebpMaxWidth: Number(process.env.UPLOAD_WEBP_MAX_WIDTH || 2560),
+    uploadWebpMaxWidth: Number(process.env.UPLOAD_WEBP_MAX_WIDTH || 1600),
     /** @deprecated Use uploadStorageRoot — kept for backward compatibility */
     uploadPath: process.env.UPLOAD_PATH || process.env.UPLOAD_STORAGE_ROOT || '/var/www/uploads',
 
