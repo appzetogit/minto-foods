@@ -981,6 +981,11 @@ model FoodAdmin {
   broadcasts        NotificationBroadcast[]
   resolvedEmergency DeliveryOrderEmergencyRequest[]
 
+  /// Cities a sub-admin looks after. They see the zones of these cities and the
+  /// restaurants, orders and riders in them; none assigned means nothing, not all.
+  /// Ignored for a super admin.
+  cities FoodAdminCity[]
+
   @@index([adminType, isDeleted, isActive])
   @@map("food_admins")
 }
@@ -1960,6 +1965,41 @@ model FoodLedgerEntry {
   @@map("food_ledger_entries")
 }
 
+/// A city the platform operates in. Zones are grouped under one, and sub-admins
+/// are given cities rather than individual zones.
+model FoodCity {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  name String
+  /// Lowercased and whitespace-collapsed name. Unique, so "Indore" and
+  /// "indore " cannot become two cities.
+  nameKey String @unique
+  state   String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  zones  FoodZone[]
+  admins FoodAdminCity[]
+
+  @@map("food_cities")
+}
+
+model FoodAdminCity {
+  adminId String @db.VarChar(24)
+  cityId  String @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+
+  admin FoodAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  city  FoodCity  @relation(fields: [cityId], references: [id], onDelete: Cascade)
+
+  @@id([adminId, cityId])
+  @@index([cityId])
+  @@map("food_admin_cities")
+}
+
 model FoodZone {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -1975,6 +2015,11 @@ model FoodZone {
   /// are three cities as far as a GROUP BY is concerned.
   city            String?
   unit            ZoneUnit @default(kilometer)
+
+  /// The city this zone belongs to; a city has many zones. `city` above is kept
+  /// in step with the city's name for the screens and apps that still read it.
+  cityId   String?   @db.VarChar(24)
+  cityRef  FoodCity? @relation(fields: [cityId], references: [id])
 
   /// [{ latitude, longitude }] ring, ≥3 points. This stays the editable record —
   /// it is the shape the admin UI sends and renders — and `boundary` below is
@@ -2018,6 +2063,7 @@ model FoodZone {
 
   @@index([isActive, name])
   @@index([city, name])
+  @@index([cityId])
   @@index([country, name])
   @@map("food_zones")
 }

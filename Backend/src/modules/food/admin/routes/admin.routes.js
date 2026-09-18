@@ -1,3 +1,5 @@
+import { loadAdminScope } from '../../../../core/roles/adminScope.service.js';
+import { runWithAdminScope } from '../../../../core/roles/adminScope.context.js';
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
 import * as adminController from '../controllers/admin.controller.js';
@@ -17,6 +19,8 @@ import {
     downloadBulkMenuTemplateController,
     uploadAdminBulkMenuController,
 } from '../../restaurant/controllers/bulkUpload.controller.js';
+import * as adminCityController from '../controllers/adminCity.controller.js';
+import { sendError } from '../../../../utils/response.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { requireAdminPermission, requireAnyAdminPermission } from '../../../../core/roles/adminPermission.middleware.js';
@@ -50,11 +54,16 @@ router.use(async (req, _res, next) => {
         const admin = isId(req.user?.userId)
             ? await prisma.foodAdmin.findUnique({
                 where: { id: String(req.user.userId) },
-                select: { adminType: true, permissions: true, isActive: true, isDeleted: true },
+                select: { id: true, adminType: true, permissions: true, isActive: true, isDeleted: true },
             })
             : null;
         req.adminAccess = admin;
-        return next();
+        // A sub-admin's whole request runs inside their city scope, which the
+        // Prisma extension applies to every query on a city-bound model.
+        const scope = await loadAdminScope(admin);
+        req.adminScope = scope;
+        if (!scope) return next();
+        return runWithAdminScope(scope, () => next());
     } catch (error) {
         return next(error);
     }
@@ -120,6 +129,10 @@ router.use((req, res, next) => {
 });
 
 router.use('/sub-admins', requireAdminPermission('sub_admin_management', 'view'));
+// Customers are not tied to a city, so a city-limited sub-admin has no slice of
+// them to see. Their orders are still visible through the orders screens.
+router.use('/customers', (req, res, next) =>
+    req.adminScope ? sendError(res, 403, 'Customers are managed by the super admin') : next());
 router.use(
     '/customers',
     requireAnyAdminPermission([
@@ -530,6 +543,28 @@ router.get(
 router.post('/zones', adminController.createZone);
 router.patch('/zones/:id', adminController.updateZone);
 router.delete('/zones/:id', adminController.deleteZone);
+
+// ----- Cities -----
+// Anyone who can see zones can see (and be suggested) cities; a sub-admin only
+// sees their own. Adding, renaming and removing cities is the super admin's,
+// since cities are what sub-admins are assigned to.
+const ZONE_VIEWERS = [
+    { section: 'dashboard', action: 'view' },
+    { section: 'restaurant_management', action: 'view' },
+    { section: 'point_of_sale', action: 'view' },
+    { section: 'food_management', action: 'view' },
+    { section: 'delivery_management', action: 'view' },
+    { section: 'report_management', action: 'view' },
+];
+const superAdminOnly = (req, res, next) =>
+    req.adminAccess?.adminType === 'sub_admin'
+        ? sendError(res, 403, 'Only the super admin can manage cities')
+        : next();
+router.get('/cities', requireAnyAdminPermission(ZONE_VIEWERS), adminCityController.listCities);
+router.get('/cities/:id', requireAnyAdminPermission(ZONE_VIEWERS), adminCityController.getCity);
+router.post('/cities', superAdminOnly, adminCityController.createCity);
+router.patch('/cities/:id', superAdminOnly, adminCityController.updateCity);
+router.delete('/cities/:id', superAdminOnly, adminCityController.deleteCity);
 
 // ----- COD & User Payments -----
 // The platform switch is filed under system_settings and the per-zone one under

@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger.js';
+import { applyAdminScope, currentAdminScope } from '../core/roles/adminScope.context.js';
 
 /**
  * Adds `_id` alongside `id` on every result.
@@ -139,8 +140,12 @@ export const prisma = new PrismaClient({
 }).$extends({
     query: {
         $allModels: {
-            async $allOperations({ query, args }) {
-                return withMongoId(await query(args));
+            async $allOperations({ model, operation, query, args }) {
+                // A sub-admin's request only reaches their own cities. Outside an
+                // admin request there is no scope and this changes nothing.
+                const scope = currentAdminScope();
+                const scoped = scope ? applyAdminScope(model, operation, args, scope) : args;
+                return withMongoId(await query(scoped));
             }
         }
     }

@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
+import { currentAdminScope } from '../../../../core/roles/adminScope.context.js';
 import { isId } from '../../../../utils/helpers.js';
 import { CANCELLED_ORDER_STATUSES } from '../../orders/services/order.helpers.js';
 import { logger } from '../../../../utils/logger.js';
@@ -99,6 +100,8 @@ async function monthlyTrend(where) {
     since.setMonth(since.getMonth() - 11, 1);
     since.setHours(0, 0, 0, 0);
 
+    // Raw SQL is not reached by the city scope, so it is applied by hand.
+    const scope = currentAdminScope();
     const rows = await prisma.$queryRaw`
         SELECT date_trunc('month', "createdAt") AS month,
                COUNT(*)::int AS orders,
@@ -114,6 +117,7 @@ async function monthlyTrend(where) {
               OR "paymentStatus" IN ('paid', 'authorized', 'refunded')
           )
           ${where.zoneId ? Prisma.sql`AND "zoneId" = ${where.zoneId}` : Prisma.empty}
+          ${scope ? Prisma.sql`AND "zoneId" = ANY(${scope.zoneIds})` : Prisma.empty}
           ${where.createdAt?.gte ? Prisma.sql`AND "createdAt" >= ${where.createdAt.gte}` : Prisma.empty}
           ${where.createdAt?.lte ? Prisma.sql`AND "createdAt" <= ${where.createdAt.lte}` : Prisma.empty}
         GROUP BY 1

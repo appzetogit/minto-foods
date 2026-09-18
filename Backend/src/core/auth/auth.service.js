@@ -12,6 +12,7 @@ import { hashAdminPassword, compareAdminPassword } from "./adminPassword.util.js
 import { creditReferralReward } from "../../modules/food/user/services/userWallet.service.js";
 import { ADMIN_FULL_PERMISSIONS, sanitizeAdminPermissions } from '../../constants/permissions.js';
 import { isMobilePlatform } from "../../utils/platform.js";
+import { loadAdminScope, describeScope } from "../roles/adminScope.service.js";
 import {
   detachFirebaseDeviceTokenEverywhere,
   replaceFirebaseDeviceToken,
@@ -322,6 +323,8 @@ export const adminLogin = async (email, password) => {
   // which the response object holds it.
   const { password: _passwordHash, ...userObj } = admin;
   userObj.effectivePermissions = effectivePermissions;
+  // Which cities the panel should limit itself to. The API enforces it anyway.
+  userObj.scope = describeScope(await loadAdminScope(admin));
   return { accessToken, refreshToken, user: userObj };
 };
 
@@ -566,6 +569,7 @@ export const getProfile = async (userId, role) => {
         profile.effectivePermissions = profile.adminType === "super_admin"
           ? ADMIN_FULL_PERMISSIONS
           : sanitizeAdminPermissions(profile.permissions || {});
+        profile.scope = describeScope(await loadAdminScope(profile));
       }
       break;
     case ROLES.RESTAURANT:

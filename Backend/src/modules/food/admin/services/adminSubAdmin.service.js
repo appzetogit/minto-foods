@@ -26,6 +26,33 @@ const SUB_ADMIN_SELECT = {
     role: true, adminType: true, permissions: true,
     isActive: true, isDeleted: true, servicesAccess: true,
     createdById: true, updatedById: true, createdAt: true, updatedAt: true,
+    cities: { select: { city: { select: { id: true, name: true } } } },
+};
+
+/** The assigned cities, flattened for the panel: cities [{id,name}] and cityIds. */
+const withCities = (admin) => {
+    if (!admin) return admin;
+    const cities = (admin.cities || []).map((link) => link.city).filter(Boolean);
+    return { ...admin, cities, cityIds: cities.map((c) => c.id) };
+};
+
+/**
+ * Replaces the cities a sub-admin looks after. Unknown ids are refused rather
+ * than skipped, so a stale form cannot silently leave someone with fewer cities.
+ */
+const setCities = async (tx, adminId, rawCityIds) => {
+    if (rawCityIds === undefined) return;
+    if (!Array.isArray(rawCityIds)) throw new ValidationError('cityIds must be a list');
+    const cityIds = [...new Set(rawCityIds.map(String))];
+    if (!cityIds.every(isId)) throw new ValidationError('Invalid city id');
+    if (cityIds.length) {
+        const found = await tx.foodCity.count({ where: { id: { in: cityIds } } });
+        if (found !== cityIds.length) throw new ValidationError('One of those cities does not exist');
+    }
+    await tx.foodAdminCity.deleteMany({ where: { adminId } });
+    if (cityIds.length) {
+        await tx.foodAdminCity.createMany({ data: cityIds.map((cityId) => ({ adminId, cityId })) });
+    }
 };
 
 const toEmail = (value) => String(value || '').trim().toLowerCase();
@@ -41,7 +68,8 @@ export async function createSubAdmin(payload = {}, actorId) {
     if (!email || !password) throw new ValidationError('Email and password are required');
 
     try {
-        return await prisma.foodAdmin.create({
+        return await prisma.$transaction(async (tx) => {
+        const created = await tx.foodAdmin.create({
             data: {
                 email,
                 // Never the raw value: the hook that used to do this is gone.
@@ -57,7 +85,11 @@ export async function createSubAdmin(payload = {}, actorId) {
                 createdById: isId(actorId) ? String(actorId) : null,
                 updatedById: isId(actorId) ? String(actorId) : null,
             },
-            select: SUB_ADMIN_SELECT,
+            select: { id: true },
+        });
+        // No cities means the sub-admin sees nothing until one is assigned.
+        await setCities(tx, created.id, payload.cityIds ?? []);
+        return withCities(await tx.foodAdmin.findUnique({ where: { id: created.id }, select: SUB_ADMIN_SELECT }));
         });
     } catch (error) {
         // email is unique in the database, so the insert decides the race
@@ -86,7 +118,7 @@ export async function getSubAdmins(query = {}) {
         select: SUB_ADMIN_SELECT,
         orderBy: { createdAt: 'desc' },
     });
-    return { items };
+    return { items: items.map(withCities) };
 }
 
 export async function getSubAdminById(id) {
@@ -97,7 +129,7 @@ export async function getSubAdminById(id) {
         select: SUB_ADMIN_SELECT,
     });
     if (!item) throw new ValidationError('Sub-admin not found');
-    return item;
+    return withCities(item);
 }
 
 /**
@@ -107,16 +139,19 @@ export async function getSubAdminById(id) {
  * super-admin's row can never be reached through these endpoints — a plain
  * update by id could.
  */
-const updateSubAdmin = async (id, data) => {
+const updateSubAdmin = async (id, data, cityIds) => {
     if (!isId(id)) throw new ValidationError('Invalid sub-admin id');
 
-    const { count } = await prisma.foodAdmin.updateMany({
-        where: subAdminWhere({ id: String(id) }),
-        data,
-    });
-    if (!count) throw new ValidationError('Sub-admin not found');
+    return prisma.$transaction(async (tx) => {
+        const { count } = await tx.foodAdmin.updateMany({
+            where: subAdminWhere({ id: String(id) }),
+            data,
+        });
+        if (!count) throw new ValidationError('Sub-admin not found');
+        await setCities(tx, String(id), cityIds);
 
-    return prisma.foodAdmin.findUnique({ where: { id: String(id) }, select: SUB_ADMIN_SELECT });
+        return withCities(await tx.foodAdmin.findUnique({ where: { id: String(id) }, select: SUB_ADMIN_SELECT }));
+    });
 };
 
 export async function updateSubAdminProfile(id, payload = {}, actorId) {
@@ -126,7 +161,7 @@ export async function updateSubAdminProfile(id, payload = {}, actorId) {
     if (payload.email !== undefined) data.email = toEmail(payload.email);
 
     try {
-        return await updateSubAdmin(id, data);
+        return await updateSubAdmin(id, data, payload.cityIds);
     } catch (error) {
         if (error?.code === 'P2002') {
             throw new ValidationError('Admin with this email already exists');

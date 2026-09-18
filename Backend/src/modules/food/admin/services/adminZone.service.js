@@ -1,5 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
+import { ValidationError } from '../../../../core/auth/errors.js';
+import { resolveZoneCity } from './adminCity.service.js';
 import { invalidateActiveZonesCache } from '../../landing/controllers/zonePublic.controller.js';
 
 /**
@@ -30,6 +32,7 @@ export async function getZones(query = {}) {
     if (isActive !== undefined && isActive !== '') {
         where.isActive = isActive === 'true' || isActive === '1';
     }
+    if (isId(query.cityId)) where.cityId = String(query.cityId);
     if (city) {
         // Exact, not contains: the filter is fed from the city list below, so a
         // loose match would make "Indore" also select "Indore Rural".
@@ -47,7 +50,13 @@ export async function getZones(query = {}) {
     }
 
     const [zones, total] = await Promise.all([
-        prisma.foodZone.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
+        prisma.foodZone.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit,
+            include: { cityRef: { select: { id: true, name: true } } },
+        }),
         prisma.foodZone.count({ where }),
     ]);
 
@@ -95,13 +104,18 @@ export async function createZone(body = {}) {
         return { error: 'At least 3 coordinates (polygon points) are required' };
     }
 
+    // Every new zone belongs to a city; the name typed is matched to one.
+    const cityRow = await resolveZoneCity(body);
+    if (!cityRow) return { error: 'Choose the city this zone is in' };
+
     const zone = await prisma.foodZone.create({
         data: {
+            cityId: cityRow.id,
             name,
             zoneName: body.zoneName?.trim() || name,
             country: body.country?.trim() || 'India',
             serviceLocation: body.serviceLocation?.trim() || name,
-            city: body.city?.trim() || null,
+            city: cityRow.name,
             unit: body.unit === 'miles' ? 'miles' : 'kilometer',
             coordinates,
             isActive: body.isActive !== false,
@@ -122,7 +136,13 @@ export async function updateZone(id, body = {}) {
     if (body.name !== undefined) data.name = String(body.name).trim();
     if (body.zoneName !== undefined) data.zoneName = String(body.zoneName).trim();
     if (body.country !== undefined) data.country = String(body.country).trim();
-    if (body.city !== undefined) data.city = String(body.city || '').trim() || null;
+    const cityRow = await resolveZoneCity(body);
+    if (cityRow) {
+        data.cityId = cityRow.id;
+        data.city = cityRow.name;
+    } else if (cityRow === null) {
+        throw new ValidationError('Choose the city this zone is in');
+    }
     if (body.codEnabled !== undefined) {
         // null is a real answer here -- "follow the platform" -- and is not the
         // same as false, which is "off in this zone whatever the platform says".

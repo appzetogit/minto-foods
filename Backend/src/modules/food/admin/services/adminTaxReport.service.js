@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../../config/prisma.js';
+import { currentAdminScope } from '../../../../core/roles/adminScope.context.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import {
@@ -172,7 +173,11 @@ export async function getTaxReport(query = {}) {
     let totalEarnings = 0;
     let totalTax = 0;
 
-    const reports = rows
+    // The grouping above is raw SQL, which the city scope does not reach; the
+    // restaurant lookup is scoped, so a city-limited admin keeps only those.
+    const visibleRows = currentAdminScope() ? rows.filter((row) => nameById.has(row.restaurantId)) : rows;
+
+    const reports = visibleRows
         .map((row) => {
             const earnings = Math.max(0, num(row.earnings) - num(overCount.get(row.restaurantId)));
             const tax = num(row.tax);
