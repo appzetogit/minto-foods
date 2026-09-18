@@ -32,7 +32,11 @@ ALTER TABLE "food_zones" ADD CONSTRAINT "food_zones_cityId_fkey"
 -- Backfill: one city per distinct typed city name, matched case- and
 -- space-insensitively, then point each zone at its city.
 INSERT INTO "food_cities" ("name", "nameKey", "updatedAt")
-SELECT MIN(btrim(regexp_replace("city", '\s+', ' ', 'g'))),
+-- A name typed all in lowercase ("bhiwandi") is capitalised; anything else is
+-- kept as the admin wrote it.
+SELECT CASE WHEN MIN(btrim(regexp_replace("city", '\s+', ' ', 'g'))) = lower(MIN(btrim(regexp_replace("city", '\s+', ' ', 'g'))))
+            THEN initcap(MIN(btrim(regexp_replace("city", '\s+', ' ', 'g'))))
+            ELSE MIN(btrim(regexp_replace("city", '\s+', ' ', 'g'))) END,
        lower(btrim(regexp_replace("city", '\s+', ' ', 'g'))),
        CURRENT_TIMESTAMP
 FROM "food_zones"
