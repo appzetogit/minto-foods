@@ -1246,6 +1246,16 @@ export const adminAPI = {
   getZoneCities: () =>
     apiClient.get("/food/admin/zones/cities", { contextModule: "admin" }),
 
+  /** Cities that zones belong to and sub-admins are assigned. `q` filters by name. */
+  getCities: (params = {}) =>
+    apiClient.get("/food/admin/cities", { params, contextModule: "admin" }),
+  createCity: (body = {}) =>
+    apiClient.post("/food/admin/cities", body ?? {}, { contextModule: "admin" }),
+  updateCity: (id, body = {}) =>
+    apiClient.patch(`/food/admin/cities/${String(id)}`, body ?? {}, { contextModule: "admin" }),
+  deleteCity: (id) =>
+    apiClient.delete(`/food/admin/cities/${String(id)}`, { contextModule: "admin" }),
+
   setRestaurantBillingMode: (id, billingMode) =>
     apiClient.patch(
       `/food/admin/restaurants/${String(id)}/billing-mode`,

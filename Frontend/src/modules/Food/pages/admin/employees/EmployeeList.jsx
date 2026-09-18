@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Search, Shield, Trash2, ToggleLeft, ToggleRight, MapPin } from "lucide-react";
 import { adminAPI } from "@food/api";
 
 const SUBADMIN_EMAIL_REGEX = /^(?!.*\.\.)([A-Za-z0-9]+[._%+-]?)*[A-Za-z0-9]+@[A-Za-z0-9-]+\.[A-Za-z]{2,}$/;
@@ -17,6 +17,37 @@ const hasSuspiciousEmailTld = (emailValue) => {
   return false;
 };
 
+/**
+ * Cities as toggle chips. A sub-admin sees only the zones, restaurants, orders
+ * and riders of the cities picked here -- and nothing if none are picked.
+ */
+function CityChips({ cities, selected, onChange }) {
+  if (!cities.length) {
+    return <p className="text-xs text-slate-500">No cities yet. Cities are added from the zone form.</p>;
+  }
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  return (
+    <div className="flex flex-wrap gap-2">
+      {cities.map((c) => {
+        const on = selected.includes(c.id);
+        return (
+          <button
+            type="button"
+            key={c.id}
+            onClick={() => toggle(c.id)}
+            className={`rounded-full border px-3 py-1 text-sm ${on ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}
+          >
+            {c.name}
+            <span className={`ml-1 text-xs ${on ? "text-blue-100" : "text-slate-400"}`}>
+              {c.zoneCount} zone{c.zoneCount === 1 ? "" : "s"}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function EmployeeList() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +55,11 @@ export default function EmployeeList() {
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [cities, setCities] = useState([]);
+  const [newCityIds, setNewCityIds] = useState([]);
+  // The row whose cities are being edited, and the draft selection.
+  const [editing, setEditing] = useState(null);
+  const [draftCityIds, setDraftCityIds] = useState([]);
 
   const validateForm = (payload) => {
     const nextErrors = {};
@@ -77,7 +113,23 @@ export default function EmployeeList() {
 
   useEffect(() => {
     load();
+    adminAPI
+      .getCities({ limit: 500 })
+      .then((res) => setCities(res?.data?.data?.cities || []))
+      .catch(() => setCities([]));
   }, []);
+
+  const cityName = (id) => cities.find((c) => c.id === id)?.name;
+
+  const saveCities = async (item) => {
+    try {
+      await adminAPI.updateSubAdmin(item._id, { cityIds: draftCityIds });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      alert(e?.response?.data?.message || "Could not save the cities");
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items;
@@ -99,8 +151,9 @@ export default function EmployeeList() {
 
     setSaving(true);
     try {
-      await adminAPI.createSubAdmin(normalizedForm);
+      await adminAPI.createSubAdmin({ ...normalizedForm, cityIds: newCityIds });
       setForm({ name: "", email: "", phone: "", password: "" });
+      setNewCityIds([]);
       setErrors({});
       await load();
     } finally {
@@ -179,6 +232,13 @@ export default function EmployeeList() {
           {errors.password ? <p className="mt-1 text-xs text-red-600">{errors.password}</p> : null}
         </div>
         <div className="md:col-span-2">
+          <p className="mb-2 text-sm font-medium text-slate-700">Cities</p>
+          <CityChips cities={cities} selected={newCityIds} onChange={setNewCityIds} />
+          <p className="mt-1 text-xs text-slate-500">
+            They will only see the zones, restaurants, orders and riders of these cities. No city means they see nothing.
+          </p>
+        </div>
+        <div className="md:col-span-2">
           <button disabled={saving} className="inline-flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg">
             <Plus className="w-4 h-4" /> Create Sub Admin
           </button>
@@ -197,12 +257,33 @@ export default function EmployeeList() {
         {loading ? <div className="text-sm text-slate-500">Loading...</div> : (
           <div className="space-y-3">
             {filtered.map((item) => (
-              <div key={item._id} className="border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-3">
+              <div key={item._id} className="border border-slate-200 rounded-lg p-3 flex flex-col md:flex-row md:items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-slate-900">{item.name || "Unnamed"}</p>
                   <p className="text-sm text-slate-600">{item.email} {item.phone ? `• ${item.phone}` : ""}</p>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                    <MapPin className="w-3 h-3" />
+                    {item.cities?.length
+                      ? item.cities.map((c) => c.name || cityName(c.id)).join(", ")
+                      : <span className="text-amber-600">No cities: sees nothing</span>}
+                  </p>
+                  {editing === item._id && (
+                    <div className="mt-3 space-y-2">
+                      <CityChips cities={cities} selected={draftCityIds} onChange={setDraftCityIds} />
+                      <div className="flex gap-2">
+                        <button onClick={() => saveCities(item)} className="px-3 py-1.5 bg-black text-white rounded-lg text-sm">Save cities</button>
+                        <button onClick={() => setEditing(null)} className="px-3 py-1.5 border rounded-lg text-sm">Cancel</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => { setEditing(item._id); setDraftCityIds(item.cityIds || []); }}
+                    className="inline-flex items-center gap-1 px-3 py-2 border rounded-lg text-sm"
+                  >
+                    <MapPin className="w-4 h-4" /> Cities
+                  </button>
                   <Link to={`/admin/food/employee-role?id=${item._id}`} className="inline-flex items-center gap-1 px-3 py-2 border rounded-lg text-sm">
                     <Shield className="w-4 h-4" /> Permissions
                   </Link>

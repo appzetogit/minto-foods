@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { MapPin, ArrowLeft, Save, X, Shapes, Search } from "lucide-react"
 import { adminAPI } from "@food/api"
+import CityPicker from "@food/components/admin/zones/CityPicker"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { Loader } from "@googlemaps/js-api-loader"
 const debugLog = (...args) => {}
@@ -33,6 +34,8 @@ export default function AddZone() {
     zoneName: "",
     unit: "kilometer",
     city: "",
+    cityId: "",
+    createCity: false,
     // "" means follow the platform switch, which is not the same as off.
     codEnabled: "",
     codMinDeliveredOrders: "0",
@@ -135,7 +138,9 @@ export default function AddZone() {
         setFormData({
           country: zoneData.country || "India",
           zoneName: zoneData.name || zoneData.zoneName || "",
-          city: zoneData.city || "",
+          city: zoneData.cityRef?.name || zoneData.city || "",
+          cityId: zoneData.cityId || "",
+          createCity: false,
           // null is a real stored value here, so it must not collapse to "off".
           codEnabled:
             zoneData.codEnabled === true
@@ -640,6 +645,12 @@ export default function AddZone() {
       setLoading(true)
       
       // Validate coordinates format
+      if (!formData.cityId && !formData.createCity) {
+        alert("Pick the city this zone is in, or add it as a new city")
+        setLoading(false)
+        return
+      }
+
       if (!coordinates || coordinates.length < 3) {
         alert("Please draw at least 3 points on the map")
         setLoading(false)
@@ -663,7 +674,11 @@ export default function AddZone() {
         country: formData.country,
         unit: formData.unit || "kilometer",
         coordinates: validCoordinates,
-        city: formData.city.trim(),
+        // An existing city by id, or a typed name the server matches to one;
+        // createCity only when the admin chose to add a new city.
+        ...(formData.cityId
+          ? { cityId: formData.cityId }
+          : { city: formData.city.trim(), createCity: formData.createCity }),
         // Three states, and null is one of them: "not decided here, follow
         // the platform". Sending false instead would switch COD off in every
         // zone anyone edits.
@@ -785,17 +800,12 @@ export default function AddZone() {
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     City
                   </label>
-                  <input
-                    type="text"
-                    value={formData.city}
-                    onChange={(e) => handleInputChange("city", e.target.value)}
-                    placeholder="Indore"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  <CityPicker
+                    value={{ cityId: formData.cityId, name: formData.city, createCity: formData.createCity }}
+                    onChange={(c) =>
+                      setFormData((prev) => ({ ...prev, city: c.name, cityId: c.cityId, createCity: c.createCity }))
+                    }
                   />
-                  <p className="mt-1 text-xs text-slate-500">
-                    What the zone filters group by. Spelling matters &mdash; use the same
-                    one across a city&rsquo;s zones.
-                  </p>
                 </div>
 
                 <div>
