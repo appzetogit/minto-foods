@@ -25,7 +25,19 @@ const RESTAURANT_ROW = {
     billingMode: true,
 };
 
-const ZONE_SUMMARY = { select: { id: true, name: true, zoneName: true } };
+const ZONE_SUMMARY = {
+    select: { id: true, name: true, zoneName: true, cityRef: { select: { id: true, name: true } } },
+};
+
+/**
+ * The city a restaurant belongs to: its zone's city, or for one still waiting
+ * for approval, its pending zone's. The typed address city is only a fallback
+ * for a restaurant with no zone at all.
+ */
+const withCity = (row, mapped) => {
+    const city = row.zone?.cityRef || row.pendingZone?.cityRef || null;
+    return { ...mapped, cityId: city?.id || null, cityName: city?.name || row.city || null };
+};
 
 /**
  * "Active" means approved.
@@ -87,6 +99,11 @@ export async function getRestaurants(query = {}) {
     const active = activeFilter(query.isActive);
     if (active) Object.assign(where, active);
 
+    if (isId(query.cityId)) {
+        const cityId = String(query.cityId);
+        where.AND = [{ OR: [{ zone: { cityId } }, { pendingZone: { cityId } }] }];
+    }
+
     const orderBy = {
         'created-desc': { createdAt: 'desc' },
         'created-asc': { createdAt: 'asc' },
@@ -107,7 +124,7 @@ export async function getRestaurants(query = {}) {
             orderBy,
             skip,
             take: limit,
-            select: { ...RESTAURANT_ROW, zone: ZONE_SUMMARY },
+            select: { ...RESTAURANT_ROW, zone: ZONE_SUMMARY, pendingZone: ZONE_SUMMARY },
         }),
         prisma.foodRestaurant.count({ where }),
     ]);
@@ -115,7 +132,7 @@ export async function getRestaurants(query = {}) {
     const result = {
         // The nested `location` the admin tables read is rebuilt from the flat
         // columns.
-        restaurants: rows.map(toRestaurant),
+        restaurants: rows.map((row) => withCity(row, toRestaurant(row))),
         total,
         page,
         limit,

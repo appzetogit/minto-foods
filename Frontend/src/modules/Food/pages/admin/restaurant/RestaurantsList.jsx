@@ -56,6 +56,8 @@ const mapRawRestaurant = (restaurant, index, zones) => ({
   ownerName: restaurant.ownerName || "N/A",
   ownerPhone: restaurant.ownerPhone || restaurant.phone || "N/A",
   zone: zoneLabelFromRestaurant(restaurant, zones),
+  // The zone's city (or the pending zone's, for one awaiting approval).
+  city: restaurant.cityName || "—",
   approvalStatus: normalizeApprovalStatus(restaurant),
   isActive: restaurant.isActive !== false && restaurant.status === "approved",
   rating: restaurant.rating || restaurant.ratings?.average || 0,
@@ -1391,6 +1393,9 @@ export default function RestaurantsList() {
                         <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'owner' ? 'text-blue-600' : 'text-slate-400'}`} />
                       </div>
                     </th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                      City
+                    </th>
                     <th
                       className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors"
                       onClick={() => handleSort('zone')}
@@ -1424,7 +1429,7 @@ export default function RestaurantsList() {
                 <tbody className="bg-white divide-y divide-slate-100">
                   {filteredRestaurants.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-6 py-20 text-center">
+                      <td colSpan={8} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <p className="text-lg font-semibold text-slate-700 mb-1">No Data Found</p>
                           <p className="text-sm text-slate-500">No restaurants match your search</p>
@@ -1472,6 +1477,9 @@ export default function RestaurantsList() {
                             <span className="text-sm font-medium text-slate-900">{restaurant.ownerName}</span>
                             <span className="text-xs text-slate-500">{formatPhone(restaurant.ownerPhone)}</span>
                           </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="text-sm font-medium text-slate-800">{restaurant.city}</span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm text-slate-700">{zoneLabel(restaurant.zone)}</span>
