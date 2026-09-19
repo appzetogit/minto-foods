@@ -16,6 +16,7 @@ import {
     resetAdminPasswordWithOtpController
 } from './auth.controller.js';
 import { authMiddleware, requireAdmin } from './auth.middleware.js';
+import { deleteOwnAccountController } from './accountDeletion.service.js';
 import {
     authRateLimiter,
     authVerifyRateLimiter,
@@ -61,6 +62,8 @@ router.post('/logout', logoutController);
 
 // Authenticated user profile (requires Bearer token)
 router.get('/me', authMiddleware, getMeController);
+// Older paths the restaurant app calls for deleting its account.
+router.delete(['/account', '/restaurant/account'], authMiddleware, deleteOwnAccountController);
 
 // Admin-only: profile update & change password (Bearer + ADMIN role)
 router.patch('/admin/profile', authMiddleware, requireAdmin, updateAdminProfileController);

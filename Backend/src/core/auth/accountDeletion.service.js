@@ -119,3 +119,17 @@ export async function deleteOwnAccount(role, accountId) {
     if (!removed) throw new NotFoundError('Account not found');
     return { deleted: true };
 }
+
+/**
+ * Deletes whichever account the token belongs to. Mounted at the new
+ * `/account` paths and at the older ones the apps already call, so installed
+ * apps work without an update.
+ */
+export const deleteOwnAccountController = async (req, res, next) => {
+    try {
+        const data = await deleteOwnAccount(req.user?.role, req.user?.userId);
+        return res.status(200).json({ success: true, message: 'Your account has been deleted', data });
+    } catch (error) {
+        return next(error);
+    }
+};

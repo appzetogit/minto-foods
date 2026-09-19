@@ -1485,7 +1485,7 @@ export const adminAPI = {
 export const restaurantAPI = {
   createUnregisteredRestaurant: (data) =>
     apiClient.post("/food/restaurant/unregistered", data),
-  deleteAccount: () => apiClient.delete('/food/restaurant/profile/account', { contextModule: 'restaurant' }),
+  deleteAccount: () => apiClient.delete('/food/restaurant/account', { contextModule: 'restaurant' }),
   getWallet: () => apiClient.get('/food/restaurant/finance', { contextModule: 'restaurant' }),
   sendOTP: (phone, _purpose = "login") => {
     if (!phone) return Promise.reject(new Error("Phone is required"));
@@ -2252,7 +2252,7 @@ const getDeliveryMeOnce = () => {
 
 /** Delivery API - OTP login + registration via new backend. */
 export const deliveryAPI = {
-  deleteAccount: () => apiClient.delete('/food/delivery/profile/account', { contextModule: 'delivery' }),
+  deleteAccount: () => apiClient.delete('/food/delivery/account', { contextModule: 'delivery' }),
   getWallet: () => apiClient.get('/food/delivery/wallet', { contextModule: 'delivery' }),
   sendOTP: (phone, _purpose = "login") => {
     if (!phone) return Promise.reject(new Error("Phone is required"));
@@ -2699,7 +2699,7 @@ export const deliveryAPI = {
 export const userAPI = {
   deleteCurrentUserAccount: () =>
     apiClient
-      .delete('/food/user/profile', { contextModule: 'user' })
+      .delete('/food/user/account', { contextModule: 'user' })
       .finally(() => {
         clearUserMeCache();
       }),

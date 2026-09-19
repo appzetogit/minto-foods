@@ -1,5 +1,5 @@
 import express from 'express';
-import { deleteOwnAccount } from '../../../../core/auth/accountDeletion.service.js';
+import { deleteOwnAccountController } from '../../../../core/auth/accountDeletion.service.js';
 import { upload } from '../../../../middleware/upload.js';
 import {
     listAddressesController,
@@ -49,14 +49,7 @@ const router = express.Router();
 router.get('/profile', getCurrentUserProfileController);
 router.patch('/profile', updateCurrentUserProfileController);
 // Soft delete: see core/auth/accountDeletion.service.js.
-router.delete('/account', async (req, res, next) => {
-    try {
-        const data = await deleteOwnAccount('USER', req.user?.userId);
-        return res.status(200).json({ success: true, message: 'Your account has been deleted', data });
-    } catch (error) {
-        return next(error);
-    }
-});
+router.delete(['/account', '/profile'], deleteOwnAccountController);
 router.post('/profile/profile-image', upload.single('file'), uploadCurrentUserProfileImageController);
 router.delete('/profile', deleteCurrentUserAccountController);
 
