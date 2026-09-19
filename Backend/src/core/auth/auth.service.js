@@ -972,8 +972,9 @@ export const refreshAccessToken = async (token) => {
   if (sessionDelegate) {
     const owner = await sessionDelegate().findUnique({
       where: { id: String(payload.userId) },
-      select: { tokenVersion: true },
+      select: { tokenVersion: true, deletedAt: true },
     });
+    if (!owner || owner.deletedAt) throw new AuthError("This account has been deleted");
     const stored = Number(owner?.tokenVersion) || 0;
     if (tokenVersion !== undefined && Number(tokenVersion) !== stored) {
       throw new AuthError(

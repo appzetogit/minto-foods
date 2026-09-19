@@ -1,4 +1,5 @@
 import express from 'express';
+import { deleteOwnAccount } from '../../../../core/auth/accountDeletion.service.js';
 import { upload } from '../../../../middleware/upload.js';
 import { imageUpload, uploadRateLimiter } from '../../../uploads/middleware/upload.middleware.js';
 import {
@@ -143,6 +144,18 @@ router.get('/categories/public', cacheResponse(600, 'categories'), listCategorie
 
 // Restaurant dashboard/profile (Bearer token + RESTAURANT role)
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);
+router.delete('/account', authMiddleware, requireRestaurant, async (req, res, next) => {
+    await invalidateCache('restaurants:*');
+    await invalidateCache('restaurant_detail:*');
+    next();
+}, async (req, res, next) => {
+    try {
+        const data = await deleteOwnAccount('RESTAURANT', req.user?.userId);
+        return res.status(200).json({ success: true, message: 'Your account has been deleted', data });
+    } catch (error) {
+        return next(error);
+    }
+});
 router.patch('/profile', authMiddleware, requireRestaurant, async (req, res, next) => {
     // Invalidate caches when profile is updated
     await invalidateCache('restaurants:*');

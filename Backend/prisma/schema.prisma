@@ -597,6 +597,12 @@ model FoodUser {
 
   isVerified Boolean @default(false)
   isActive   Boolean @default(true)
+
+  /// Set when the owner deleted their account from the app. The row is kept
+  /// (orders, payouts and invoices point at it) but can no longer sign in.
+  deletedAt    DateTime?
+  /// The number the account had, moved here so it is free to sign up again.
+  deletedPhone String?   @db.VarChar(20)
   role       String  @default("USER")
 
   rating       Decimal @default(0) @db.Decimal(2, 1)
@@ -794,6 +800,12 @@ model FoodRestaurant {
   rejectedAt      DateTime?
   rejectionReason String?
 
+  /// Set when the owner deleted their account from the app. The row is kept
+  /// (orders, payouts and invoices point at it) but can no longer sign in.
+  deletedAt    DateTime?
+  /// The number the account had, moved here so it is free to sign up again.
+  deletedPhone String?   @db.VarChar(20)
+
   onboardingFeePaid             Boolean   @default(false)
   onboardingFeeAmount           Decimal   @default(0) @db.Decimal(14, 2)
   onboardingFeePaidAt           DateTime?
@@ -887,6 +899,12 @@ model FoodDeliveryPartner {
 
   status          PartnerStatus @default(pending)
   rejectionReason String?
+
+  /// Set when the owner deleted their account from the app. The row is kept
+  /// (orders, payouts and invoices point at it) but can no longer sign in.
+  deletedAt    DateTime?
+  /// The number the account had, moved here so it is free to sign up again.
+  deletedPhone String?   @db.VarChar(20)
   rejectedAt      DateTime?
   approvedAt      DateTime?
 

@@ -1,4 +1,5 @@
 import express from 'express';
+import { deleteOwnAccount } from '../../../../core/auth/accountDeletion.service.js';
 import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
 import { requireRoles } from '../../../../core/roles/role.middleware.js';
@@ -48,6 +49,14 @@ router.get('/check-vehicle/:number', async (req, res) => {
 });
 
 router.patch('/profile', authMiddleware, requireRoles('DELIVERY_PARTNER'), uploadFields, updateDeliveryPartnerProfileController);
+router.delete('/account', authMiddleware, requireRoles('DELIVERY_PARTNER'), async (req, res, next) => {
+    try {
+        const data = await deleteOwnAccount('DELIVERY_PARTNER', req.user?.userId);
+        return res.status(200).json({ success: true, message: 'Your account has been deleted', data });
+    } catch (error) {
+        return next(error);
+    }
+});
 
 // JSON-only profile updates (no files) – safe for web updates like vehicle number.
 router.patch('/profile/details', authMiddleware, requireRoles('DELIVERY_PARTNER'), updateDeliveryPartnerDetailsController);
