@@ -206,8 +206,10 @@ export function validateDispatchSettingsDto(body) {
 
 export function validateOrderRatingsDto(body) {
     const schema = z.object({
-        restaurantRating: z.number().min(1).max(5),
-        deliveryPartnerRating: z.number().min(1).max(5).optional(),
+        // Each can be sent on its own: the delivered screen rates only the
+        // rider, the order sheet rates the food. At least one is required.
+        restaurantRating: z.number().int().min(1).max(5).optional(),
+        deliveryPartnerRating: z.number().int().min(1).max(5).optional(),
         restaurantComment: z.string().max(500).optional(),
         deliveryPartnerComment: z.string().max(500).optional(),
         // Per-dish ratings. Optional, so a customer can rate the restaurant
@@ -222,6 +224,8 @@ export function validateOrderRatingsDto(body) {
             )
             .max(50)
             .optional()
+    }).refine((b) => b.restaurantRating != null || b.deliveryPartnerRating != null, {
+        message: 'Choose a rating for the food or the delivery partner',
     });
     const result = schema.safeParse(body || {});
     if (!result.success) {

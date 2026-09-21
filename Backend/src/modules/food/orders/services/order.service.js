@@ -1465,23 +1465,31 @@ export async function submitOrderRatings(orderId, userId, dto) {
   }
 
   const partnerId = row.dispatchDeliveryPartnerId;
-  const hasDeliveryPartner = Boolean(partnerId);
-  if (hasDeliveryPartner && !dto.deliveryPartnerRating) {
-    throw new ValidationError("Delivery partner rating is required");
-  }
+  const ratesRestaurant = dto.restaurantRating != null;
+  const ratesPartner = dto.deliveryPartnerRating != null;
 
-  const restaurantAlreadyRated = Number.isFinite(Number(order?.ratings?.restaurant?.rating));
-  const deliveryAlreadyRated = Number.isFinite(Number(order?.ratings?.deliveryPartner?.rating));
-  if (restaurantAlreadyRated || (hasDeliveryPartner && deliveryAlreadyRated)) {
-    throw new ValidationError("Ratings already submitted for this order");
+  // The food and the rider can be rated separately and in either order -- the
+  // delivered screen asks only about the rider. Each can be rated once.
+  if (ratesPartner && !partnerId) {
+    throw new ValidationError("This order had no delivery partner to rate");
+  }
+  if (ratesRestaurant && row.restaurantRating != null) {
+    throw new ValidationError("You have already rated the food for this order");
+  }
+  if (ratesPartner && row.partnerRating != null) {
+    throw new ValidationError("You have already rated the delivery partner for this order");
   }
 
   const now = new Date();
 
-  // Per-dish ratings. Only items actually on this order count — otherwise a
-  // customer could rate any dish on the menu, from one cheap order.
+  // Per-dish ratings go with the food rating. Only items actually on this
+  // order count -- otherwise a customer could rate any dish on the menu, from
+  // one cheap order.
   const orderedItems = new Map((order.items || []).map((it) => [String(it.itemId), it]));
   const itemRatings = Array.isArray(dto.itemRatings) ? dto.itemRatings : [];
+  if (itemRatings.length && !ratesRestaurant) {
+    throw new ValidationError("Rate the food to rate individual dishes");
+  }
   const seenItemIds = new Set();
   const itemRatingRows = [];
   for (const entry of itemRatings) {
@@ -1499,41 +1507,57 @@ export async function submitOrderRatings(orderId, userId, dto) {
     });
   }
 
+  // Claim the rating slots atomically: the write only lands if they are still
+  // empty, so a double tap cannot count the same rating into the averages twice.
+  const updated = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.foodOrder.updateMany({
+      where: {
+        id: order.id,
+        ...(ratesRestaurant ? { restaurantRating: null } : {}),
+        ...(ratesPartner ? { partnerRating: null } : {}),
+      },
+      data: {
+        ...(ratesRestaurant
+          ? {
+              restaurantRating: dto.restaurantRating,
+              restaurantRatingComment: dto.restaurantComment || "",
+              restaurantRatedAt: now,
+            }
+          : {}),
+        ...(ratesPartner
+          ? {
+              partnerRating: dto.deliveryPartnerRating,
+              partnerRatingComment: dto.deliveryPartnerComment || "",
+              partnerRatedAt: now,
+            }
+          : {}),
+      },
+    });
+    if (!count) throw new ValidationError("Ratings already submitted for this order");
+    if (itemRatingRows.length) {
+      await tx.foodOrder.update({
+        where: { id: order.id },
+        data: { itemRatings: { create: itemRatingRows } },
+      });
+    }
+    return tx.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude });
+  });
+
   await Promise.all([
-    applyAggregateRating('restaurant', row.restaurantId, dto.restaurantRating),
-    hasDeliveryPartner
-      ? applyAggregateRating('deliveryPartner', partnerId, dto.deliveryPartnerRating)
-      : Promise.resolve(),
+    ratesRestaurant ? applyAggregateRating('restaurant', row.restaurantId, dto.restaurantRating) : null,
+    ratesPartner ? applyAggregateRating('deliveryPartner', partnerId, dto.deliveryPartnerRating) : null,
     ...itemRatings.map((entry) => applyAggregateRating('foodItem', entry.itemId, entry.rating)),
   ]);
-
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
-    data: {
-      restaurantRating: dto.restaurantRating,
-      restaurantRatingComment: dto.restaurantComment || "",
-      restaurantRatedAt: now,
-      ...(hasDeliveryPartner
-        ? {
-            partnerRating: dto.deliveryPartnerRating,
-            partnerRatingComment: dto.deliveryPartnerComment || "",
-            partnerRatedAt: now,
-          }
-        : {}),
-      ...(itemRatingRows.length ? { itemRatings: { create: itemRatingRows } } : {}),
-    },
-    include: orderInclude,
-  }));
 
   enqueueOrderEvent('order_ratings_submitted', {
     orderMongoId: order.id,
     orderId: order.id,
     userId,
-    restaurantRating: dto.restaurantRating,
-    deliveryPartnerRating: hasDeliveryPartner ? dto.deliveryPartnerRating : null,
+    restaurantRating: ratesRestaurant ? dto.restaurantRating : null,
+    deliveryPartnerRating: ratesPartner ? dto.deliveryPartnerRating : null,
   });
 
-  return normalizeOrderForClient(updated);
+  return normalizeOrderForClient(toOrder(updated));
 }
 
 /**
