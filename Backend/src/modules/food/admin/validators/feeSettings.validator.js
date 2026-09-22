@@ -39,6 +39,9 @@ const rangeSchema = z.object({
     min: bounded('Range start', MAX_DISTANCE_KM, ' km'),
     max: bounded('Range end', MAX_DISTANCE_KM, ' km'),
     fee: bounded('Range delivery fee', MAX_AMOUNT),
+    // The customer's per-km charge past the band start ("User ₹/km"). It was
+    // missing here and from the mapping below, so it was dropped on every save.
+    feePerKm: bounded('Per km delivery fee', MAX_AMOUNT).optional().default(0),
     deliveryBoyPerKm: bounded('Per km amount', MAX_AMOUNT).optional().default(0),
     deliveryBoyBasePay: bounded('Base pay', MAX_AMOUNT).optional().default(0)
 });
@@ -71,6 +74,7 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 min: Number(r?.min),
                 max: Number(r?.max),
                 fee: Number(r?.fee),
+                feePerKm: Number(r?.feePerKm || 0),
                 deliveryBoyPerKm: Number(r?.deliveryBoyPerKm || 0),
                 deliveryBoyBasePay: Number(r?.deliveryBoyBasePay || 0)
             }))
