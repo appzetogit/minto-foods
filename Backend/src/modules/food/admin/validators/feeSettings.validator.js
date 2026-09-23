@@ -53,6 +53,8 @@ const feeSettingsUpsertSchema = z.object({
     quickDeliveryFee: bounded('Quick delivery extra', MAX_AMOUNT).nullable().optional(),
     gstRate: percentage('GST rate').nullable().optional(),
     deliveryFeeGstRate: percentage('Delivery fee GST rate').nullable().optional(),
+    // The floor under a rider's earning for one trip; null removes it.
+    riderMinPayPerTrip: bounded('Minimum rider pay', MAX_AMOUNT).nullable().optional(),
     isActive: z.boolean().optional(),
     // Which zone these fees are for. Absent/null is the global default, which
     // is what every pre-zone caller means. Zod strips undeclared keys, so
@@ -94,6 +96,12 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 ? null
                 : body?.deliveryFeeGstRate !== undefined
                     ? Number(body.deliveryFeeGstRate)
+                    : undefined,
+        riderMinPayPerTrip:
+            body?.riderMinPayPerTrip === null
+                ? null
+                : body?.riderMinPayPerTrip !== undefined
+                    ? Number(body.riderMinPayPerTrip)
                     : undefined,
         isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined,
         zoneId: body?.zoneId ? String(body.zoneId) : body?.zoneId === null ? null : undefined

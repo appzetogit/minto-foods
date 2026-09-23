@@ -2288,6 +2288,11 @@ model FoodFeeSettings {
   /// GST on the delivery fee. Unset means it is not charged at all.
   deliveryFeeGstRate Decimal? @db.Decimal(5, 2)
 
+  /// The least a rider earns for one delivery, whatever the distance bands
+  /// work out to. Without it a one-kilometre trip paid per km earned almost
+  /// nothing. Null means no floor.
+  riderMinPayPerTrip Decimal? @db.Decimal(14, 2)
+
   /// Null is the global default. A row scoped to a zone overrides it for
   /// orders in that zone; loadActiveFeeSettings falls back to the global row
   /// when a zone has none, so adding a zone never leaves it unpriced.

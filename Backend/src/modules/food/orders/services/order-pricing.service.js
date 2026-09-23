@@ -502,10 +502,16 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
   const distance = Number(distanceKm);
   if (!Number.isFinite(distance) || distance < 0) return 0;
 
+  // A floor under the whole calculation: a one-kilometre trip priced per km
+  // earned a rider almost nothing, and no rider accepts that.
+  const rawFloor = Number(feeSettings?.riderMinPayPerTrip);
+  const floor = Number.isFinite(rawFloor) && rawFloor > 0 ? Math.round(rawFloor) : 0;
+  const atLeastFloor = (amount) => Math.max(floor, amount);
+
   const ranges = Array.isArray(feeSettings.deliveryFeeRanges)
     ? feeSettings.deliveryFeeRanges
     : [];
-  if (ranges.length === 0) return 0;
+  if (ranges.length === 0) return atLeastFloor(0);
 
   // basePay and perKm are mutually exclusive (the admin UI enforces this too):
   // a flat basePay wins, otherwise pay per km of the actual trip.
@@ -519,8 +525,9 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
   };
 
   const matched = matchFeeRange(ranges, distance, payFor);
-  // A matched band is authoritative — including an explicit 0.
-  if (matched != null && Number.isFinite(matched)) return Math.round(matched);
+  // A matched band is authoritative — including an explicit 0 — but never
+  // pays less than the floor.
+  if (matched != null && Number.isFinite(matched)) return atLeastFloor(Math.round(matched));
 
   // No band covers this distance. The customer is still charged (resolveUserDeliveryFee
   // falls back to the base fee), so paying the rider 0 here would mean unpaid work on a
@@ -530,7 +537,7 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
     (a, b) => Number(a?.max ?? 0) - Number(b?.max ?? 0),
   )[ranges.length - 1];
   const fallback = payFor(widest);
-  return Number.isFinite(fallback) ? Math.round(fallback) : 0;
+  return atLeastFloor(Number.isFinite(fallback) ? Math.round(fallback) : 0);
 }
 
 /**

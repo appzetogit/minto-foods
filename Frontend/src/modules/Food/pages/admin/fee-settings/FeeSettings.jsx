@@ -16,6 +16,7 @@ export default function FeeSettings() {
     deliveryFeeRanges: [],
     platformFee: "",
     quickDeliveryFee: "",
+    riderMinPayPerTrip: "",
     gstRate: "",
     deliveryFeeGstRate: "",
   })
@@ -53,6 +54,7 @@ export default function FeeSettings() {
           deliveryFeeRanges: response.data.data.feeSettings.deliveryFeeRanges || [],
           platformFee: response.data.data.feeSettings.platformFee ?? "",
           quickDeliveryFee: response.data.data.feeSettings.quickDeliveryFee ?? "",
+          riderMinPayPerTrip: response.data.data.feeSettings.riderMinPayPerTrip ?? "",
           gstRate: response.data.data.feeSettings.gstRate ?? "",
           deliveryFeeGstRate: response.data.data.feeSettings.deliveryFeeGstRate ?? "",
         })
@@ -64,6 +66,7 @@ export default function FeeSettings() {
           deliveryFeeRanges: [],
           platformFee: "",
           quickDeliveryFee: "",
+          riderMinPayPerTrip: "",
           gstRate: "",
           deliveryFeeGstRate: "",
         })
@@ -128,6 +131,8 @@ export default function FeeSettings() {
         })),
         platformFee: settingsToSave.platformFee === "" ? undefined : Number(settingsToSave.platformFee),
         quickDeliveryFee: settingsToSave.quickDeliveryFee === "" ? undefined : Number(settingsToSave.quickDeliveryFee),
+        riderMinPayPerTrip:
+          settingsToSave.riderMinPayPerTrip === "" ? null : Number(settingsToSave.riderMinPayPerTrip),
         gstRate: settingsToSave.gstRate === "" ? undefined : Number(settingsToSave.gstRate),
         deliveryFeeGstRate: settingsToSave.deliveryFeeGstRate === "" ? undefined : Number(settingsToSave.deliveryFeeGstRate),
         isActive: true,
@@ -154,6 +159,7 @@ export default function FeeSettings() {
             deliveryFeeRanges: saved.deliveryFeeRanges ?? [],
             platformFee: saved.platformFee ?? "",
             quickDeliveryFee: saved.quickDeliveryFee ?? "",
+            riderMinPayPerTrip: saved.riderMinPayPerTrip ?? "",
             gstRate: saved.gstRate ?? "",
             deliveryFeeGstRate: saved.deliveryFeeGstRate ?? "",
           })
@@ -798,6 +804,30 @@ export default function FeeSettings() {
                   </p>
                   {feeErrors.quickDeliveryFee ? (
                     <p className="text-xs font-medium text-red-600">{feeErrors.quickDeliveryFee}</p>
+                  ) : null}
+                </div>
+
+                {/* Minimum rider pay */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Minimum Rider Pay per Trip (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={feeSettings.riderMinPayPerTrip}
+                    onChange={(e) => setFee("riderMinPayPerTrip", e.target.value)}
+                    onKeyDown={blockExponent}
+                    min="0"
+                    step="1"
+                    className={feeInputClass("riderMinPayPerTrip")}
+                    placeholder="Leave blank for no minimum"
+                  />
+                  <p className="text-xs text-slate-500">
+                    The least a rider earns for one delivery, whatever the distance rows work out
+                    to. A short trip paid per km earns very little without this.
+                  </p>
+                  {feeErrors.riderMinPayPerTrip ? (
+                    <p className="text-xs font-medium text-red-600">{feeErrors.riderMinPayPerTrip}</p>
                   ) : null}
                 </div>
 
