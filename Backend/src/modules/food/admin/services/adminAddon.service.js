@@ -89,11 +89,15 @@ export async function createRestaurantAddonAdmin(body = {}) {
         '../../restaurant/services/restaurantAddon.service.js'
     );
     const created = await createRestaurantAddon(restaurantId, body);
+    // Read the stored row rather than the serialized response: the serializer
+    // flattens the draft into top-level fields, so `created.draft` is undefined
+    // and publishing it left the add-on with no content for the app to show.
+    const row = await prisma.foodAddon.findUnique({ where: { id: created.id }, select: { draft: true } });
 
     const approved = await prisma.foodAddon.update({
         where: { id: created.id },
         data: {
-            published: created.draft ?? undefined,
+            published: row?.draft ?? undefined,
             approvalStatus: 'approved',
             approvedAt: new Date(),
             rejectionReason: '',
