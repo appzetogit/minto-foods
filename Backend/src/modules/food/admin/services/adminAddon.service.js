@@ -1,7 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { isId } from '../../../../utils/helpers.js';
-import { ValidationError } from '../../../../core/auth/errors.js';
+import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { logger } from '../../../../utils/logger.js';
 
 /**
@@ -41,12 +41,24 @@ const serializeAddon = (a) => ({
     isAvailable: a.isAvailable !== false,
     draft: a.draft || null,
     published: a.published || null,
+    foodIds: (a.foodIds || []).map(String),
+    group: {
+        name: a.groupName || '',
+        minSelect: a.groupMinSelect || 0,
+        maxSelect: a.groupMaxSelect || 1,
+        sortOrder: a.groupSortOrder || 0,
+    },
+    variantPrices: (a.variantPrices || []).map((v) => ({
+        variantId: v.variantId,
+        price: Number(v.price) || 0,
+    })),
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
 });
 
 const WITH_RESTAURANT = {
     restaurant: { select: { id: true, restaurantName: true, ownerName: true, ownerPhone: true } },
+    variantPrices: { select: { variantId: true, price: true } },
 };
 
 /** Approving flips draft → published, which is what the public feed serves. */
@@ -56,6 +68,42 @@ const dropPublicAddonCache = async () => {
     );
     await invalidatePublicAddonCache();
 };
+
+/**
+ * Admin creates an add-on on a restaurant's behalf, already approved.
+ *
+ * The rules (name clashes, which dishes and variants may be priced) are the
+ * restaurant service's, so the two paths cannot drift apart; only the approval
+ * differs -- an add-on the admin typed does not need the admin to approve it.
+ */
+export async function createRestaurantAddonAdmin(body = {}) {
+    const restaurantId = String(body?.restaurantId || '').trim();
+    if (!isId(restaurantId)) throw new ValidationError('Choose the restaurant this add-on belongs to');
+    const restaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: restaurantId },
+        select: { id: true },
+    });
+    if (!restaurant) throw new NotFoundError('Restaurant not found');
+
+    const { createRestaurantAddon } = await import(
+        '../../restaurant/services/restaurantAddon.service.js'
+    );
+    const created = await createRestaurantAddon(restaurantId, body);
+
+    const approved = await prisma.foodAddon.update({
+        where: { id: created.id },
+        data: {
+            published: created.draft ?? undefined,
+            approvalStatus: 'approved',
+            approvedAt: new Date(),
+            rejectionReason: '',
+            rejectedAt: null,
+        },
+        include: WITH_RESTAURANT,
+    });
+    await dropPublicAddonCache();
+    return serializeAddon(approved);
+}
 
 export async function getRestaurantAddonsAdmin(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 200);

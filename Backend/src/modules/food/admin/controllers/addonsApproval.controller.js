@@ -1,6 +1,16 @@
 import * as adminService from '../services/admin.service.js';
+import * as adminAddonService from '../services/adminAddon.service.js';
 import { isId } from '../../../../utils/helpers.js';
 import { validateAddonAdminListQuery, validateAddonRejectDto } from '../validators/addonApproval.validator.js';
+
+export async function createRestaurantAddon(req, res, next) {
+    try {
+        const addon = await adminAddonService.createRestaurantAddonAdmin(req.body || {});
+        return res.status(201).json({ success: true, message: 'Add-on created', data: { addon } });
+    } catch (error) {
+        return next(error);
+    }
+}
 
 export async function getRestaurantAddons(req, res, next) {
     try {

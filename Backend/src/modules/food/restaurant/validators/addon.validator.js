@@ -19,6 +19,21 @@ const groupSchema = z
     })
     .optional();
 
+/**
+ * What this add-on costs on individual dish variants. Left out means the
+ * add-on's own price applies; the service checks the variants belong to this
+ * restaurant and to the dishes the add-on is attached to.
+ */
+const variantPricesSchema = z
+    .array(
+        z.object({
+            variantId: objectId,
+            price: z.coerce.number().min(0, 'Add-on variant price must be 0 or more'),
+        }),
+    )
+    .max(50)
+    .optional();
+
 /** The moderated content: what admin approves. Excludes foodIds by design. */
 const addonContentSchema = z.object({
     name: z.string().min(1, 'Add-on name is required').max(200),
@@ -32,7 +47,8 @@ const addonContentSchema = z.object({
 /** Create takes a flat body, so foodIds rides along with the content here. */
 const addonPayloadSchema = addonContentSchema.extend({
     foodIds: foodIdsSchema,
-    group: groupSchema
+    group: groupSchema,
+    variantPrices: variantPricesSchema
 });
 
 const listSchema = z.object({
@@ -49,7 +65,8 @@ const updateSchema = z.object({
     isAvailable: z.boolean().optional(),
     // Top-level: re-linking an add-on to menu items does not need re-approval.
     foodIds: foodIdsSchema,
-    group: groupSchema
+    group: groupSchema,
+    variantPrices: variantPricesSchema
 });
 
 export const validateAddonListQuery = (query) => {

@@ -27,6 +27,7 @@ import BottomNavOrders from "@food/components/restaurant/BottomNavOrders"
 // Removed foodManagement - now using backend API directly
 import { useNavigate } from "react-router-dom"
 import { restaurantAPI, uploadAPI } from "@food/api"
+import AddonFields, { addonFieldsPayload, emptyAddonFields } from "@food/components/shared/AddonFields"
 import { isFlutterBridgeAvailable, openGallery } from "@food/utils/imageUploadUtils"
 import { toast } from "sonner"
 const debugLog = (...args) => {}
@@ -165,6 +166,8 @@ export default function HubMenu() {
   const [addonPrice, setAddonPrice] = useState("")
   const [addonFoodType, setAddonFoodType] = useState("veg")
   const [addonImages, setAddonImages] = useState([])
+  // Which dishes the add-on appears on, its choice group, and per-variant prices.
+  const [addonFields, setAddonFields] = useState(emptyAddonFields)
   const [addonImageFiles, setAddonImageFiles] = useState(new Map())
   const [uploadingAddonImages, setUploadingAddonImages] = useState(false)
   const [editingAddon, setEditingAddon] = useState(null) // Store addon being edited
@@ -678,13 +681,17 @@ export default function HubMenu() {
         images: allImageUrls
       }
 
+      // Where the add-on appears and what it costs per variant ride alongside
+      // the content: only the content itself needs admin approval again.
+      const placement = addonFieldsPayload(addonFields)
+
       if (editingAddon) {
         // Update existing add-on
-        await restaurantAPI.updateAddon(editingAddon.id, { draft: addonData })
+        await restaurantAPI.updateAddon(editingAddon.id, { draft: addonData, ...placement })
         toast.success('Add-on updated successfully! Pending admin approval.')
       } else {
         // Create new add-on
-        await restaurantAPI.addAddon(addonData)
+        await restaurantAPI.addAddon({ ...addonData, ...placement })
         toast.success('Add-on added successfully! Pending admin approval.')
       }
       
@@ -695,6 +702,7 @@ export default function HubMenu() {
       setAddonFoodType("veg")
       setAddonImages([])
       setAddonImageFiles(new Map())
+      setAddonFields(emptyAddonFields())
       setEditingAddon(null)
       setIsAddAddonModalOpen(false)
       
@@ -709,6 +717,22 @@ export default function HubMenu() {
   }
 
   // Handle edit add-on
+  // The restaurant's own dishes, with their variants, for the add-on form.
+  const addonFoodOptions = useMemo(
+    () =>
+      (Array.isArray(menuData) ? menuData : [])
+        .flatMap((section) => section?.items || [])
+        .filter((item) => item?.id)
+        .map((item) => ({
+          id: String(item.id),
+          name: item.name || "Unnamed dish",
+          variants: (item.variations || [])
+            .filter((v) => v?.id && v?.name)
+            .map((v) => ({ id: String(v.id), name: v.name })),
+        })),
+    [menuData],
+  )
+
   const handleEditAddon = (addon) => {
     // Edits create a new pending draft while keeping old published version visible (if any).
     setEditingAddon(addon)
@@ -718,6 +742,18 @@ export default function HubMenu() {
     setAddonFoodType(isPureVegRestaurant ? "veg" : (addon.foodType === "non-veg" ? "non-veg" : "veg"))
     setAddonImages(addon.images && addon.images.length > 0 ? addon.images : (addon.image ? [addon.image] : []))
     setAddonImageFiles(new Map())
+    setAddonFields({
+      foodIds: Array.isArray(addon.foodIds) ? addon.foodIds.map(String) : [],
+      group: {
+        name: addon.group?.name || "",
+        minSelect: addon.group?.minSelect || 0,
+        maxSelect: addon.group?.maxSelect || 1,
+        sortOrder: addon.group?.sortOrder || 0,
+      },
+      variantPrices: Array.isArray(addon.variantPrices)
+        ? addon.variantPrices.map((v) => ({ variantId: String(v.variantId), price: v.price }))
+        : [],
+    })
     setIsAddAddonModalOpen(true)
   }
 
@@ -2536,6 +2572,16 @@ export default function HubMenu() {
                     <span className="text-sm font-medium text-gray-700">Add Images</span>
                   </button>
                   <p className="text-xs text-gray-500 mt-1">Add multiple images (PNG, JPG, WEBP - max 5MB each)</p>
+                </div>
+
+                {/* Which dishes it appears on, its choice group, and per-variant prices */}
+                <div className="pt-2 border-t border-gray-200">
+                  <AddonFields
+                    foods={addonFoodOptions}
+                    basePrice={addonPrice}
+                    value={addonFields}
+                    onChange={setAddonFields}
+                  />
                 </div>
               </div>
 

@@ -87,6 +87,61 @@ async function nameIsTaken(restaurantId, name, exceptId = null) {
     return candidates.some((a) => String(a.draft?.name || '').trim().toLowerCase() === target);
 }
 
+
+/**
+ * Prices for an add-on on individual dish variants, replaced as a set.
+ *
+ * Each variant must belong to a dish of this restaurant, and to one of the
+ * dishes the add-on is attached to when it is attached to specific dishes --
+ * otherwise a restaurant could price its add-on against another restaurant's
+ * variant, or against a dish the add-on never appears on.
+ *
+ * Returns the rows to write, or null when the caller sent nothing.
+ */
+async function resolveVariantPrices(restaurantId, addonFoodIds, variantPrices) {
+    if (variantPrices === undefined) return null;
+    const entries = (Array.isArray(variantPrices) ? variantPrices : [])
+        .map((v) => ({ variantId: String(v?.variantId || '').trim(), price: Number(v?.price) }))
+        .filter((v) => isId(v.variantId));
+
+    for (const entry of entries) {
+        if (!Number.isFinite(entry.price) || entry.price < 0) {
+            throw new ValidationError('Add-on variant price must be 0 or more');
+        }
+    }
+    if (!entries.length) return [];
+
+    const ids = [...new Set(entries.map((e) => e.variantId))];
+    const variants = await prisma.foodItemVariant.findMany({
+        where: { id: { in: ids }, foodItem: { restaurantId } },
+        select: { id: true, foodItemId: true },
+    });
+    if (variants.length !== ids.length) {
+        throw new ValidationError('One or more variants do not belong to this restaurant');
+    }
+    if (Array.isArray(addonFoodIds) && addonFoodIds.length) {
+        const allowed = new Set(addonFoodIds);
+        if (variants.some((v) => !allowed.has(v.foodItemId))) {
+            throw new ValidationError('A variant priced here belongs to a dish this add-on is not attached to');
+        }
+    }
+
+    // Last one wins if the caller repeats a variant, rather than failing the save.
+    const byVariant = new Map(entries.map((e) => [e.variantId, e]));
+    return [...byVariant.values()];
+}
+
+/** Writes the variant prices as a set: rows not sent are removed. */
+async function writeVariantPrices(tx, addonId, rows) {
+    if (rows === null) return;
+    await tx.foodAddonVariantPrice.deleteMany({ where: { addonId } });
+    if (rows.length) {
+        await tx.foodAddonVariantPrice.createMany({
+            data: rows.map((r) => ({ addonId, variantId: r.variantId, price: r.price })),
+        });
+    }
+}
+
 const cleanImages = (images) =>
     (Array.isArray(images) ? images : []).filter(Boolean).slice(0, MAX_IMAGES);
 
@@ -133,6 +188,11 @@ const serializeAddon = (a) => {
         ...serializeContent(draft),
         // Published snapshot (what the user app sees).
         published: serializeContent(a.published),
+        // Per-variant prices; an absent variant is charged the price above.
+        variantPrices: (a.variantPrices || []).map((v) => ({
+            variantId: v.variantId,
+            price: Number(v.price) || 0,
+        })),
         createdAt: a.createdAt,
         updatedAt: a.updatedAt,
     };
@@ -162,6 +222,7 @@ export async function listRestaurantAddons(restaurantId, query = {}) {
             orderBy: [{ requestedAt: 'desc' }, { createdAt: 'desc' }],
             skip,
             take: limit,
+            include: { variantPrices: true },
         }),
         prisma.foodAddon.count({ where }),
     ]);
@@ -177,6 +238,8 @@ export async function createRestaurantAddon(restaurantId, body = {}) {
     if (await nameIsTaken(rid, name)) throw new ValidationError('Add-on already exists');
 
     const foodIds = await sanitizeFoodIds(rid, body?.foodIds);
+
+    const variantPriceRows = await resolveVariantPrices(rid, foodIds, body?.variantPrices);
 
     const addon = await prisma.foodAddon.create({
         data: {
@@ -197,7 +260,11 @@ export async function createRestaurantAddon(restaurantId, body = {}) {
             groupSortOrder: Number(body?.group?.sortOrder) || 0,
             approvalStatus: 'pending',
             requestedAt: new Date(),
+            ...(variantPriceRows?.length
+                ? { variantPrices: { create: variantPriceRows.map(({ variantId, price }) => ({ variantId, price })) } }
+                : {}),
         },
+        include: { variantPrices: true },
     });
 
     void notifyAdminsSafely({
@@ -215,7 +282,10 @@ export async function updateRestaurantAddon(restaurantId, addonId, updateDto = {
     if (!isId(addonId)) throw new ValidationError('Invalid add-on id');
     const id = String(addonId);
 
-    const existing = await prisma.foodAddon.findFirst({ where: live({ id, restaurantId: rid }) });
+    const existing = await prisma.foodAddon.findFirst({
+        where: live({ id, restaurantId: rid }),
+        include: { variantPrices: true },
+    });
     if (!existing) return null;
 
     const data = {};
@@ -276,9 +346,18 @@ export async function updateRestaurantAddon(restaurantId, addonId, updateDto = {
         data.rejectedAt = null;
     }
 
-    if (Object.keys(data).length === 0) return serializeAddon(existing);
+    // Prices are checked against the dishes the add-on will be attached to
+    // after this save, not the ones it had before.
+    const nextFoodIds = data.foodIds ?? existing.foodIds;
+    const variantPriceRows = await resolveVariantPrices(rid, nextFoodIds, updateDto?.variantPrices);
 
-    const updated = await prisma.foodAddon.update({ where: { id }, data });
+    if (Object.keys(data).length === 0 && variantPriceRows === null) return serializeAddon(existing);
+
+    const updated = await prisma.$transaction(async (tx) => {
+        if (Object.keys(data).length) await tx.foodAddon.update({ where: { id }, data });
+        await writeVariantPrices(tx, id, variantPriceRows);
+        return tx.foodAddon.findUnique({ where: { id }, include: { variantPrices: true } });
+    });
     await invalidatePublicAddonCache();
     return serializeAddon(updated);
 }

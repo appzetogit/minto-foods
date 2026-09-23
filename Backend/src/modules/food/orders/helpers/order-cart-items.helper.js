@@ -78,6 +78,9 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
     // an attached add-on's id never appears in items[].itemId.
     prisma.foodAddon.findMany({
       where: { restaurantId: rId, isDeleted: false, approvalStatus: 'approved' },
+      // Priced per variant where the restaurant set one: extra cheese can cost
+      // more on a large pizza than a small one.
+      include: { variantPrices: { select: { variantId: true, price: true } } },
     }),
   ]);
 
@@ -97,6 +100,9 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
       addonId: doc.id,
       name: String(published.name).trim(),
       price: Number(published.price) || 0,
+      priceByVariant: new Map(
+        (doc.variantPrices || []).map((v) => [String(v.variantId), Number(v.price) || 0]),
+      ),
     };
     attachableById.set(entry.addonId, entry);
     attachableByName.set(entry.name.toLowerCase(), entry);
@@ -111,7 +117,7 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
    * Anything unrecognised is ignored rather than guessed at: charging for an
    * add-on we cannot identify is worse than omitting it.
    */
-  const resolveAttachedAddons = (raw) => {
+  const resolveAttachedAddons = (raw, variantId = '') => {
     if (!Array.isArray(raw) || raw.length === 0) return [];
     const out = [];
     for (const entry of raw) {
@@ -120,7 +126,12 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
       ).trim();
       if (!key) continue;
       const match = attachableById.get(key) || attachableByName.get(key.toLowerCase());
-      if (match) out.push({ ...match });
+      if (!match) continue;
+      // The price is decided here, never taken from the client: the variant's
+      // own price when the restaurant set one, else the add-on's price.
+      const { priceByVariant, ...addon } = match;
+      const forVariant = variantId ? priceByVariant?.get(String(variantId)) : undefined;
+      out.push({ ...addon, price: forVariant === undefined ? addon.price : forVariant });
     }
     return out;
   };
@@ -142,7 +153,7 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
       }
 
       const pricing = resolveFoodItemPrice(foodDoc, rawItem);
-      const addons = resolveAttachedAddons(rawItem?.addons);
+      const addons = resolveAttachedAddons(rawItem?.addons, pricing.variantId);
       const addonsTotal = addons.reduce((sum, a) => sum + a.price, 0);
 
       resolved.push({

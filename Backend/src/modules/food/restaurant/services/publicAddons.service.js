@@ -83,6 +83,7 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { fo
         select: {
             id: true, published: true, foodIds: true,
             groupName: true, groupMinSelect: true, groupMaxSelect: true, groupSortOrder: true,
+            variantPrices: { select: { variantId: true, price: true } },
         },
     });
 
@@ -105,6 +106,13 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { fo
                 // Lets the app group add-ons per item from one unfiltered fetch.
                 foodIds: (a.foodIds || []).map(String),
                 appliesToWholeMenu: !Array.isArray(a.foodIds) || a.foodIds.length === 0,
+                // What this add-on costs on a given dish variant. A variant not
+                // listed here costs `price` above. The app shows these; the
+                // server prices the order from the same rows.
+                variantPrices: (a.variantPrices || []).map((v) => ({
+                    variantId: v.variantId,
+                    price: Number(v.price) || 0,
+                })),
                 group: toAddonGroup(a),
             };
         });

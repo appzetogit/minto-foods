@@ -1725,6 +1725,10 @@ model FoodItemVariant {
 
   foodItem FoodItem @relation(fields: [foodItemId], references: [id], onDelete: Cascade)
 
+  /// Per-variant prices for add-ons on this dish, e.g. extra cheese costing
+  /// more on a large pizza than a small one.
+  addonPrices FoodAddonVariantPrice[]
+
   /// Two "Large" options on one dish is a data-entry slip, and the picker gives
   /// the customer no way to tell them apart.
   @@unique([foodItemId, name])
@@ -1779,6 +1783,29 @@ model FoodCategory {
   @@map("food_categories")
 }
 
+/// What one add-on costs on one variant of a dish.
+///
+/// Add-ons used to carry a single price, so "extra cheese" cost the same on a
+/// small and a large pizza. A row here overrides that price for one variant;
+/// the add-on's own price is the fallback, so existing add-ons need no rows.
+model FoodAddonVariantPrice {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  addonId   String  @db.VarChar(24)
+  variantId String  @db.VarChar(24)
+  price     Decimal @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  addon   FoodAddon       @relation(fields: [addonId], references: [id], onDelete: Cascade)
+  variant FoodItemVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([addonId, variantId])
+  @@index([variantId])
+  @@map("food_addon_variant_prices")
+}
+
 model FoodAddon {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -1819,6 +1846,10 @@ model FoodAddon {
   updatedAt DateTime @updatedAt
 
   restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  /// Overrides of this add-on's own price, one per dish variant. A variant with
+  /// no row here is charged the add-on's normal price.
+  variantPrices FoodAddonVariantPrice[]
 
   @@index([restaurantId, isDeleted, createdAt(sort: Desc)])
   @@index([approvalStatus, isDeleted, requestedAt(sort: Desc)])

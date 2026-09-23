@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import AddonFields, { addonFieldsPayload, emptyAddonFields } from "@food/components/shared/AddonFields"
 import { Eye, Loader2, Search, Trash2, Pencil } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 import { adminAPI, uploadAPI } from "@food/api"
@@ -44,6 +45,8 @@ export default function AddonsList() {
   const [editForm, setEditForm] = useState({ name: "", price: "", description: "", isAvailable: true })
   const [editImagePreview, setEditImagePreview] = useState("")
   const [editImageFile, setEditImageFile] = useState(null)
+  // Bumped after a create so the list below refetches.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     const fetchAddons = async () => {
@@ -72,7 +75,7 @@ export default function AddonsList() {
 
     const t = setTimeout(fetchAddons, 250)
     return () => clearTimeout(t)
-  }, [searchQuery])
+  }, [searchQuery, refreshKey])
 
   const filteredAddons = useMemo(() => {
     const result = Array.isArray(addons) ? [...addons] : []
@@ -164,6 +167,94 @@ export default function AddonsList() {
 
   const [pendingDelete, setPendingDelete] = useState(null)
 
+  // ---- create -------------------------------------------------------------
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [restaurants, setRestaurants] = useState([])
+  const [createFoods, setCreateFoods] = useState([])
+  const [loadingFoods, setLoadingFoods] = useState(false)
+  const blankCreateForm = () => ({
+    restaurantId: "",
+    name: "",
+    price: "",
+    description: "",
+    foodType: "veg",
+    ...emptyAddonFields(),
+  })
+  const [createForm, setCreateForm] = useState(blankCreateForm)
+
+  const openCreate = async () => {
+    setCreateForm(blankCreateForm())
+    setCreateFoods([])
+    setShowCreateModal(true)
+    try {
+      const res = await adminAPI.getRestaurants({ limit: 200, status: "approved" })
+      setRestaurants(res?.data?.data?.restaurants || [])
+    } catch {
+      setRestaurants([])
+    }
+  }
+
+  // The dish list (with its variants) belongs to the chosen restaurant, so it
+  // is reloaded whenever that changes.
+  const pickRestaurant = async (restaurantId) => {
+    setCreateForm((f) => ({ ...f, restaurantId, ...emptyAddonFields() }))
+    if (!restaurantId) {
+      setCreateFoods([])
+      return
+    }
+    setLoadingFoods(true)
+    try {
+      const res = await adminAPI.getFoods({ restaurantId, limit: 200 })
+      const list = res?.data?.data?.foods || res?.data?.data?.items || []
+      setCreateFoods(
+        list.map((f) => ({
+          id: f._id || f.id,
+          name: f.name,
+          variants: (f.variants || f.variations || []).map((v) => ({ id: v._id || v.id, name: v.name })),
+        })),
+      )
+    } catch {
+      setCreateFoods([])
+    } finally {
+      setLoadingFoods(false)
+    }
+  }
+
+  const handleCreate = async () => {
+    if (!createForm.restaurantId) {
+      toast.error("Choose the restaurant this add-on belongs to")
+      return
+    }
+    if (!String(createForm.name).trim()) {
+      toast.error("Add-on name is required")
+      return
+    }
+    const price = Number(createForm.price)
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("Enter a valid price")
+      return
+    }
+
+    setSubmittingAction(true)
+    try {
+      await adminAPI.createRestaurantAddon({
+        restaurantId: createForm.restaurantId,
+        name: String(createForm.name).trim(),
+        description: String(createForm.description || "").trim(),
+        foodType: createForm.foodType,
+        price,
+        ...addonFieldsPayload(createForm),
+      })
+      toast.success("Add-on created")
+      setShowCreateModal(false)
+      setRefreshKey((k) => k + 1)
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Could not create the add-on")
+    } finally {
+      setSubmittingAction(false)
+    }
+  }
+
   const confirmDelete = async () => {
     if (!pendingDelete) return
     const id = pendingDelete?.id || pendingDelete?._id
@@ -194,7 +285,14 @@ export default function AddonsList() {
             <div className="text-sm text-slate-500 mt-1">Manage add-ons submitted by restaurants.</div>
           </div>
 
-          <div className="flex items-center gap-2" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              + New add-on
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -327,6 +425,98 @@ export default function AddonsList() {
           </table>
         </div>
       </div>
+
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="max-w-2xl p-0 overflow-hidden">
+          <DialogHeader className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+            <DialogTitle className="text-lg font-semibold text-slate-900">New add-on</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[70vh] space-y-4 overflow-y-auto px-6 py-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">Restaurant</label>
+              <select
+                value={createForm.restaurantId}
+                onChange={(e) => pickRestaurant(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">Select a restaurant</option>
+                {restaurants.map((r) => (
+                  <option key={r._id || r.id} value={r._id || r.id}>
+                    {r.restaurantName || r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Name</label>
+                <input
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Extra cheese"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Price (Rs)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={createForm.price}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, price: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Description</label>
+                <input
+                  value={createForm.description}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-700">Food type</label>
+                <select
+                  value={createForm.foodType}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, foodType: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="veg">Veg</option>
+                  <option value="non-veg">Non-veg</option>
+                </select>
+              </div>
+            </div>
+
+            <AddonFields
+              foods={createFoods}
+              loadingFoods={loadingFoods}
+              basePrice={createForm.price}
+              value={createForm}
+              onChange={(next) => setCreateForm((f) => ({ ...f, ...next }))}
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
+            <button
+              onClick={() => setShowCreateModal(false)}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={submittingAction}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {submittingAction ? "Creating..." : "Create add-on"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
         <DialogContent className="max-w-xl p-0 overflow-hidden">

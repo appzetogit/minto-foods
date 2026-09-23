@@ -320,6 +320,8 @@ router.patch('/categories/:id/make-global', adminController.makeCategoryGlobal);
 
 // ----- Restaurant Add-ons Approval -----
 router.get('/addons', addonsApprovalController.getRestaurantAddons);
+// Admin-created add-ons are approved on creation: there is nobody else to approve them.
+router.post('/addons', addonsApprovalController.createRestaurantAddon);
 router.patch('/addons/:id', addonsApprovalController.updateRestaurantAddon);
 router.patch('/addons/:id/approve', addonsApprovalController.approveRestaurantAddon);
 router.patch('/addons/:id/reject', addonsApprovalController.rejectRestaurantAddon);
