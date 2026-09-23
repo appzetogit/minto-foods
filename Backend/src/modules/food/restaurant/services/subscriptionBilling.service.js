@@ -256,8 +256,11 @@ export async function runMonthlyBilling(billingMonth, { generatedBy = 'system' }
     });
 
     const settings = (await getRestaurantSubscriptionSettings()) || {};
+    // Only restaurants actually on the monthly plan. A restaurant on either
+    // commission mode already pays per order; invoicing it as well charged it
+    // twice for the same month.
     const restaurants = await prisma.foodRestaurant.findMany({
-        where: { status: 'approved' },
+        where: { status: 'approved', billingMode: 'subscription' },
         select: { id: true, restaurantName: true },
     });
 

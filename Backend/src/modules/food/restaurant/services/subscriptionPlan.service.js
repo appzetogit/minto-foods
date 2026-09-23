@@ -59,9 +59,19 @@ export const buildPlanCatalog = (settings = {}) => {
     };
 };
 
+/**
+ * The plan a month's GMV falls into: the cheapest plan whose ceiling it does
+ * not exceed.
+ *
+ * Only the ceilings are read. Matching both bounds meant a GMV that fell in a
+ * gap between two bands -- or below the Starter floor, if an admin set one
+ * above zero -- matched nothing and dropped through to Premium, the most
+ * expensive plan. A settings typo would then overcharge the smallest
+ * restaurants.
+ */
 export const resolveEligiblePlanByGmv = (gmv = 0, catalog = buildPlanCatalog({})) => {
     const safeGmv = Math.max(0, toNum(gmv, 0));
-    if (safeGmv >= catalog.starterMinGmv && safeGmv <= catalog.starterMaxGmv) return SUBSCRIPTION_PLAN_KEYS.STARTER;
-    if (safeGmv >= catalog.growthMinGmv && safeGmv <= catalog.growthMaxGmv) return SUBSCRIPTION_PLAN_KEYS.GROWTH;
+    if (safeGmv <= catalog.starterMaxGmv) return SUBSCRIPTION_PLAN_KEYS.STARTER;
+    if (safeGmv <= catalog.growthMaxGmv) return SUBSCRIPTION_PLAN_KEYS.GROWTH;
     return SUBSCRIPTION_PLAN_KEYS.PREMIUM;
 };
