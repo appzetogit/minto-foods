@@ -85,6 +85,7 @@ export default function OutletInfo() {
   const [showEditComplianceDialog, setShowEditComplianceDialog] = useState(false)
   const [complianceForm, setComplianceForm] = useState({
     panNumber: "",
+    aadhaarNumber: "",
     gstRegistered: false,
     gstNumber: "",
     gstLegalName: "",
@@ -359,6 +360,7 @@ export default function OutletInfo() {
   useEffect(() => {
     setComplianceForm({
       panNumber: String(restaurantData?.panNumber || ""),
+      aadhaarNumber: String(restaurantData?.aadhaarNumber || ""),
       gstRegistered: restaurantData?.gstRegistered === true,
       gstNumber: String(restaurantData?.gstNumber || ""),
       gstLegalName: String(restaurantData?.gstLegalName || ""),
@@ -623,11 +625,11 @@ export default function OutletInfo() {
       const uploadRes = await uploadAPI.uploadMedia(file, { folder: `food/restaurants/compliance/${type}` })
       const url = uploadRes?.data?.data?.url || uploadRes?.data?.url || ""
       if (!url) throw new Error("Upload failed")
-      const fieldMap = { pan: "panImage", gst: "gstImage", fssai: "fssaiImage" }
+      const fieldMap = { pan: "panImage", aadhaar: "aadhaarImage", gst: "gstImage", fssai: "fssaiImage" }
       const field = fieldMap[type]
       const response = await restaurantAPI.updateProfile({ [field]: url })
       applyProfileSaveResult(response, "compliance", { [field]: url })
-      toast.success("Document submitted for admin approval")
+      toast.success("Document updated")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to upload document")
     } finally {
@@ -700,6 +702,11 @@ export default function OutletInfo() {
     const gstLegalName = String(complianceForm.gstLegalName || "").trim()
     const gstAddress = String(complianceForm.gstAddress || "").trim()
     const fssaiNumber = String(complianceForm.fssaiNumber || "").trim()
+    const aadhaarNumber = String(complianceForm.aadhaarNumber || "").replace(/\D/g, "")
+    if (aadhaarNumber && aadhaarNumber.length !== 12) {
+      toast.error("Aadhaar number must be 12 digits")
+      return
+    }
 
     if (panNumber && !PAN_REGEX.test(panNumber)) {
       toast.error("Invalid PAN format (e.g. ABCDE1234F)")
@@ -730,6 +737,7 @@ export default function OutletInfo() {
       setSavingCompliance(true)
       const payload = {
         panNumber,
+        aadhaarNumber,
         gstRegistered: complianceForm.gstRegistered === true,
         gstNumber: complianceForm.gstRegistered ? gstNumber : "",
         gstLegalName: complianceForm.gstRegistered ? gstLegalName : "",
@@ -740,7 +748,7 @@ export default function OutletInfo() {
       const response = await restaurantAPI.updateProfile(payload)
       applyProfileSaveResult(response, "compliance", payload)
       setShowEditComplianceDialog(false)
-      toast.success("Compliance details submitted for admin approval")
+      toast.success("Compliance details saved")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update compliance details")
     } finally {
@@ -1238,6 +1246,40 @@ export default function OutletInfo() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><p className="text-xs text-slate-500">PAN number</p><p className="text-sm font-medium text-slate-900">{direct(restaurantData?.panNumber)}</p></div>
+              <div>
+                <p className="text-xs text-slate-500">Aadhaar number</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {restaurantData?.aadhaarNumber
+                    ? `XXXX XXXX ${String(restaurantData.aadhaarNumber).slice(-4)}`
+                    : direct(restaurantData?.aadhaarNumber)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Aadhaar document</p>
+                <div className="mt-1 flex items-center gap-3">
+                  {readDocUrl(restaurantData?.aadhaarImage) ? (
+                    <button
+                      type="button"
+                      onClick={() => openImagePreview(readDocUrl(restaurantData?.aadhaarImage))}
+                      className="text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2"
+                    >
+                      View image
+                    </button>
+                  ) : (
+                    <span className="text-sm text-slate-500">Not uploaded</span>
+                  )}
+                  <label className="cursor-pointer text-sm font-medium text-slate-700 hover:text-slate-900">
+                    {uploadingDocType === "aadhaar" ? "Uploading..." : "Upload"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      disabled={uploadingDocType === "aadhaar"}
+                      onChange={(e) => handleComplianceDocUpload("aadhaar", e.target.files?.[0])}
+                    />
+                  </label>
+                </div>
+              </div>
               <div><p className="text-xs text-slate-500">GST registered</p><p className="text-sm font-medium text-slate-900">{isGstRegistered ? "Yes" : "No"}</p></div>
               {isGstRegistered ? (
                 <>
@@ -1514,6 +1556,20 @@ export default function OutletInfo() {
                   }))
                 }
                 placeholder="Enter PAN number"
+              />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 mb-1">Aadhaar number</p>
+              <Input
+                value={complianceForm.aadhaarNumber}
+                inputMode="numeric"
+                onChange={(e) =>
+                  setComplianceForm((prev) => ({
+                    ...prev,
+                    aadhaarNumber: e.target.value.replace(/\D/g, "").slice(0, 12),
+                  }))
+                }
+                placeholder="12-digit Aadhaar number"
               />
             </div>
             <div>

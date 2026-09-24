@@ -1454,6 +1454,11 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
     if (body.gstImage !== undefined) {
         update.gstImage = toUrl(body.gstImage) || '';
     }
+    // The FSSAI certificate was the one document missing here, so the panel's
+    // "replace certificate" upload reported success and changed nothing.
+    if (body.fssaiImage !== undefined) {
+        update.fssaiImage = toUrl(body.fssaiImage) || '';
+    }
     if (body.fssaiNumber !== undefined) {
         update.fssaiNumber = String(body.fssaiNumber || '').trim();
     }
