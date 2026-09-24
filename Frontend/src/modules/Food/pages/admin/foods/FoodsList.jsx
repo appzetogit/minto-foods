@@ -165,6 +165,10 @@ export default function FoodsList() {
 
   const withImageVersion = (url) => {
     if (!url || typeof url !== "string") return FOOD_FALLBACK_IMAGE
+    // A signed S3 link covers every query parameter, so appending one breaks
+    // the signature and S3 answers 403 -- which is why every dish showed the
+    // placeholder. Signed links already change when the image does.
+    if (/[?&]X-Amz-Signature=/i.test(url)) return url
     return `${url}${url.includes("?") ? "&" : "?"}v=${imageVersion}`
   }
 
