@@ -21,6 +21,7 @@ import {
 } from '../../restaurant/controllers/bulkUpload.controller.js';
 import * as adminCityController from '../controllers/adminCity.controller.js';
 import * as bankChangeController from '../controllers/bankChange.controller.js';
+import * as profileChangeController from '../controllers/profileChange.controller.js';
 import { sendError } from '../../../../utils/response.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -95,6 +96,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/withdrawals')) return 'transaction_management';
     // Where a restaurant's payouts go: the same people who handle withdrawals.
     if (path.startsWith('/bank-changes')) return 'transaction_management';
+    if (path.startsWith('/profile-changes')) return 'restaurant_management';
     if (path.startsWith('/feedback-experiences')) return 'report_management';
     if (path.startsWith('/reports')) return 'report_management';
     // COD & User Payments sits with the other platform-wide switches: the
@@ -330,6 +332,11 @@ router.post('/addons', addonsApprovalController.createRestaurantAddon);
 router.get('/bank-changes', bankChangeController.listBankChangesController);
 router.patch('/bank-changes/:id/approve', bankChangeController.approveBankChangeController);
 router.patch('/bank-changes/:id/reject', bankChangeController.rejectBankChangeController);
+
+// ----- Restaurant profile change requests (held while the restaurant stays live) -----
+router.get('/profile-changes', profileChangeController.listProfileChangesController);
+router.patch('/profile-changes/:id/approve', profileChangeController.approveProfileChangeController);
+router.patch('/profile-changes/:id/reject', profileChangeController.rejectProfileChangeController);
 router.patch('/addons/:id', addonsApprovalController.updateRestaurantAddon);
 router.patch('/addons/:id/approve', addonsApprovalController.approveRestaurantAddon);
 router.patch('/addons/:id/reject', addonsApprovalController.rejectRestaurantAddon);

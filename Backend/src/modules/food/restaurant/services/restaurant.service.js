@@ -7,6 +7,7 @@ import { normalizeMediaUrlForStorage } from '../../../../services/storage.servic
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { findZoneForPoint } from '../../shared/zone.service.js';
 import { extractBankChange, requestBankChange, getPendingBankChange } from './bankChange.service.js';
+import { splitHeld, requestProfileChange, getOpenProfileChange, pendingChangesOf } from './profileChange.service.js';
 import {
     restaurantIdsMatchingCuisine,
     restaurantsNearPoint,
@@ -1068,7 +1069,11 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
     const profile = toRestaurantProfile(toRestaurant(doc));
     if (!profile) return null;
     const enriched = await enrichRestaurantProfileWithAvailability(profile, doc);
-    return { ...enriched, pendingBankChange: await getPendingBankChange(restaurantId) };
+    const [pendingBankChange, pendingProfileChange] = await Promise.all([
+        getPendingBankChange(restaurantId),
+        getOpenProfileChange(restaurantId),
+    ]);
+    return { ...enriched, pendingBankChange, pendingProfileChange };
 };
 
 const enrichRestaurantProfileWithAvailability = async (profile, doc) => {
@@ -1466,9 +1471,27 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
 
     const bankRequest = bankChange ? await requestBankChange(restaurantId, bankChange) : null;
 
+    // A live restaurant keeps trading while sensitive edits wait for review:
+    // they are held as a change request instead of being written and sending
+    // the whole restaurant back to `pending`, which hid it from customers.
+    // One still being onboarded is not visible yet, so it is left as it was.
+    let profileRequest = null;
+    if (currentRestaurant.status === 'approved') {
+        const { now, held } = splitHeld(update);
+        if (Object.keys(held).length) {
+            profileRequest = await requestProfileChange(restaurantId, held, currentRestaurant.restaurantName);
+            for (const key of Object.keys(update)) delete update[key];
+            Object.assign(update, now);
+        }
+    }
+    const withRequests = (profile) => ({
+        ...profile,
+        ...(bankRequest ? { bankChangeRequest: bankRequest } : {}),
+        ...(profileRequest ? { profileChangeRequest: profileRequest } : {}),
+    });
+
     if (!Object.keys(update).length) {
-        const profile = await getCurrentRestaurantProfile(restaurantId);
-        return bankRequest ? { ...profile, bankChangeRequest: bankRequest } : profile;
+        return withRequests(await getCurrentRestaurantProfile(restaurantId));
     }
 
     // Only move profile to pending review when sensitive business/KYC fields are changed.
@@ -1528,8 +1551,7 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             );
         }
 
-        const saved = toRestaurantProfile(toRestaurant(doc));
-        return bankRequest ? { ...saved, bankChangeRequest: bankRequest } : saved;
+        return withRequests(toRestaurantProfile(toRestaurant(doc)));
     } catch (err) {
         if (err?.code === 'P2002') {
             throw new ValidationError('A restaurant with this name and phone already exists');
@@ -1571,16 +1593,20 @@ export const uploadRestaurantProfileImage = async (restaurantId, file) => {
     if (!current) throw new ValidationError('Restaurant not found');
 
     const url = await uploadImageBuffer(file.buffer, 'food/restaurants/profile');
+
+    // A live restaurant keeps its current logo until the new one is approved.
+    if (current.status === 'approved') {
+        const request = await requestProfileChange(id, { profileImage: url }, current.restaurantName);
+        return { profileImage: { url }, profileChangeRequest: request };
+    }
+
     await prisma.foodRestaurant.update({
         where: { id },
         data: { profileImage: url, ...BACK_TO_REVIEW },
     });
-
-    // Only tell the admins if this actually re-opened a settled decision.
     if (current.status !== 'pending') {
         void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
     }
-
     return { profileImage: { url } };
 };
 
@@ -1609,25 +1635,33 @@ export const uploadRestaurantCoverImages = async (restaurantId, files = []) => {
         validFiles.slice(0, 20).map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/cover'))
     );
 
+    const isLive = current.status === 'approved';
+    // Added to what is already waiting, when something is.
+    const waiting = isLive ? await pendingChangesOf(id) : {};
     const data = {
-        coverImages: mergeImageUrls(current.coverImages, uploadedUrls),
-        ...BACK_TO_REVIEW,
+        coverImages: mergeImageUrls(waiting.coverImages ?? current.coverImages, uploadedUrls),
     };
     // A restaurant with no profile picture gets its first cover as one, so the
     // listing card is never blank.
-    if (!toUrl(current.profileImage) && uploadedUrls[0]) {
+    if (!toUrl(waiting.profileImage ?? current.profileImage) && uploadedUrls[0]) {
         data.profileImage = uploadedUrls[0];
     }
 
-    await prisma.foodRestaurant.update({ where: { id }, data });
-
-    if (current.status !== 'pending') {
-        void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
+    let profileChangeRequest = null;
+    if (isLive) {
+        // Held for review; the restaurant stays on the app with its current photos.
+        profileChangeRequest = await requestProfileChange(id, data, current.restaurantName);
+    } else {
+        await prisma.foodRestaurant.update({ where: { id }, data: { ...data, ...BACK_TO_REVIEW } });
+        if (current.status !== 'pending') {
+            void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
+        }
     }
 
     return {
         coverImages: uploadedUrls.map((url) => ({ url, publicId: null })),
         profileImage: data.profileImage ? { url: data.profileImage } : undefined,
+        ...(profileChangeRequest ? { profileChangeRequest } : {}),
     };
 };
 
@@ -1650,15 +1684,20 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
         validFiles.slice(0, 20).map((file) => uploadImageBuffer(file.buffer, 'food/restaurants/menu'))
     );
 
+    if (current.status === 'approved') {
+        const waiting = await pendingChangesOf(id);
+        const menuImages = mergeImageUrls(waiting.menuImages ?? current.menuImages, uploadedUrls);
+        const profileChangeRequest = await requestProfileChange(id, { menuImages }, current.restaurantName);
+        return { menuImages: uploadedUrls.map((url) => ({ url, publicId: null })), profileChangeRequest };
+    }
+
     await prisma.foodRestaurant.update({
         where: { id },
         data: { menuImages: mergeImageUrls(current.menuImages, uploadedUrls), ...BACK_TO_REVIEW },
     });
-
     if (current.status !== 'pending') {
         void notifyAdminsAboutRestaurantProfileReview(id, current.restaurantName || '');
     }
-
     return { menuImages: uploadedUrls.map((url) => ({ url, publicId: null })) };
 };
 

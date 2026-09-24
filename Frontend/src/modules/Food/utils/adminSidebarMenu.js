@@ -61,6 +61,7 @@ export const adminSidebarMenu = [
         icon: "UtensilsCrossed",
         subItems: [
           { label: "Restaurants List", path: "/admin/food/restaurants" },
+          { label: "Changes to Review", path: "/admin/food/restaurant-changes" },
           { label: "New Joining Request", path: "/admin/food/restaurants/joining-request" },
           { label: "Unregistered Restaurants", path: "/admin/food/restaurants/unregistered" },
           { label: "Restaurant Reviews", path: "/admin/food/restaurants/reviews" },

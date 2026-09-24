@@ -698,6 +698,37 @@ model FoodRestaurantBankChange {
   @@map("food_restaurant_bank_changes")
 }
 
+/// Edits to a live restaurant that need an admin's look before customers see
+/// them: name, owner and contact details, KYC documents and photos.
+///
+/// These used to be written straight to the restaurant and knock it back to
+/// `pending`, which took it off the customer app until someone re-approved it
+/// -- a new cover photo meant a closed restaurant. Now the restaurant stays
+/// live with its current details and the edit waits here. `changes` holds the
+/// already-cleaned column values, so approving is a single update.
+model FoodRestaurantProfileChange {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String @db.VarChar(24)
+  changes      Json
+
+  /// pending, approved, rejected, or superseded.
+  status          String    @default("pending") @db.VarChar(16)
+  rejectionReason String    @default("")
+  requestedAt     DateTime  @default(now())
+  reviewedAt      DateTime?
+  reviewedById    String?   @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([status, requestedAt(sort: Desc)])
+  @@index([restaurantId, status])
+  @@map("food_restaurant_profile_changes")
+}
+
 model FoodRestaurant {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -881,6 +912,7 @@ model FoodRestaurant {
   supportTickets       FoodRestaurantSupportTicket[]
   withdrawals          FoodRestaurantWithdrawal[]
   bankChanges          FoodRestaurantBankChange[]
+  profileChanges       FoodRestaurantProfileChange[]
   subscriptionInvoices FoodSubscriptionInvoice[]
   subscriptionTxns     FoodSubscriptionTransaction[]
   subscriptionHistory  FoodRestaurantSubscriptionHistory[]

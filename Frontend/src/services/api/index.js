@@ -1429,6 +1429,13 @@ export const adminAPI = {
       params: params ?? {},
       contextModule: "admin",
     }),
+  /** Restaurant name, contact, document and photo changes waiting for review. */
+  getProfileChanges: (params = {}) =>
+    apiClient.get("/food/admin/profile-changes", { params, contextModule: "admin" }),
+  approveProfileChange: (id) =>
+    apiClient.patch(`/food/admin/profile-changes/${String(id)}/approve`, {}, { contextModule: "admin" }),
+  rejectProfileChange: (id, reason) =>
+    apiClient.patch(`/food/admin/profile-changes/${String(id)}/reject`, { reason }, { contextModule: "admin" }),
   /** Restaurant payout account changes waiting for review. */
   getBankChanges: (params = {}) =>
     apiClient.get("/food/admin/bank-changes", { params, contextModule: "admin" }),

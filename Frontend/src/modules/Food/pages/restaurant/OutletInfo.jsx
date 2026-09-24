@@ -481,12 +481,14 @@ export default function OutletInfo() {
       response?.data?.restaurant ||
       null
 
+    // The server decides the status: a live restaurant now stays approved and
+    // its edit waits as a change request, so forcing "pending" here showed an
+    // open restaurant as closed for review.
+    const held = Boolean(updated?.profileChangeRequest || updated?.bankChangeRequest)
     if (updated) {
-      setRestaurantData({ ...updated, status: "pending" })
-    } else {
-      setRestaurantData((prev) =>
-        prev ? { ...prev, ...fallbackPatch, status: "pending" } : prev,
-      )
+      setRestaurantData(updated)
+    } else if (!held) {
+      setRestaurantData((prev) => (prev ? { ...prev, ...fallbackPatch } : prev))
     }
     markSectionPending(section)
   }
@@ -629,7 +631,7 @@ export default function OutletInfo() {
       const field = fieldMap[type]
       const response = await restaurantAPI.updateProfile({ [field]: url })
       applyProfileSaveResult(response, "compliance", { [field]: url })
-      toast.success("Document uploaded. Your restaurant is back in admin review until it is checked.")
+      toast.success("Document sent for approval. Your restaurant stays open meanwhile.")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to upload document")
     } finally {
@@ -748,7 +750,7 @@ export default function OutletInfo() {
       const response = await restaurantAPI.updateProfile(payload)
       applyProfileSaveResult(response, "compliance", payload)
       setShowEditComplianceDialog(false)
-      toast.success("Saved. Your restaurant is back in admin review until these are checked.")
+      toast.success("Sent for approval. Customers keep seeing your current details until it is approved.")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update compliance details")
     } finally {
