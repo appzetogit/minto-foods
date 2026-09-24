@@ -1,3 +1,4 @@
+import { resolveServiceZone } from '../../shared/zone.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -1816,9 +1817,21 @@ export const listApprovedRestaurants = async (query = {}) => {
         }
     }
 
-    // A zone filter is strict: only restaurants mapped to that zone.
-    const zoneIdRaw = String(query.zoneId || '').trim();
-    if (isId(zoneIdRaw)) AND.push({ zoneId: zoneIdRaw });
+    // Always limited to one zone: the one asked for, or the one the customer
+    // is standing in. Without a zone this used to list every restaurant on the
+    // platform, so a customer outside every service area saw all of India.
+    const service = await resolveServiceZone(query);
+    if (!service.zoneId) {
+        return {
+            restaurants: [],
+            total: 0,
+            page,
+            limit,
+            outOfService: Boolean(service.outOfService),
+            requiresLocation: Boolean(service.requiresLocation),
+        };
+    }
+    AND.push({ zoneId: service.zoneId });
 
     const where = { status: 'approved', ...(AND.length ? { AND } : {}) };
 

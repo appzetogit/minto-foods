@@ -1,3 +1,4 @@
+import { resolveServiceZone } from '../../shared/zone.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { loadRadiusSettings, withinDeliveryRadius } from '../../shared/deliveryRadius.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -67,12 +68,29 @@ export const searchUnified = async (query = {}, options = {}) => {
     const hasGeoSorting = userLat !== null && userLng !== null;
     const fetchLimit = Math.min(limitNumber * 3, 120);
 
-    const zoneFiltered = isId(zoneId);
+    // Search is limited to one zone like every customer list: the zone asked
+    // for, or the one at the customer's location. Outside every zone, or with
+    // no location, there is nothing to search.
+    const service = await resolveServiceZone({ zoneId, lat, lng });
+    if (!service.zoneId) {
+        return {
+            success: true,
+            data: {
+                restaurants: [],
+                total: 0,
+                page: Math.max(parseInt(page, 10) || 1, 1),
+                limit: Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50),
+                outOfService: Boolean(service.outOfService),
+                requiresLocation: Boolean(service.requiresLocation),
+            },
+        };
+    }
+    const zoneFiltered = true;
     const categoryFiltered = isId(categoryId);
 
     // 1. Base filter
     const where = { status: 'approved' };
-    if (zoneFiltered) where.zoneId = String(zoneId);
+    where.zoneId = service.zoneId;
     if (isVeg === 'true') where.pureVegRestaurant = true;
     // Filters from the URL are only applied when they are real numbers. A value
     // like `minRating=abc` used to reach the query as NaN, which the database
@@ -221,13 +239,10 @@ export const searchUnified = async (query = {}, options = {}) => {
     const shouldSkipZoneFallback =
         strictZone === true || strictZone === 'true' || categoryFiltered;
 
-    if (!shouldSkipZoneFallback && !results.length && zoneFiltered) {
-        const fallbackResults = await searchUnified({ ...query, zoneId: null }, options);
-        if (fallbackResults.data.total > 0) {
-            fallbackResults.data.wasFallback = true;
-            return fallbackResults;
-        }
-    }
+    // The old fallback re-ran an empty search with no zone, which searched every
+    // city on the platform and offered restaurants that cannot deliver here. An
+    // empty result now stays empty.
+    void shouldSkipZoneFallback;
 
     return finalResult;
 };

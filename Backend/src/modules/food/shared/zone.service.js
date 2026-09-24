@@ -86,3 +86,31 @@ export async function backfillZoneBoundaries() {
     `;
     return stats;
 }
+
+/**
+ * The zone a customer-facing list is limited to.
+ *
+ * Every restaurant, dish and search list for customers is limited to one
+ * zone. Before this, a request with no zone -- a customer outside every
+ * service area, or an app that asked before location was known -- got every
+ * restaurant on the platform, from every city.
+ *
+ * Returns one of:
+ *   { zoneId }                          the zone asked for, or the zone at the point
+ *   { zoneId: null, outOfService: true } the point is outside every zone
+ *   { zoneId: null, requiresLocation: true } no zone and no point to find one
+ */
+export async function resolveServiceZone({ zoneId, lat, lng } = {}) {
+    const asked = String(zoneId || '').trim();
+    if (/^[a-f0-9]{24}$/i.test(asked)) return { zoneId: asked };
+
+    const la = Number(lat);
+    const ln = Number(lng);
+    const hasPoint = lat !== undefined && lat !== null && lat !== ''
+        && lng !== undefined && lng !== null && lng !== ''
+        && Number.isFinite(la) && Number.isFinite(ln);
+    if (!hasPoint) return { zoneId: null, requiresLocation: true };
+
+    const zone = await findZoneForPoint(la, ln);
+    return zone ? { zoneId: zone.id } : { zoneId: null, outOfService: true };
+}

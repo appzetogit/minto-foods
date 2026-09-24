@@ -1,3 +1,4 @@
+import { resolveServiceZone } from '../../shared/zone.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import {
@@ -26,10 +27,21 @@ export async function listPublicFoods(query = {}) {
     const promo = String(query.promo || query.promoSlug || '').trim().toLowerCase();
     const isSwitch99Promo = promo === 'switch99' || promo === 'under-250' || promo === 'under250';
 
+    // Dishes come from one zone only, like the restaurant feed.
+    const service = await resolveServiceZone({ zoneId: zoneIdRaw, lat: query.lat, lng: query.lng });
+    if (!service.zoneId) {
+        return {
+            foods: [],
+            total: 0,
+            outOfService: Boolean(service.outOfService),
+            requiresLocation: Boolean(service.requiresLocation),
+        };
+    }
+
     let restaurants = await prisma.foodRestaurant.findMany({
         where: {
             status: 'approved',
-            ...(isId(zoneIdRaw) ? { zoneId: zoneIdRaw } : {}),
+            zoneId: service.zoneId,
         },
         select: {
             id: true, restaurantName: true, zoneId: true, profileImage: true,
