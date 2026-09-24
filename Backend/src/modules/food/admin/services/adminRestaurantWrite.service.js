@@ -183,6 +183,9 @@ export async function updateRestaurantById(id, body = {}) {
     if (body.ifscCode !== undefined) data.ifscCode = toStr(body.ifscCode);
     if (body.accountHolderName !== undefined) data.accountHolderName = toStr(body.accountHolderName);
     if (body.accountType !== undefined) data.accountType = toStr(body.accountType);
+    // UPI was stored by onboarding but could not be corrected by an admin.
+    if (body.upiId !== undefined) data.upiId = toStr(body.upiId);
+    if (body.upiQrImage !== undefined) data.upiQrImage = toUrl(body.upiQrImage) ?? '';
 
     if (body.featuredDish !== undefined) data.featuredDish = toStr(body.featuredDish);
     if (body.featuredPrice !== undefined) data.featuredPrice = toFiniteNumber(body.featuredPrice);

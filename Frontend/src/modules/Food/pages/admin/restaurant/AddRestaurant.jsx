@@ -468,8 +468,6 @@ export default function AddRestaurant() {
     if (openingMinutes !== null && closingMinutes !== null) {
       if (openingMinutes === closingMinutes) {
         errors.push("Opening time and closing time cannot be same")
-      } else if (closingMinutes < openingMinutes) {
-        errors.push("Closing time cannot be less than opening time")
       }
     }
     if (!step2.openDays || step2.openDays.length === 0) errors.push("Please select at least one open day")
@@ -1261,11 +1259,6 @@ export default function AddRestaurant() {
                   if (openingMinutes !== null && closingMinutes !== null) {
                     if (openingMinutes === closingMinutes) {
                       toast.error("Opening time and closing time cannot be same")
-                      return
-                    }
-                    if (closingMinutes < openingMinutes) {
-                      toast.error("Closing time cannot be less than opening time")
-                      return
                     }
                   }
                   setStep2({ ...step2, openingTime: nextOpening })
@@ -1286,11 +1279,6 @@ export default function AddRestaurant() {
                   if (openingMinutes !== null && closingMinutes !== null) {
                     if (openingMinutes === closingMinutes) {
                       toast.error("Opening time and closing time cannot be same")
-                      return
-                    }
-                    if (closingMinutes < openingMinutes) {
-                      toast.error("Closing time cannot be less than opening time")
-                      return
                     }
                   }
                   setStep2({ ...step2, closingTime: nextClosing })
@@ -1298,6 +1286,11 @@ export default function AddRestaurant() {
                 autoComplete="off"
                 className="bg-white text-sm"
               />
+              {timeStringToMinutes(step2.closingTime) !== null &&
+              timeStringToMinutes(step2.openingTime) !== null &&
+              timeStringToMinutes(step2.closingTime) < timeStringToMinutes(step2.openingTime) && (
+                <p className="mt-1 text-xs text-slate-500">Closes the next day (open past midnight).</p>
+              )}
             </div>
           </div>
         </div>

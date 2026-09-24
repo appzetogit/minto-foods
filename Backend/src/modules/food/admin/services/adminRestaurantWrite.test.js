@@ -70,10 +70,11 @@ test('times are normalised and validated', async () => {
     assert.equal(r.openingTime, '09:30');
     assert.equal(r.closingTime, '23:00');
 
-    await assert.rejects(
-        () => createRestaurantByAdmin(baseBody({ openingTime: '22:00', closingTime: '09:00' })),
-        /Closing time cannot be less than opening time/,
-    );
+    // Past midnight is a real schedule (a late-night kitchen), not an error:
+    // it closes at 09:00 the next day.
+    const late = await track(baseBody({ openingTime: '22:00', closingTime: '09:00' }));
+    assert.equal(late.openingTime, '22:00');
+    assert.equal(late.closingTime, '09:00');
     await assert.rejects(
         () => createRestaurantByAdmin(baseBody({ openingTime: '10:00', closingTime: '10:00' })),
         /cannot be same/,

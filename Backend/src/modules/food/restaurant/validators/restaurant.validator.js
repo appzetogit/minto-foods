@@ -163,9 +163,9 @@ export const validateRestaurantRegisterDto = (body) => {
         if (openingMinutes === closingMinutes) {
             throw new ValidationError('Opening time and closing time cannot be same');
         }
-        if (closingMinutes < openingMinutes) {
-            throw new ValidationError('Closing time cannot be less than opening time');
-        }
+        // A closing time earlier than the opening time is the next day: 4 PM to
+        // 2 AM is a late-night restaurant, not a mistake. The open-now check in
+        // restaurantAvailability.helper.js already handles windows past midnight.
     }
     return {
         ...data,

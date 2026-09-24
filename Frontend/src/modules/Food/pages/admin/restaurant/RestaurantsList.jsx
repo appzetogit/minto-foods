@@ -12,6 +12,7 @@ import locationIcon from "@food/assets/Dashboard-icons/image1.png"
 import restaurantIcon from "@food/assets/Dashboard-icons/image2.png"
 import inactiveIcon from "@food/assets/Dashboard-icons/image3.png"
 import { zoneLabel } from "@food/utils/entityLabels"
+import RestaurantBusinessEditor from "@food/components/admin/restaurant/RestaurantBusinessEditor"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -1017,10 +1018,6 @@ export default function RestaurantsList() {
       if (openingMinutes !== null && closingMinutes !== null) {
         if (openingMinutes === closingMinutes) {
           alert("Opening time and closing time cannot be same")
-          return
-        }
-        if (closingMinutes < openingMinutes) {
-          alert("Closing time cannot be less than opening time")
           return
         }
       }
@@ -2322,6 +2319,18 @@ export default function RestaurantsList() {
                         )}
                       </div>
                     </div>
+                  )}
+
+                  {/* Editable licences, tax, payout account and delivery limits. Outside the
+                      documents block below, which hides itself when a restaurant has
+                      no documents yet -- exactly when they most need filling in. */}
+                  {isEditingDetails && (
+                    <RestaurantBusinessEditor
+                      restaurant={r}
+                      onSaved={(updated) => {
+                        if (updated) setRestaurantDetails((prev) => ({ ...(prev || {}), ...updated }))
+                      }}
+                    />
                   )}
 
                   {/* Registration Documents - flat (PAN, GST, FSSAI, Bank) or onboarding.step3 */}
