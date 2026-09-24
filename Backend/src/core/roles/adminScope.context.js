@@ -37,6 +37,9 @@ const ZONED = {
     foodRestaurant: (s) => ({ OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] }),
     // Riders carry a typed city rather than a zone.
     foodDeliveryPartner: (s) => ({ city: { in: s.cityNames, mode: 'insensitive' } }),
+    foodRestaurantBankChange: (s) => ({
+        restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
+    }),
 };
 
 /**

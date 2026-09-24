@@ -663,6 +663,41 @@ model UserAddress {
   @@map("food_user_addresses")
 }
 
+/// A restaurant's request to change where its payouts go.
+///
+/// Held here, not written to the restaurant, until an admin approves: payouts
+/// keep using the current account meanwhile. Without this a stolen restaurant
+/// login could switch the payout account and take the next payout. A null
+/// field means "not part of this change".
+model FoodRestaurantBankChange {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId String @db.VarChar(24)
+
+  accountHolderName String?
+  accountNumber     String?
+  ifscCode          String?
+  accountType       String?
+  upiId             String?
+  upiQrImage        String?
+
+  /// pending, approved, rejected, or superseded (replaced by a newer request).
+  status          String    @default("pending") @db.VarChar(16)
+  rejectionReason String    @default("")
+  requestedAt     DateTime  @default(now())
+  reviewedAt      DateTime?
+  reviewedById    String?   @db.VarChar(24)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([status, requestedAt(sort: Desc)])
+  @@index([restaurantId, status])
+  @@map("food_restaurant_bank_changes")
+}
+
 model FoodRestaurant {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -845,6 +880,7 @@ model FoodRestaurant {
   itemCommissions      FoodItemCommission[]
   supportTickets       FoodRestaurantSupportTicket[]
   withdrawals          FoodRestaurantWithdrawal[]
+  bankChanges          FoodRestaurantBankChange[]
   subscriptionInvoices FoodSubscriptionInvoice[]
   subscriptionTxns     FoodSubscriptionTransaction[]
   subscriptionHistory  FoodRestaurantSubscriptionHistory[]

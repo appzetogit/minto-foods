@@ -30,6 +30,8 @@ export default function UpdateBankDetails() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState({})
   const [isQrPickerOpen, setIsQrPickerOpen] = useState(false)
+  // A change waiting for admin approval, or the last one rejected.
+  const [pendingChange, setPendingChange] = useState(null)
   const qrInputRef = useRef(null)
 
   const formattedUpdatedAt = useMemo(() => {
@@ -89,6 +91,7 @@ export default function UpdateBankDetails() {
       const response = await restaurantAPI.getCurrentRestaurant()
       const doc = response?.data?.data?.restaurant || response?.data?.restaurant || null
       if (!doc) return
+      setPendingChange(doc.pendingBankChange || null)
 
       const accountNumber = String(doc.accountNumber || "").replace(/\s|-/g, "")
       const upiQrImage =
@@ -161,10 +164,15 @@ export default function UpdateBankDetails() {
 
     try {
       setSaving(true)
-      await restaurantAPI.updateProfile(payload)
+      const res = await restaurantAPI.updateProfile(payload)
+      const request = res?.data?.data?.restaurant?.bankChangeRequest || res?.data?.data?.bankChangeRequest
       await loadProfile()
       setErrors({})
-      alert("Bank details updated successfully")
+      alert(
+        request?.status === "unchanged"
+          ? "These are already your payout details."
+          : "Sent for approval. Payouts keep going to your current account until the Minto team approves the change.",
+      )
     } catch (error) {
       alert(error?.response?.data?.message || "Failed to update bank details")
     } finally {
@@ -209,6 +217,19 @@ export default function UpdateBankDetails() {
               {formattedUpdatedAt ? (
                 <p className="text-sm text-gray-500 mt-1">Last updated: {formattedUpdatedAt}</p>
               ) : null}
+              {pendingChange?.status === "pending" && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  A change to your payout account is waiting for approval
+                  {pendingChange.requested?.accountNumber ? ` (account ${pendingChange.requested.accountNumber})` : ""}.
+                  Payouts keep going to the account shown below until it is approved.
+                </div>
+              )}
+              {pendingChange?.status === "rejected" && (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  Your last payout account change was not approved
+                  {pendingChange.rejectionReason ? `: ${pendingChange.rejectionReason}` : "."} You can correct it and send it again.
+                </div>
+              )}
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">

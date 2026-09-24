@@ -1429,6 +1429,13 @@ export const adminAPI = {
       params: params ?? {},
       contextModule: "admin",
     }),
+  /** Restaurant payout account changes waiting for review. */
+  getBankChanges: (params = {}) =>
+    apiClient.get("/food/admin/bank-changes", { params, contextModule: "admin" }),
+  approveBankChange: (id) =>
+    apiClient.patch(`/food/admin/bank-changes/${String(id)}/approve`, {}, { contextModule: "admin" }),
+  rejectBankChange: (id, reason) =>
+    apiClient.patch(`/food/admin/bank-changes/${String(id)}/reject`, { reason }, { contextModule: "admin" }),
   /** Admin creates an add-on for a restaurant; it is approved on creation. */
   createRestaurantAddon: (body) =>
     apiClient.post("/food/admin/addons", body ?? {}, { contextModule: "admin" }),

@@ -20,6 +20,7 @@ import {
     uploadAdminBulkMenuController,
 } from '../../restaurant/controllers/bulkUpload.controller.js';
 import * as adminCityController from '../controllers/adminCity.controller.js';
+import * as bankChangeController from '../controllers/bankChange.controller.js';
 import { sendError } from '../../../../utils/response.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -92,6 +93,8 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
+    // Where a restaurant's payouts go: the same people who handle withdrawals.
+    if (path.startsWith('/bank-changes')) return 'transaction_management';
     if (path.startsWith('/feedback-experiences')) return 'report_management';
     if (path.startsWith('/reports')) return 'report_management';
     // COD & User Payments sits with the other platform-wide switches: the
@@ -322,6 +325,11 @@ router.patch('/categories/:id/make-global', adminController.makeCategoryGlobal);
 router.get('/addons', addonsApprovalController.getRestaurantAddons);
 // Admin-created add-ons are approved on creation: there is nobody else to approve them.
 router.post('/addons', addonsApprovalController.createRestaurantAddon);
+
+// ----- Restaurant bank change requests -----
+router.get('/bank-changes', bankChangeController.listBankChangesController);
+router.patch('/bank-changes/:id/approve', bankChangeController.approveBankChangeController);
+router.patch('/bank-changes/:id/reject', bankChangeController.rejectBankChangeController);
 router.patch('/addons/:id', addonsApprovalController.updateRestaurantAddon);
 router.patch('/addons/:id/approve', addonsApprovalController.approveRestaurantAddon);
 router.patch('/addons/:id/reject', addonsApprovalController.rejectRestaurantAddon);

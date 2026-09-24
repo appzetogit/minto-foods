@@ -228,6 +228,7 @@ export const adminSidebarMenu = [
         icon: "Wallet",
       },
       { type: "link", label: "Restaurant Withdraws", path: "/admin/food/restaurant-withdraws", icon: "CreditCard" },
+      { type: "link", label: "Payout Account Changes", path: "/admin/food/bank-change-requests", icon: "CreditCard" },
     ],
   },
   {

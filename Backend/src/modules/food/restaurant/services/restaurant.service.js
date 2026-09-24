@@ -6,6 +6,7 @@ import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { findZoneForPoint } from '../../shared/zone.service.js';
+import { extractBankChange, requestBankChange, getPendingBankChange } from './bankChange.service.js';
 import {
     restaurantIdsMatchingCuisine,
     restaurantsNearPoint,
@@ -1066,7 +1067,8 @@ export const getCurrentRestaurantProfile = async (restaurantId) => {
 
     const profile = toRestaurantProfile(toRestaurant(doc));
     if (!profile) return null;
-    return enrichRestaurantProfileWithAvailability(profile, doc);
+    const enriched = await enrichRestaurantProfileWithAvailability(profile, doc);
+    return { ...enriched, pendingBankChange: await getPendingBankChange(restaurantId) };
 };
 
 const enrichRestaurantProfileWithAvailability = async (profile, doc) => {
@@ -1263,26 +1265,10 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         update.zoneId = isId(zoneId) ? zoneId : null;
     }
 
-    // Bank + UPI fields (Explore -> Update Bank Details page)
-    if (body.accountHolderName !== undefined) {
-        update.accountHolderName = String(body.accountHolderName || '').trim();
-    }
-    if (body.accountNumber !== undefined) {
-        update.accountNumber = String(body.accountNumber || '').replace(/\s|-/g, '').trim();
-    }
-    if (body.ifscCode !== undefined) {
-        update.ifscCode = String(body.ifscCode || '').trim().toUpperCase();
-    }
-    if (body.accountType !== undefined) {
-        update.accountType = String(body.accountType || '').trim();
-    }
-    if (body.upiId !== undefined) {
-        update.upiId = String(body.upiId || '').trim();
-    }
-    if (body.upiQrImage !== undefined || body.upiQrCode !== undefined) {
-        const qrImage = body.upiQrImage !== undefined ? body.upiQrImage : body.upiQrCode;
-        update.upiQrImage = String(qrImage || '').trim();
-    }
+    // Bank + UPI fields are not written here. They become a change request an
+    // admin approves (bankChange.service.js), so payouts keep going to the
+    // current account and a hijacked login cannot redirect them.
+    const bankChange = extractBankChange(body);
 
     if (body.name !== undefined || body.restaurantName !== undefined) {
         const raw = body.name !== undefined ? body.name : body.restaurantName;
@@ -1478,8 +1464,11 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         update.fssaiImage = toUrl(body.fssaiImage) || '';
     }
 
+    const bankRequest = bankChange ? await requestBankChange(restaurantId, bankChange) : null;
+
     if (!Object.keys(update).length) {
-        return getCurrentRestaurantProfile(restaurantId);
+        const profile = await getCurrentRestaurantProfile(restaurantId);
+        return bankRequest ? { ...profile, bankChangeRequest: bankRequest } : profile;
     }
 
     // Only move profile to pending review when sensitive business/KYC fields are changed.
@@ -1506,12 +1495,6 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
         'fssaiNumber',
         'fssaiExpiry',
         'fssaiImage',
-        'accountHolderName',
-        'accountNumber',
-        'ifscCode',
-        'accountType',
-        'upiId',
-        'upiQrImage',
         'profileImage',
         'coverImages',
         'menuImages'
@@ -1545,7 +1528,8 @@ export const updateRestaurantProfile = async (restaurantId, body = {}) => {
             );
         }
 
-        return toRestaurantProfile(toRestaurant(doc));
+        const saved = toRestaurantProfile(toRestaurant(doc));
+        return bankRequest ? { ...saved, bankChangeRequest: bankRequest } : saved;
     } catch (err) {
         if (err?.code === 'P2002') {
             throw new ValidationError('A restaurant with this name and phone already exists');

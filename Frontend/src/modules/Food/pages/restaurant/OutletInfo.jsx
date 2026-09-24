@@ -629,7 +629,7 @@ export default function OutletInfo() {
       const field = fieldMap[type]
       const response = await restaurantAPI.updateProfile({ [field]: url })
       applyProfileSaveResult(response, "compliance", { [field]: url })
-      toast.success("Document updated")
+      toast.success("Document uploaded. Your restaurant is back in admin review until it is checked.")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to upload document")
     } finally {
@@ -748,7 +748,7 @@ export default function OutletInfo() {
       const response = await restaurantAPI.updateProfile(payload)
       applyProfileSaveResult(response, "compliance", payload)
       setShowEditComplianceDialog(false)
-      toast.success("Compliance details saved")
+      toast.success("Saved. Your restaurant is back in admin review until these are checked.")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update compliance details")
     } finally {
