@@ -6,6 +6,7 @@ import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import { normalizeMediaUrlForStorage } from '../../../../services/storage.service.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
 import { findZoneForPoint } from '../../shared/zone.service.js';
+import { parseDayBound } from '../../../../utils/timezone.js';
 import { extractBankChange, requestBankChange, getPendingBankChange } from './bankChange.service.js';
 import { splitHeld, requestProfileChange, getOpenProfileChange, pendingChangesOf } from './profileChange.service.js';
 import {
@@ -985,7 +986,9 @@ export const registerRestaurant = async (payload, files) => {
                     gstLegalName,
                     gstAddress,
                     fssaiNumber,
-                    fssaiExpiry,
+                    // The form sends a bare day ("2027-10-31"); Prisma needs a Date and threw,
+                    // so every sign-up that filled in the FSSAI expiry failed with a 500.
+                    fssaiExpiry: fssaiExpiry ? (parseDayBound(fssaiExpiry, 'end') || null) : null,
                     accountNumber,
                     ifscCode,
                     accountHolderName,
