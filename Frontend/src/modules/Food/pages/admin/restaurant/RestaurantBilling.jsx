@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import apiClient from "@food/api"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { Search, Loader2, Percent, IndianRupee, X, RotateCcw, Info } from "lucide-react"
@@ -88,6 +89,10 @@ export default function RestaurantBilling() {
         loadOverview()
     }, [fetchRestaurants, loadOverview])
 
+
+    // Long lists page instead of rendering every row at once.
+
+    const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filtered)
     const filtered = useMemo(() => {
         const query = searchQuery.trim().toLowerCase()
         if (!query) return restaurants
@@ -222,7 +227,7 @@ export default function RestaurantBilling() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {filtered.map((restaurant) => {
+                                    {pagedRows.map((restaurant) => {
                                         const id = restaurant.id || restaurant._id
                                         const mode = restaurant.billingMode || "commission_overall"
                                         return (
@@ -276,7 +281,9 @@ export default function RestaurantBilling() {
                                     })}
                                 </tbody>
                             </table>
+                            {listPager}
                         </div>
+
                     )}
                 </div>
             </div>

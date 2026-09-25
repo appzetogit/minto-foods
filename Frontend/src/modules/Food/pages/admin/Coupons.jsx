@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Check, ChevronDown, Search, X } from "lucide-react"
 import { adminAPI } from "@food/api"
@@ -559,6 +560,8 @@ export default function Coupons() {
       offer.couponCode?.toLowerCase().includes(query)
     )
   }, [offers, searchQuery])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredOffers)
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
@@ -893,7 +896,7 @@ export default function Coupons() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
-                  {filteredOffers.map((offer) => (
+                  {pagedRows.map((offer) => (
                     <tr key={`${offer.offerId}-${offer.dishId}`} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm font-medium text-slate-700">{offer.sl}</span>
@@ -1019,6 +1022,7 @@ export default function Coupons() {
                   ))}
                 </tbody>
               </table>
+              {listPager}
             </div>
           )}
         </div>

@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import { useState, useMemo, useEffect } from "react"
 import { Search, Filter, Eye, Check, X, Package, ArrowUpDown, FileText, FileSpreadsheet, Loader2, Download, ExternalLink, Calendar, MapPin, CreditCard, User, Mail, Phone, Bike, FileCheck } from "lucide-react"
 import { adminAPI } from "@food/api"
@@ -99,6 +100,10 @@ export default function JoinRequest() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, debouncedSearch, filters, isFilterOpen])
 
+
+  // Long lists page instead of rendering every row at once.
+
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
   const filteredRequests = useMemo(() => {
     let result = [...requests]
     
@@ -333,7 +338,8 @@ export default function JoinRequest() {
                 <span className="ml-3 text-sm text-slate-600">Loading requests...</span>
               </div>
             ) : (
-              <table className="w-full">
+              <>
+<table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
@@ -385,7 +391,7 @@ export default function JoinRequest() {
                       </td>
                     </tr>
                   ) : (
-                    filteredRequests.map((request) => (
+                    pagedRows.map((request) => (
                       <tr key={request._id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm font-medium text-slate-700">{request.sl}</span>
@@ -482,8 +488,11 @@ export default function JoinRequest() {
                   )}
                 </tbody>
               </table>
+              {listPager}
+</>
             )}
           </div>
+
         </div>
       </div>
 

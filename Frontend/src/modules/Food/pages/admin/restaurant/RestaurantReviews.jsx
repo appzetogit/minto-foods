@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import DateRangeFilter from "@food/components/admin/DateRangeFilter"
 import { useState, useMemo, useEffect } from "react"
 import { Search, Download, ChevronDown, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Code, Check, Columns, Loader2, Eye, Utensils } from "lucide-react"
@@ -48,6 +49,10 @@ export default function RestaurantReviews() {
     date: true,
   })
 
+
+  // Long lists page instead of rendering every row at once.
+
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredReviews)
   const filteredReviews = useMemo(() => {
     if (!searchQuery.trim()) {
       return reviews
@@ -229,7 +234,8 @@ export default function RestaurantReviews() {
                 <p className="text-slate-500">No reviews found</p>
               </div>
             ) : (
-              <table className="w-full">
+              <>
+<table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     {visibleColumns.si && (
@@ -256,7 +262,7 @@ export default function RestaurantReviews() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
-                  {filteredReviews.map((review) => (
+                  {pagedRows.map((review) => (
                     <tr key={review.sl || review.orderId} className="hover:bg-slate-50 transition-colors">
                       {visibleColumns.si && <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">{review.sl}</td>}
                       {visibleColumns.orderId && <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-slate-700">{review.orderId}</td>}
@@ -280,8 +286,11 @@ export default function RestaurantReviews() {
                   ))}
                 </tbody>
               </table>
+              {listPager}
+</>
             )}
           </div>
+
         </div>
       </div>
 

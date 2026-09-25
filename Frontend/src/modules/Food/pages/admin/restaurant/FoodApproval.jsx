@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { Search, CheckCircle2, XCircle, Eye, Clock, Loader2 } from "lucide-react"
 import { Card } from "@food/components/ui/card"
@@ -97,6 +98,8 @@ export default function FoodApproval() {
       request.entityType?.toLowerCase().includes(query)
     )
   }, [foodRequests, searchQuery])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
 
   const totalRequests = filteredRequests.length
 
@@ -288,10 +291,10 @@ export default function FoodApproval() {
                         </td>
                       </tr>
                     ) : (
-                      filteredRequests.map((request, index) => (
+                      pagedRows.map((request, index) => (
                         <tr key={request._id || request.id} className="hover:bg-gray-50">
                           <td className="px-3 py-3 whitespace-nowrap text-sm text-gray-700 font-semibold">
-                            {index + 1}
+                            {pageOffset + index + 1}
                           </td>
                           <td className="px-3 py-3 whitespace-nowrap">
                             <div className="text-sm">
@@ -360,6 +363,7 @@ export default function FoodApproval() {
                     )}
                   </tbody>
                 </table>
+                {listPager}
               </div>
             </div>
           )}

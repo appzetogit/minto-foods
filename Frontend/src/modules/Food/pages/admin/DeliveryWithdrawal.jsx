@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import { useState, useEffect, useMemo } from "react"
 import { Search, Wallet, Eye, CheckCircle, XCircle, Loader2, Package, QrCode } from "lucide-react"
 import { adminAPI } from "@food/api"
@@ -72,6 +73,10 @@ export default function DeliveryWithdrawal() {
     return () => clearTimeout(timer)
   }, [searchQuery, fromDate, toDate])
 
+
+  // Long lists page instead of rendering every row at once.
+
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
   const filteredRequests = useMemo(() => {
     if (!searchQuery.trim()) return requests
     const q = searchQuery.toLowerCase().trim()
@@ -276,9 +281,9 @@ export default function DeliveryWithdrawal() {
                       </td>
                     </tr>
                   ) : (
-                    filteredRequests.map((req, index) => (
+                    pagedRows.map((req, index) => (
                       <tr key={req.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{index + 1}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{pageOffset + index + 1}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{formatCurrency(req.amount)}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{req.deliveryName || "N/A"}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-700">{req.deliveryIdString || "N/A"}</td>
@@ -331,7 +336,9 @@ export default function DeliveryWithdrawal() {
                   )}
                 </tbody>
               </table>
+              {listPager}
             </div>
+
           )}
         </div>
 

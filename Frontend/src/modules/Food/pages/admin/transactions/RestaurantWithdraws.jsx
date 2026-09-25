@@ -1,3 +1,4 @@
+import usePagedRows from "@food/components/admin/usePagedRows"
 import { useState, useMemo, useEffect } from "react"
 import { Search, Download, ChevronDown, Eye, Settings, Building, ArrowUpDown, FileText, FileSpreadsheet, Code, Check, Columns, CheckCircle, XCircle, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
@@ -74,6 +75,10 @@ export default function RestaurantWithdraws() {
     return () => clearTimeout(timer)
   }, [searchQuery, fromDate, toDate])
 
+
+  // Long lists page instead of rendering every row at once.
+
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredWithdraws)
   const filteredWithdraws = useMemo(() => {
     let result = [...withdraws]
 
@@ -384,10 +389,10 @@ export default function RestaurantWithdraws() {
                       </td>
                     </tr>
                   ) : (
-                    filteredWithdraws.map((withdraw, index) => (
+                    pagedRows.map((withdraw, index) => (
                       <tr key={withdraw.id} className="hover:bg-slate-50 transition-colors">
                         {visibleColumns.si && <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="text-sm font-medium text-slate-700">{index + 1}</span>
+                          <span className="text-sm font-medium text-slate-700">{pageOffset + index + 1}</span>
                         </td>}
                         {visibleColumns.amount && <td className="px-6 py-4 whitespace-nowrap">
                           <span className="text-sm font-medium text-slate-700">
@@ -451,7 +456,9 @@ export default function RestaurantWithdraws() {
                   )}
                 </tbody>
               </table>
+              {listPager}
             </div>
+
           )}
         </div>
 
