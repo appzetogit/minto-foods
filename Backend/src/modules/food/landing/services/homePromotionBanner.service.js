@@ -1,3 +1,4 @@
+import { parseDayBound } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { saveImageFile } from '../../../../services/storage.service.js';
@@ -6,8 +7,12 @@ import { makeBannerService } from './bannerService.factory.js';
 const BANNER_FOLDER = 'food/home-promotion-banners';
 const banners = makeBannerService(prisma.homePromotionBanner, BANNER_FOLDER);
 
-/** '' and undefined both mean "no bound"; anything else is a date. */
-const toDate = (value) => (value && value !== '' ? new Date(value) : null);
+/** '' and undefined both mean "no bound"; a bare day is the whole day in India time. */
+const toDate = (value, edge) => {
+    const date = parseDayBound(value, edge);
+    if (date === null) throw new Error('Dates must be valid, or left blank');
+    return date ?? null;
+};
 
 const byOrder = [{ sortOrder: 'asc' }, { createdAt: 'desc' }];
 
@@ -27,7 +32,10 @@ export const getPublicHomePromotionBanners = async (zoneId = null) => {
                 { OR: [{ startDate: null }, { startDate: { lte: now } }] },
                 { OR: [{ endDate: null }, { endDate: { gte: now } }] },
             ],
-            ...(isId(zoneId) ? { zoneId: String(zoneId) } : {}),
+            // Banners for every zone (no zone set) show everywhere; a zone
+            // banner only in its zone. Matching the zone alone hid every
+            // all-zones banner from anyone whose app sent a zone.
+            ...(isId(zoneId) ? { OR: [{ zoneId: null }, { zoneId: String(zoneId) }] } : {}),
         },
         orderBy: byOrder,
     });
@@ -45,8 +53,8 @@ export const createHomePromotionBanner = async (file, meta = {}) => {
                 title: meta.title,
                 ctaLink: meta.ctaLink,
                 zoneId: isId(meta.zoneId) ? String(meta.zoneId) : null,
-                startDate: toDate(meta.startDate),
-                endDate: toDate(meta.endDate),
+                startDate: toDate(meta.startDate, 'start'),
+                endDate: toDate(meta.endDate, 'end'),
                 sortOrder: Number(meta.sortOrder) || 0,
                 isActive: true,
             },
@@ -62,8 +70,8 @@ export const updateHomePromotionBanner = async (id, data = {}) => {
 
     // Only touch a field the caller actually sent — a PATCH that changes the
     // title must not clear the schedule.
-    if (startDate !== undefined) updates.startDate = toDate(startDate);
-    if (endDate !== undefined) updates.endDate = toDate(endDate);
+    if (startDate !== undefined) updates.startDate = toDate(startDate, 'start');
+    if (endDate !== undefined) updates.endDate = toDate(endDate, 'end');
     if (zoneId !== undefined) updates.zoneId = isId(zoneId) ? String(zoneId) : null;
 
     return prisma.homePromotionBanner

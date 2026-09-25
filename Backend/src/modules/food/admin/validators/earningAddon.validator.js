@@ -1,3 +1,4 @@
+import { parseDayBound } from '../../../../utils/timezone.js';
 import { z } from 'zod';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -40,9 +41,11 @@ export const validateEarningAddonUpsertDto = (body) => {
         throw new ValidationError(result.error.errors[0].message);
     }
 
-    const startDate = new Date(`${result.data.startDate}T00:00:00.000Z`);
-    const endDate = new Date(`${result.data.endDate}T00:00:00.000Z`);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    // Whole days in India time, not midnight UTC (5:30 AM IST), which cut the
+    // last day short and started the first one early.
+    const startDate = parseDayBound(result.data.startDate, 'start');
+    const endDate = parseDayBound(result.data.endDate, 'end');
+    if (!startDate || !endDate) {
         throw new ValidationError('Invalid startDate or endDate');
     }
     if (endDate <= startDate) {

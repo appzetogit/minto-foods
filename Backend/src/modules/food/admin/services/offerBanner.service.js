@@ -1,3 +1,4 @@
+import { parseDayBound } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -48,13 +49,11 @@ const toZoneId = (value) => {
 };
 
 /** Blank clears the date; a value has to be a real one. */
-const toDate = (value) => {
-    if (value === null || value === undefined) return null;
-    const raw = String(value).trim();
-    if (!raw || raw === 'null') return null;
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) throw new ValidationError('Dates must be valid, or left blank');
-    return date;
+const toDate = (value, edge = 'start') => {
+    // A bare day is the whole day in India time; see parseDayBound.
+    const date = parseDayBound(value, edge);
+    if (date === null) throw new ValidationError('Dates must be valid, or left blank');
+    return date ?? null;
 };
 
 /**
@@ -122,7 +121,7 @@ export const createBanner = async (file, body = {}) => {
     if (!file?.buffer) throw new ValidationError('Banner image file is required');
 
     const startDate = toDate(body.startDate);
-    const endDate = toDate(body.endDate);
+    const endDate = toDate(body.endDate, 'end');
     if (startDate && endDate && endDate < startDate) {
         throw new ValidationError('The end date cannot be before the start date');
     }
@@ -166,7 +165,7 @@ export const updateBanner = async (id, body = {}, file = null) => {
     if (body.title !== undefined) data.title = String(body.title || '').trim();
     if (body.ctaLink !== undefined) data.ctaLink = String(body.ctaLink || '').trim();
     if (body.startDate !== undefined) data.startDate = toDate(body.startDate);
-    if (body.endDate !== undefined) data.endDate = toDate(body.endDate);
+    if (body.endDate !== undefined) data.endDate = toDate(body.endDate, 'end');
     if (body.zoneId !== undefined) data.zoneId = toZoneId(body.zoneId);
     if (body.isActive !== undefined) data.isActive = toActive(body.isActive);
 
