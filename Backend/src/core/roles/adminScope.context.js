@@ -106,6 +106,11 @@ const withFilter = (where, filter) => (where ? { AND: [where, filter] } : filter
  */
 export const applyAdminScope = (model, operation, args, scope) => {
     if (!scope || !model) return args;
+    // A zone picked only for viewing narrows reads. Writes fall back to the
+    // admin's real scope -- none for a super admin, their cities for a sub-admin.
+    if ((scope.viewOnly || scope.base) && !READS.has(operation)) {
+        return scope.base ? applyAdminScope(model, operation, args, scope.base) : args;
+    }
     const filter = scopeFilter(model, operation, scope);
     if (!filter && !CREATES.has(operation)) return args;
 

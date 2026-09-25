@@ -30,3 +30,30 @@ export const describeScope = (scope) =>
     scope
         ? { limited: true, cityIds: scope.cityIds, cityNames: scope.cityNames, zoneIds: scope.zoneIds }
         : { limited: false, cityIds: [], cityNames: [], zoneIds: [] };
+
+/**
+ * Narrows a request to the one zone picked in the admin header.
+ *
+ * A viewing filter, not a permission: it only limits what is read, so an
+ * admin looking at one zone can still save a platform-wide setting. A
+ * sub-admin can only pick a zone inside their own cities; anything else is
+ * ignored and they keep their normal scope.
+ */
+export async function applyZoneView(scope, admin, zoneId) {
+    if (!isId(zoneId)) return scope;
+    const zone = await prisma.foodZone.findUnique({
+        where: { id: String(zoneId) },
+        select: { id: true, cityId: true, cityRef: { select: { name: true } } },
+    });
+    if (!zone) return scope;
+    if (scope && !scope.zoneIds.includes(zone.id)) return scope;
+    return {
+        adminId: String(admin?.id || ''),
+        cityIds: zone.cityId ? [zone.cityId] : [],
+        cityNames: zone.cityRef?.name ? [zone.cityRef.name] : [],
+        zoneIds: [zone.id],
+        // Reads only; writes keep the sub-admin's own scope (or none).
+        viewOnly: !scope,
+        base: scope || null,
+    };
+}

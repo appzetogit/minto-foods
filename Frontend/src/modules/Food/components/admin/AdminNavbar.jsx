@@ -1,3 +1,4 @@
+import AdminZonePicker from "@food/components/admin/AdminZonePicker"
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -321,6 +322,7 @@ export default function AdminNavbar({ onMenuClick }) {
 
           {/* Right: User Profile */}
           <div className="flex items-center gap-3">
+            <AdminZonePicker />
             <Popover open={notificationsOpen} onOpenChange={setNotificationsOpen}>
               <PopoverTrigger asChild>
                 <button

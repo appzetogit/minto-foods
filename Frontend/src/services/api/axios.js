@@ -33,7 +33,8 @@ const ADMIN_PERMISSION_PATH_MAP = [
   { prefix: "/food/admin/restaurant-settings", section: "restaurant_management" },
   { prefix: "/food/admin/restaurant-subscription-settings", section: "restaurant_management" },
   { prefix: "/food/admin/restaurant-subscriptions", section: "restaurant_management" },
-  { prefix: "/food/admin/zones", section: "restaurant_management" },
+  { prefix: "/food/admin/zones", section: "restaurant_management" },
+
   { prefix: "/food/admin/cuisines", section: "restaurant_management" },
   { prefix: "/food/admin/categories", section: "food_management" },
   { prefix: "/food/admin/addons", section: "food_management" },
@@ -328,6 +329,16 @@ function refreshModuleToken(module) {
 apiClient.interceptors.request.use(
   async (config) => {
     config.contextModule = getModuleFromConfig(config);
+
+    // The zone picked in the admin header: the server narrows every read to it.
+    if (config.contextModule === "admin") {
+      try {
+        const zone = localStorage.getItem("admin_zone_filter")
+        if (zone) config.headers["X-Admin-Zone"] = zone
+      } catch {
+        // No storage: show every zone.
+      }
+    }
 
     // Client-side RBAC safety net for sub-admins across all admin APIs.
     if (config.contextModule === "admin") {

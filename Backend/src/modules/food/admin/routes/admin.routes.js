@@ -1,4 +1,4 @@
-import { loadAdminScope } from '../../../../core/roles/adminScope.service.js';
+import { loadAdminScope, applyZoneView } from '../../../../core/roles/adminScope.service.js';
 import { runWithAdminScope } from '../../../../core/roles/adminScope.context.js';
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
@@ -62,8 +62,11 @@ router.use(async (req, _res, next) => {
         req.adminAccess = admin;
         // A sub-admin's whole request runs inside their city scope, which the
         // Prisma extension applies to every query on a city-bound model.
-        const scope = await loadAdminScope(admin);
-        req.adminScope = scope;
+        // The zone picked in the admin header narrows what every screen shows.
+        // The zone list itself is not narrowed, or the picker could never switch zones.
+        const zoneHeader = /^\/(zones|cities)(\/|$)/.test(req.path) ? null : req.headers['x-admin-zone'];
+        const scope = await applyZoneView(await loadAdminScope(admin), admin, zoneHeader);
+        req.adminScope = scope?.viewOnly ? null : scope;
         if (!scope) return next();
         return runWithAdminScope(scope, () => next());
     } catch (error) {
