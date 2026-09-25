@@ -72,6 +72,16 @@ router.use(async (req, _res, next) => {
 });
 
 const resolveSectionFromRequest = (path = '', method = '') => {
+    // Settings that change what customers pay, what riders and restaurants
+    // earn, and what the apps show. These had no section at all, so a
+    // sub-admin granted nothing could still change commission rates, delivery
+    // fees and rider pay.
+    if (path.startsWith('/restaurant-commissions')) return 'restaurant_management';
+    if (path.startsWith('/fee-settings') && path !== '/fee-settings/public') return 'system_settings';
+    if (path.startsWith('/cashback-settings')) return 'system_settings';
+    if (path.startsWith('/driver-registration-fields')) return 'delivery_management';
+    if (path.startsWith('/restaurant-app-banners')) return 'banner_management';
+    if (path.startsWith('/dining')) return 'restaurant_management';
     if (path.startsWith('/sub-admins')) return 'sub_admin_management';
     if (path === '/customers' && String(method).toUpperCase() === 'GET') return null;
     if (path.startsWith('/customers') || path.startsWith('/support-tickets')) return 'customer_management';

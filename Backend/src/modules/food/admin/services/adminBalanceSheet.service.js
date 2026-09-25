@@ -357,6 +357,12 @@ export async function payoutEntity(entityType, entityId, body = {}) {
         });
 
         if (!count) throw new ValidationError('Nothing outstanding for this period');
+        // Fewer settled than were totted up means another payout took some of
+        // these orders a moment ago; the amount above would then overpay.
+        // The whole payout rolls back rather than recording the wrong figure.
+        if (count !== ids.length) {
+            throw new ValidationError('Some of these orders were just paid out by someone else. Reload and try again.');
+        }
 
         const settlement = await tx.settlement.create({
             data: {

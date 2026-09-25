@@ -234,6 +234,33 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   if (paymentStatus !== 'paid') {
     return none({ reason: `payment_status_${paymentStatus || 'unknown'}`, method: paymentMethod });
   }
+  if (paymentMethod !== 'razorpay' && paymentMethod !== 'wallet') {
+    return none({ reason: `unsupported_method_${paymentMethod}`, method: paymentMethod });
+  }
+
+  // Claim the refund before any money moves. Two cancellations landing
+  // together (admin and restaurant, or either and the expiry job) both read
+  // the order as paid-and-not-refunded from their own copy; without this the
+  // wallet was credited twice, and for Razorpay the second attempt's refusal
+  // overwrote the first's success with "failed". Only the caller that flips
+  // the status here goes on to refund.
+  const orderRowId = String(order.id ?? order._id);
+  const { count: claimed } = await prisma.foodOrder.updateMany({
+    where: {
+      id: orderRowId,
+      paymentStatus: 'paid',
+      OR: [{ refundStatus: null }, { refundStatus: { in: ['none', 'failed'] } }],
+    },
+    data: { refundStatus: 'pending' },
+  });
+  if (!claimed) {
+    return none({ reason: 'refund_already_in_progress', method: paymentMethod });
+  }
+  const releaseClaim = () =>
+    prisma.foodOrder.updateMany({
+      where: { id: orderRowId, refundStatus: 'pending' },
+      data: { refundStatus: 'failed' },
+    }).catch(() => {});
 
   if (paymentMethod === 'razorpay') {
     const paymentId = String(order.razorpayPaymentId || '').trim();
@@ -245,7 +272,14 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
       };
     }
 
-    const refundResult = await initiateRazorpayRefund(paymentId, amount);
+    let refundResult;
+    try {
+      refundResult = await initiateRazorpayRefund(paymentId, amount);
+    } catch (err) {
+      // Unreachable gateway: hand the claim back so it can be retried.
+      await releaseClaim();
+      throw err;
+    }
     if (refundResult.success) {
       return {
         attempted: true, processed: true, method: paymentMethod, refundId: refundResult.refundId,
@@ -267,12 +301,17 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   }
 
   if (paymentMethod === 'wallet') {
-    await userWalletService.refundWalletBalance(
+    try {
+      await userWalletService.refundWalletBalance(
       order.userId?.id ?? order.userId,
       amount,
       buildCancellationRefundDescription(order, cancelledBy),
       { orderId: order.id ?? order._id, cancelledBy }
-    );
+      );
+    } catch (err) {
+      await releaseClaim();
+      throw err;
+    }
     return {
       attempted: true, processed: true, method: paymentMethod,
       paymentPatch: {

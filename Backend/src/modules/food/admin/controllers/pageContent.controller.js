@@ -1,6 +1,6 @@
 import { logger } from '../../../../utils/logger.js';
 import { sendResponse } from '../../../../utils/response.js';
-import { ValidationError } from '../../../../core/auth/errors.js';
+import { NotFoundError, ValidationError } from '../../../../core/auth/errors.js';
 import {
     getPublicPageByKey,
     getAdminPageByKey,
@@ -8,7 +8,21 @@ import {
     upsertAboutPage
 } from '../services/pageContent.service.js';
 
-const parseKeyFromParam = (req) => String(req.params?.key || '').trim().toLowerCase();
+const PAGE_KEYS = new Set(['terms', 'privacy', 'refund', 'shipping', 'cancellation', 'about', 'support']);
+const PAGE_MODULES = new Set(['ALL', 'USER', 'RESTAURANT', 'DELIVERY']);
+
+/**
+ * The page and app named in the request, checked against the ones that exist.
+ * Both went straight into the query, so an unknown one (or a typo in an app's
+ * link) was a database error and a 500 -- on a page anyone can open.
+ */
+const parseKeyFromParam = (req) => {
+    const key = String(req.params?.key || '').trim().toLowerCase();
+    if (!PAGE_KEYS.has(key)) throw new NotFoundError('Page not found');
+    const module = String(req.query?.module || 'ALL').trim().toUpperCase();
+    if (!PAGE_MODULES.has(module)) throw new ValidationError('Unknown app for this page');
+    return key;
+};
 
 export const getPublicPageController = async (req, res, next) => {
     try {
