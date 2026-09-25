@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
+import { reconcileOrderPayment } from './payment-reconcile.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
 import { buildPaginationOptions, buildPaginatedResult, isId } from '../../../../utils/helpers.js';
@@ -151,9 +152,9 @@ async function deletePendingPaymentOrder(orderLike) {
 let lastExpiredCleanupAt = 0;
 const EXPIRE_CLEANUP_INTERVAL_MS = 60_000;
 
-async function expireStalePendingPaymentOrders() {
+export async function expireStalePendingPaymentOrders({ force = false } = {}) {
   const now = Date.now();
-  if (now - lastExpiredCleanupAt < EXPIRE_CLEANUP_INTERVAL_MS) return;
+  if (!force && now - lastExpiredCleanupAt < EXPIRE_CLEANUP_INTERVAL_MS) return;
   lastExpiredCleanupAt = now;
 
   const cutoff = new Date(Date.now() - PENDING_PAYMENT_TTL_MS);
@@ -167,11 +168,16 @@ async function expireStalePendingPaymentOrders() {
       paymentStatus: { in: ["created", "pending_qr", "failed"] },
       createdAt: { lte: cutoff },
     },
-    select: { id: true, orderStatus: true, paymentStatus: true },
+    select: { id: true, orderStatus: true, paymentStatus: true, razorpayOrderId: true, total: true },
   });
 
   for (const doc of stale) {
     try {
+      // Ask Razorpay before giving up on it. Deleting on age alone removed
+      // orders customers had actually paid for whenever the app's verify call
+      // and the webhook both missed -- charged, with no order to show for it.
+      const gateway = await reconcileOrderPayment(doc);
+      if (gateway !== 'unpaid') continue;
       await deletePendingPaymentOrder(doc);
     } catch (err) {
       logger.warn(
@@ -675,8 +681,11 @@ export async function createOrder(userId, dto) {
       } catch (err) {
         // Mongo threw before saving, so no order existed on gateway failure.
         await purgeOrder(order.id).catch(() => {});
-        logger.error(`Razorpay order creation failed: ${err.message}`);
-        throw new ValidationError(err?.message || "Payment gateway error");
+        // Razorpay's SDK rejects with { statusCode, error: { description } },
+        // not an Error, so err.message was always undefined in the log.
+        const reason = err?.error?.description || err?.message || JSON.stringify(err);
+        logger.error(`Razorpay order creation failed (${err?.statusCode || '?'}): ${reason}`);
+        throw new ValidationError("Online payment is not available right now. Please try again or choose cash on delivery.");
       }
     }
 

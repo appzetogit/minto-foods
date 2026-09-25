@@ -50,6 +50,15 @@ const start = async () => {
                 logger.error(`Scheduled jobs watchdog error: ${err.message}`);
             }
             try {
+                // Online orders nobody finished paying for: each is checked with
+                // Razorpay first, and only removed if it was never paid. This
+                // used to run only when someone opened their order list.
+                const { expireStalePendingPaymentOrders } = await import('../src/modules/food/orders/services/order.service.js');
+                await expireStalePendingPaymentOrders({ force: true });
+            } catch (err) {
+                logger.error(`Pending payment cleanup error: ${err.message}`);
+            }
+            try {
                 // Anything the hunt above could not rescue is eventually closed
                 // out rather than left open for days.
                 const { expired, failed } = await expireStalledOrders();

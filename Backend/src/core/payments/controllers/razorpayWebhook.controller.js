@@ -3,6 +3,7 @@ import { prisma } from '../../../config/prisma.js';
 import { finalizeOrderPayment } from '../../../modules/food/orders/services/order.service.js';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
+import { reconcileOrderPayment } from '../../../modules/food/orders/services/payment-reconcile.service.js';
 
 /**
  * Razorpay webhook handler.
@@ -112,6 +113,51 @@ export const handleRazorpayWebhook = async (req, res) => {
             }
         }
 
+        // --- Money held but not taken, or the order reported paid ---
+        // Both mean "check the gateway": an authorised payment is captured
+        // there (with manual capture on in the dashboard it would otherwise be
+        // returned to the customer after a few days, with the order never
+        // confirmed), and order.paid is the same news payment.captured brings.
+        if (event === 'payment.authorized' || event === 'order.paid') {
+            const rzOrderId = payload?.payment?.entity?.order_id || payload?.order?.entity?.id;
+            const order = rzOrderId
+                ? await prisma.foodOrder.findFirst({
+                    where: { razorpayOrderId: rzOrderId },
+                    select: { id: true, orderId: true, total: true, razorpayOrderId: true },
+                })
+                : null;
+            if (order) {
+                const result = await reconcileOrderPayment(order);
+                logger.info(`Webhook [${event}]: Order ${order.orderId} is ${result}`);
+            }
+        }
+
+        // --- Payment failed ---
+        // The customer can try again, so the order stays open for them; it is
+        // only recorded, and the 30-minute cleanup (which asks Razorpay first)
+        // closes it if they never do. A later success still wins: the update
+        // skips an order already paid.
+        if (event === 'payment.failed') {
+            const paymentObj = payload.payment.entity;
+            const { count } = await prisma.foodOrder.updateMany({
+                where: { razorpayOrderId: paymentObj.order_id, paymentStatus: { notIn: ['paid', 'refunded'] } },
+                data: { paymentStatus: 'failed' },
+            });
+            logger.warn(
+                `Webhook [payment.failed]: RZ-Order ${paymentObj.order_id} -- ${paymentObj.error_description || paymentObj.error_code || 'no reason given'}${count ? '' : ' (order already settled)'}`,
+            );
+        }
+
+        // --- Refund failed ---
+        if (event === 'refund.failed') {
+            const refundObj = payload.refund.entity;
+            await prisma.foodOrder.updateMany({
+                where: { razorpayPaymentId: refundObj.payment_id, refundStatus: { not: 'processed' } },
+                data: { refundStatus: 'failed' },
+            });
+            logger.error(`Webhook [refund.failed]: refund ${refundObj.id} for payment ${refundObj.payment_id} failed -- needs a manual refund`);
+        }
+
         // --- Refund processed ---
         if (event === 'refund.processed') {
             const refundObj = payload.refund.entity;
@@ -119,10 +165,21 @@ export const handleRazorpayWebhook = async (req, res) => {
             const rzRefundId = refundObj.id;
             const refundAmount = refundObj.amount / 100; // paise → rupees
 
+            // Only a full refund makes the order "refunded". A partial one (a
+            // missing item, say) left the whole order marked refunded, which
+            // made paid money look returned in every report.
+            const paidOrder = await prisma.foodOrder.findFirst({
+                where: { razorpayPaymentId: rzPaymentId },
+                select: { total: true },
+            });
+            const isFullRefund = paidOrder
+                ? Math.round(refundAmount * 100) >= Math.round(Number(paidOrder.total || 0) * 100)
+                : true;
+
             const { count } = await prisma.foodOrder.updateMany({
                 where: { razorpayPaymentId: rzPaymentId, refundStatus: { not: 'processed' } },
                 data: {
-                    paymentStatus: 'refunded',
+                    ...(isFullRefund ? { paymentStatus: 'refunded' } : {}),
                     refundStatus: 'processed',
                     refundAmount,
                     refundId: rzRefundId,
