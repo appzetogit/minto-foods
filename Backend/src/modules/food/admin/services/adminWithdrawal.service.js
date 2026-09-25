@@ -65,6 +65,17 @@ const serializeDeliveryWithdrawal = (w) => ({
     status: titleCase(w.status),
 });
 
+/**
+ * From/to on a withdrawal list, as whole India days. The lists had no date
+ * filter, so "what was paid out last month" meant scrolling.
+ */
+const requestedBetween = (query = {}) => {
+    const from = parseDayBound(query.from ?? query.startDate, 'start');
+    const to = parseDayBound(query.to ?? query.endDate, 'end');
+    if (!from && !to) return {};
+    return { createdAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } };
+};
+
 export async function getWithdrawals(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 500);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -75,6 +86,12 @@ export async function getWithdrawals(query = {}) {
         where.status = String(query.status).toLowerCase();
     }
     if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
+    Object.assign(where, requestedBetween(query));
+    const search = String(query.search || '').trim();
+    if (search) {
+        const contains = { contains: search, mode: 'insensitive' };
+        where.restaurant = { OR: [{ restaurantName: contains }, { ownerName: contains }, { ownerPhone: { contains: search } }] };
+    }
 
     const [withdrawals, total] = await Promise.all([
         prisma.foodRestaurantWithdrawal.findMany({
@@ -137,8 +154,16 @@ export async function getDeliveryWithdrawals(query = {}) {
     }
     // The search box accepts an amount; a name needs the partner table, which
     // the original did not reach either.
-    if (query.search && !Number.isNaN(Number(query.search))) {
-        where.amount = Number(query.search);
+    Object.assign(where, requestedBetween(query));
+    // Search by rider name or phone; a plain number still also matches the amount.
+    const search = String(query.search || '').trim();
+    if (search) {
+        const contains = { contains: search, mode: 'insensitive' };
+        where.OR = [
+            { deliveryPartner: { name: contains } },
+            { deliveryPartner: { phone: { contains: search } } },
+            ...(Number.isFinite(Number(search)) ? [{ amount: Number(search) }] : []),
+        ];
     }
 
     const [withdrawals, total] = await Promise.all([

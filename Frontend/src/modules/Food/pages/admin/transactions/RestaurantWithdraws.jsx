@@ -13,6 +13,9 @@ const debugError = (...args) => {}
 export default function RestaurantWithdraws() {
   const [activeTab, setActiveTab] = useState("All")
   const [searchQuery, setSearchQuery] = useState("")
+  // Requested between these days (India time on the server); blank = no limit.
+  const [fromDate, setFromDate] = useState("")
+  const [toDate, setToDate] = useState("")
   const [withdraws, setWithdraws] = useState([])
   const [loading, setLoading] = useState(true)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
@@ -41,7 +44,12 @@ export default function RestaurantWithdraws() {
     try {
       setLoading(true)
       const status = activeTab === "All" ? undefined : activeTab
-      const response = await adminAPI.getWithdrawalRequests({ status, search: searchQuery || undefined })
+      const response = await adminAPI.getWithdrawalRequests({
+        status,
+        search: searchQuery || undefined,
+        from: fromDate || undefined,
+        to: toDate || undefined,
+      })
       if (response.data?.success) {
         setWithdraws(response.data.data?.requests || [])
       } else {
@@ -64,7 +72,7 @@ export default function RestaurantWithdraws() {
       }
     }, 500)
     return () => clearTimeout(timer)
-  }, [searchQuery])
+  }, [searchQuery, fromDate, toDate])
 
   const filteredWithdraws = useMemo(() => {
     let result = [...withdraws]
@@ -283,6 +291,33 @@ export default function RestaurantWithdraws() {
                 />
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white"
+                aria-label="Requested from"
+                title="Requested from"
+              />
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(e) => setToDate(e.target.value)}
+                className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white"
+                aria-label="Requested to"
+                title="Requested to"
+              />
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  onClick={() => { setFromDate(""); setToDate("") }}
+                  className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white text-slate-600"
+                >
+                  Clear dates
+                </button>
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">

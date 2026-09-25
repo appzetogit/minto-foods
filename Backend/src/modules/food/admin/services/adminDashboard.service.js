@@ -229,7 +229,7 @@ export async function getDashboardStats(query = {}) {
             }).then((rows) => rows.map((r) => ({ ...r.user, createdAt: r.createdAt })))
             : prisma.foodUser.findMany({
                 orderBy: { createdAt: 'desc' }, take: 5,
-                select: { name: true, createdAt: true },
+                select: { name: true, phone: true, createdAt: true },
             }),
     ]);
 
@@ -249,7 +249,7 @@ export async function getDashboardStats(query = {}) {
         ...recentCancelledOrders.map((o) =>
             signal('order_cancelled', 'Order Cancelled', `Order #${o.orderId} was cancelled`, o.updatedAt)),
         ...recentCustomers.map((c) =>
-            signal('customer', 'New Customer', `${c.name} just registered`, c.createdAt)),
+            signal('customer', 'New Customer', `${c.name?.trim() || (c.phone ? `Customer ending ${String(c.phone).slice(-4)}` : 'A new customer')} just registered`, c.createdAt)),
     ]
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 15);
