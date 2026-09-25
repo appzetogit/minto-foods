@@ -90,9 +90,6 @@ export default function RestaurantBilling() {
     }, [fetchRestaurants, loadOverview])
 
 
-    // Long lists page instead of rendering every row at once.
-
-    const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filtered)
     const filtered = useMemo(() => {
         const query = searchQuery.trim().toLowerCase()
         if (!query) return restaurants
@@ -101,6 +98,8 @@ export default function RestaurantBilling() {
             String(r.id || r._id || "").toLowerCase().includes(query),
         )
     }, [restaurants, searchQuery])
+    // Long lists page instead of rendering every row at once.
+    const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filtered)
 
     const changeMode = async (restaurant, billingMode) => {
         const id = restaurant.id || restaurant._id

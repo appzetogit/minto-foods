@@ -76,9 +76,6 @@ export default function RestaurantWithdraws() {
   }, [searchQuery, fromDate, toDate])
 
 
-  // Long lists page instead of rendering every row at once.
-
-  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredWithdraws)
   const filteredWithdraws = useMemo(() => {
     let result = [...withdraws]
 
@@ -93,6 +90,8 @@ export default function RestaurantWithdraws() {
 
     return result
   }, [withdraws, searchQuery])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredWithdraws)
 
   const getStatusBadge = (status) => {
     if (status === "Approved") {

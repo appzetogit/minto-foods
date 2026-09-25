@@ -275,11 +275,6 @@ export default function TransactionReport() {
 
 
 
-  // Long lists page instead of rendering every row at once.
-
-
-
-  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredTransactions)
 
 
   const filteredTransactions = useMemo(() => {
@@ -287,6 +282,8 @@ export default function TransactionReport() {
     return transactions // Backend already filters, so just return transactions
 
   }, [transactions])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredTransactions)
 
 
 

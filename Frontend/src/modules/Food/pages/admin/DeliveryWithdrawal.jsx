@@ -74,9 +74,6 @@ export default function DeliveryWithdrawal() {
   }, [searchQuery, fromDate, toDate])
 
 
-  // Long lists page instead of rendering every row at once.
-
-  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
   const filteredRequests = useMemo(() => {
     if (!searchQuery.trim()) return requests
     const q = searchQuery.toLowerCase().trim()
@@ -88,6 +85,8 @@ export default function DeliveryWithdrawal() {
         r.amount?.toString().includes(q)
     )
   }, [requests, searchQuery])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
 
   const getStatusBadge = (status) => {
     if (status === "Approved" || status === "Processed") return "bg-green-100 text-green-700"

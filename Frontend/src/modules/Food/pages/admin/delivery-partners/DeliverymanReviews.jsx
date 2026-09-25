@@ -33,9 +33,6 @@ export default function DeliverymanReviews() {
   })
 
 
-  // Long lists page instead of rendering every row at once.
-
-  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredReviews)
   const filteredReviews = useMemo(() => {
     if (!searchQuery.trim()) {
       return reviews
@@ -50,6 +47,8 @@ export default function DeliverymanReviews() {
       (review.deliverymanId && review.deliverymanId.toString().toLowerCase().includes(query))
     )
   }, [reviews, searchQuery])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredReviews)
 
   const handleExport = (format) => {
     if (filteredReviews.length === 0) {

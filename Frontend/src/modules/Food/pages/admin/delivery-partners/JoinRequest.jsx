@@ -101,9 +101,6 @@ export default function JoinRequest() {
   }, [activeTab, debouncedSearch, filters, isFilterOpen])
 
 
-  // Long lists page instead of rendering every row at once.
-
-  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
   const filteredRequests = useMemo(() => {
     let result = [...requests]
     
@@ -114,6 +111,8 @@ export default function JoinRequest() {
 
     return result
   }, [requests, filters])
+  // Long lists page instead of rendering every row at once.
+  const { pageRows: pagedRows, offset: pageOffset, pager: listPager } = usePagedRows(filteredRequests)
 
   const handleApprove = (request) => {
     setSelectedRequest(request)
