@@ -310,15 +310,10 @@ export const createDeliveryCashDepositOrder = async (deliveryPartnerId, amountIn
     const amountPaise = Math.round(amount * 100);
     const receipt = `cash_deposit_${String(deliveryPartnerId).slice(-8)}_${Date.now()}`;
 
+    // No gateway, no online deposit. This used to hand back a made-up order,
+    // which the verify step below then accepted without any payment.
     if (!isRazorpayConfigured()) {
-        return {
-            razorpay: {
-                key: getRazorpayKeyId() || 'rzp_test_dummy',
-                orderId: `order_dev_${Date.now()}`,
-                amount: amountPaise,
-                currency: 'INR',
-            },
-        };
+        throw new ValidationError('Online cash deposit is not available right now. Please deposit at the office.');
     }
 
     const order = await createRazorpayOrder(amountPaise, 'INR', receipt);
@@ -355,8 +350,15 @@ export const verifyDeliveryCashDepositPayment = async (deliveryPartnerId, payloa
         return { deposit: existing, wallet: await getDeliveryPartnerWalletEnhanced(partnerId) };
     }
 
-    const isValid = isRazorpayConfigured() ? verifyPaymentSignature(orderId, paymentId, signature) : true;
-    if (!isValid) throw new ValidationError('Payment verification failed');
+    // Without a gateway there is nothing to verify against, so nothing is
+    // accepted. This used to treat "not configured" as valid: a rider could
+    // post any ids and clear their cash in hand without paying a rupee.
+    if (!isRazorpayConfigured()) {
+        throw new ValidationError('Online cash deposit is not available right now. Please deposit at the office.');
+    }
+    if (!verifyPaymentSignature(orderId, paymentId, signature)) {
+        throw new ValidationError('Payment verification failed');
+    }
 
     // The signature proves the payment belongs to this order — it says NOTHING about
     // how much was paid. Trusting the client's `amount` let a rider pay Rs 1 and post

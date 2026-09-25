@@ -604,6 +604,11 @@ export async function createOrder(userId, dto) {
       // rest of the earning would read as the platform losing money per tip.
       (riderEarning - tipAmount);
 
+    // Refused before anything is saved: an online order the gateway cannot take
+    // would sit waiting for a payment the customer has no way to make.
+    if (paymentMethod === "razorpay" && !isRazorpayConfigured()) {
+      throw new ValidationError("Online payment is not available right now. Please choose cash on delivery.");
+    }
     const isAwaitingOnlinePayment = isAwaitingOnlinePaymentMethod(paymentMethod);
     const initialStatus = isAwaitingOnlinePayment ? "pending_payment" : "created";
     const acceptanceWindowSeconds = await getOrderAcceptanceWindowSeconds();

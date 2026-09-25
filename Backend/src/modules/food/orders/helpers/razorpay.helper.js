@@ -14,8 +14,19 @@ import { logger } from '../../../../utils/logger.js';
 const KEY_ID = config.razorpayKeyId || process.env.RAZORPAY_KEY_ID || '';
 const KEY_SECRET = config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET || '';
 
+/**
+ * Keys copied from a template ("PLACEHOLDER", "your_key_secret") are not keys.
+ * Counting them as configured sent every online order to Razorpay, which
+ * refused it -- online payment failed on every attempt while the server
+ * believed it was set up.
+ */
+const looksLikePlaceholder = (v) => /placeholder|your[_-]|changeme|xxxx|dummy/i.test(String(v || ''));
+
 export function isRazorpayConfigured() {
-    return Boolean(KEY_ID && KEY_SECRET && Razorpay);
+    return Boolean(
+        KEY_ID && KEY_SECRET && Razorpay
+        && !looksLikePlaceholder(KEY_ID) && !looksLikePlaceholder(KEY_SECRET),
+    );
 }
 
 export function getRazorpayKeyId() {
@@ -55,8 +66,11 @@ export function createPaymentLink({ amountPaise, currency = 'INR', description, 
 export function verifyPaymentSignature(orderId, paymentId, signature) {
     if (!KEY_SECRET) return false;
     const body = `${orderId}|${paymentId}`;
-    const expected = crypto.createHmac('sha256', KEY_SECRET).update(body).digest('hex');
-    return expected === signature;
+    const expected = Buffer.from(crypto.createHmac('sha256', KEY_SECRET).update(body).digest('hex'), 'utf8');
+    const given = Buffer.from(String(signature || ''), 'utf8');
+    // Constant time, like the webhook check: === returns at the first wrong
+    // character and so leaks how much of a forged signature was right.
+    return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
 /**
