@@ -67,3 +67,14 @@ export const parseDayBound = (value, edge = 'start') => {
     : new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date;
 };
+
+/**
+ * A from/to filter from a list's query string, as whole India days, or null
+ * when neither is given. Accepts from/to or startDate/endDate.
+ */
+export const dayRange = (query = {}) => {
+  const from = parseDayBound(query.from ?? query.startDate ?? query.fromDate, 'start');
+  const to = parseDayBound(query.to ?? query.endDate ?? query.toDate, 'end');
+  if (!from && !to) return null;
+  return { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
+};

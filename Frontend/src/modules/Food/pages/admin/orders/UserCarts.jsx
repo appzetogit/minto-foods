@@ -1,3 +1,4 @@
+import DateRangeFilter from "@food/components/admin/DateRangeFilter"
 import { useCallback, useEffect, useState } from "react"
 import {
   Search,
@@ -153,6 +154,8 @@ function CartBillBreakdown({ pricing, fallbackSubtotal = 0, items = [] }) {
 }
 
 export default function UserCarts() {
+  // From/to days (India time on the server); blank = no limit.
+  const [dateRange, setDateRange] = useState({ from: "", to: "" })
   const [carts, setCarts] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchInput, setSearchInput] = useState("")
@@ -171,6 +174,7 @@ export default function UserCarts() {
         page,
         limit: PAGE_SIZE,
         ...(searchQuery ? { search: searchQuery } : {}),
+        from: dateRange.from || undefined, to: dateRange.to || undefined,
       })
       const data = response?.data?.data || response?.data || {}
       setCarts(Array.isArray(data.carts) ? data.carts : [])
@@ -184,7 +188,7 @@ export default function UserCarts() {
     } finally {
       setLoading(false)
     }
-  }, [page, searchQuery])
+  }, [page, searchQuery, dateRange])
 
   useEffect(() => {
     fetchCarts()
@@ -256,6 +260,7 @@ export default function UserCarts() {
               className="pl-9 bg-white h-9"
             />
           </div>
+          <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
           <Button
             onClick={handleSearch}
             size="sm"

@@ -1,3 +1,4 @@
+import DateRangeFilter from "@food/components/admin/DateRangeFilter"
 import { useState, useEffect, useMemo } from "react"
 import { 
   Search, 
@@ -53,6 +54,8 @@ const addonProgress = (item) => {
 }
 
 export default function EarningAddonHistory() {
+  // From/to days (India time on the server); blank = no limit.
+  const [dateRange, setDateRange] = useState({ from: "", to: "" })
   const [searchQuery, setSearchQuery] = useState("")
   const [history, setHistory] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -74,13 +77,13 @@ export default function EarningAddonHistory() {
 
   useEffect(() => {
     fetchHistory()
-  }, [])
+  }, [dateRange])
 
   const fetchHistory = async () => {
     try {
       setIsLoading(true)
       debugLog('?? Fetching earning addon history...')
-      const response = await adminAPI.getEarningAddonHistory()
+      const response = await adminAPI.getEarningAddonHistory({ from: dateRange.from || undefined, to: dateRange.to || undefined })
       debugLog('?? API Response:', {
         success: response.data.success,
         message: response.data.message,
@@ -414,6 +417,7 @@ export default function EarningAddonHistory() {
                 />
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
+              <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">

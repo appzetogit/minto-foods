@@ -237,9 +237,9 @@ export default function AdminHome() {
               path="/admin/food/restaurants/commission"
             />
             <MetricCard
-              title="Orders processed"
+              title="Orders in progress"
               value={activeOrdersTotal.toLocaleString("en-IN")}
-              helper="Restaurant accepted — awaiting delivery partner"
+              helper="Placed and not yet delivered or cancelled"
               icon={<Activity className="h-5 w-5 text-amber-600" />}
               accent="bg-amber-200/40"
               path="/admin/food/orders/processing"

@@ -80,6 +80,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     // sub-admin granted nothing could still change commission rates, delivery
     // fees and rider pay.
     if (path.startsWith('/restaurant-commissions')) return 'restaurant_management';
+    if (path.startsWith('/commission-overview')) return 'restaurant_management';
     if (path.startsWith('/fee-settings') && path !== '/fee-settings/public') return 'system_settings';
     if (path.startsWith('/cashback-settings')) return 'system_settings';
     if (path.startsWith('/driver-registration-fields')) return 'delivery_management';
@@ -315,6 +316,12 @@ router.patch('/withdrawals/balance-sheet/entries/:id', adminController.updateLed
 router.delete('/withdrawals/balance-sheet/entries/:id', adminController.deleteLedgerEntry);
 
 router.patch('/restaurants/:id/billing-mode', adminController.setRestaurantBillingMode);
+router.get('/commission-overview', async (req, res, next) => {
+    try {
+        const { getCommissionOverview } = await import('../services/adminCommission.service.js');
+        return res.status(200).json({ success: true, message: 'Commission overview', data: await getCommissionOverview() });
+    } catch (error) { return next(error); }
+});
 router.get('/restaurants/:id/item-commissions', adminController.getItemCommissions);
 router.patch('/restaurants/:id/item-commissions/:itemId', adminController.upsertItemCommission);
 

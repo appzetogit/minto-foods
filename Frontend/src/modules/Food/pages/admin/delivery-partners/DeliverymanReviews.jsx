@@ -1,3 +1,4 @@
+import DateRangeFilter from "@food/components/admin/DateRangeFilter"
 import { useState, useMemo, useEffect } from "react"
 import { Search, Download, ChevronDown, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Code, Check, Columns, Loader2, Eye } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
@@ -11,6 +12,8 @@ const debugError = (...args) => {}
 
 
 export default function DeliverymanReviews() {
+  // From/to days (India time on the server); blank = no limit.
+  const [dateRange, setDateRange] = useState({ from: "", to: "" })
   const [searchQuery, setSearchQuery] = useState("")
   const [reviews, setReviews] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -130,7 +133,7 @@ export default function DeliverymanReviews() {
       try {
         setIsLoading(true)
         debugLog('?? Fetching deliveryman reviews...')
-        const response = await adminAPI.getDeliverymanReviews({ limit: 1000 })
+        const response = await adminAPI.getDeliverymanReviews({ limit: 1000, from: dateRange.from || undefined, to: dateRange.to || undefined })
         
         debugLog('? Deliveryman reviews response:', response?.data)
         
@@ -164,7 +167,7 @@ export default function DeliverymanReviews() {
     }
 
     fetchReviews()
-  }, [])
+  }, [dateRange])
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
@@ -192,6 +195,7 @@ export default function DeliverymanReviews() {
                 />
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
+              <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

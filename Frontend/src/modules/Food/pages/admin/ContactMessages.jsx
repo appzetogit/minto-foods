@@ -1,3 +1,4 @@
+import DateRangeFilter from "@food/components/admin/DateRangeFilter"
 import { useState, useEffect, useMemo } from "react"
 import { Search, ArrowUpDown, Settings, Folder, ChevronDown, Eye, Loader2, Star } from "lucide-react"
 import { toast } from "sonner"
@@ -22,6 +23,8 @@ const debugWarn = (...args) => {}
 const debugError = (...args) => {}
 
 export default function ContactMessages() {
+  // From/to days (India time on the server); blank = no limit.
+  const [dateRange, setDateRange] = useState({ from: "", to: "" })
   const [searchQuery, setSearchQuery] = useState("")
   const [feedbacks, setFeedbacks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -33,7 +36,7 @@ export default function ContactMessages() {
 
   useEffect(() => {
     fetchFeedbacks()
-  }, [ratingFilter, currentPage, searchQuery])
+  }, [ratingFilter, currentPage, searchQuery, dateRange])
 
   const fetchFeedbacks = async () => {
     try {
@@ -42,7 +45,8 @@ export default function ContactMessages() {
         page: currentPage,
         limit: 10,
         rating: ratingFilter !== 'all' ? ratingFilter : undefined,
-        search: searchQuery.trim() || undefined
+        search: searchQuery.trim() || undefined,
+        from: dateRange.from || undefined, to: dateRange.to || undefined
       }
       
       const response = await adminAPI.getContactMessages(params)
@@ -176,6 +180,7 @@ export default function ContactMessages() {
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             </div>
+            <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
           </div>
         </div>
       </div>

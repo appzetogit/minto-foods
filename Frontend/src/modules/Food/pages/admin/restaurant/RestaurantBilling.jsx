@@ -1,3 +1,4 @@
+import apiClient from "@food/api"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { Search, Loader2, Percent, IndianRupee, X, RotateCcw, Info } from "lucide-react"
 import { toast } from "sonner"
@@ -44,6 +45,16 @@ export default function RestaurantBilling() {
     const [loading, setLoading] = useState(true)
     const [searchQuery, setSearchQuery] = useState("")
     const [savingId, setSavingId] = useState(null)
+    // What each restaurant is actually charged, so one paying nothing stands out.
+    const [overview, setOverview] = useState({})
+    const loadOverview = useCallback(async () => {
+        try {
+            const res = await apiClient.get("/food/admin/commission-overview", { contextModule: "admin" })
+            setOverview(res?.data?.data?.overview || {})
+        } catch {
+            setOverview({})
+        }
+    }, [])
 
     // Dish-rate editor
     const [dishOpen, setDishOpen] = useState(false)
@@ -74,7 +85,8 @@ export default function RestaurantBilling() {
 
     useEffect(() => {
         fetchRestaurants()
-    }, [fetchRestaurants])
+        loadOverview()
+    }, [fetchRestaurants, loadOverview])
 
     const filtered = useMemo(() => {
         const query = searchQuery.trim().toLowerCase()
@@ -99,6 +111,7 @@ export default function RestaurantBilling() {
         try {
             await adminAPI.setRestaurantBillingMode(id, billingMode)
             toast.success(`${restaurant.restaurantName || "Restaurant"} is now on ${modeLabel(billingMode)}`)
+            loadOverview()
         } catch (error) {
             setRestaurants((rows) =>
                 rows.map((r) => ((r.id || r._id) === id ? { ...r, billingMode: previous } : r)),
@@ -139,6 +152,7 @@ export default function RestaurantBilling() {
                 ),
             )
             toast.success(patch.clear ? `${item.name} follows the restaurant rate` : `${item.name} updated`)
+            loadOverview()
         } catch (error) {
             // Interceptor toasts the reason; the row keeps its previous value.
         } finally {
@@ -199,6 +213,9 @@ export default function RestaurantBilling() {
                                         <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                                             Billing Mode
                                         </th>
+                                        <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                                            What they pay
+                                        </th>
                                         <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                                             Dish Rates
                                         </th>
@@ -242,6 +259,9 @@ export default function RestaurantBilling() {
                                                         )}
                                                     </div>
                                                 </td>
+                                                <td className="px-6 py-4">
+                                                    <ChargeCell info={overview[id]} />
+                                                </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <button
                                                         type="button"
@@ -280,6 +300,31 @@ export default function RestaurantBilling() {
  * none -- and so fall back to the restaurant rate -- is exactly what an admin
  * needs to see before switching a restaurant to dish-based billing.
  */
+/** One line on what a restaurant is charged, red when it is nothing. */
+function ChargeCell({ info }) {
+    if (!info) return <span className="text-xs text-slate-400">…</span>
+    if (info.charges === "subscription") {
+        return <span className="text-xs text-slate-600">Monthly plan</span>
+    }
+    if (info.charges === "nothing") {
+        return (
+            <span className="inline-block rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">
+                0% · no commission set
+            </span>
+        )
+    }
+    if (info.billingMode === "commission_dish") {
+        return (
+            <span className="text-xs text-slate-700">
+                {info.dishRatesAboveZero} of {info.totalDishes} dishes have a rate
+                {info.restaurantRate?.value ? `, others ${info.restaurantRate.value}${info.restaurantRate.type === "amount" ? " Rs" : "%"}` : ""}
+            </span>
+        )
+    }
+    const r = info.restaurantRate
+    return <span className="text-xs font-medium text-slate-800">{r.type === "amount" ? `Rs ${r.value} per order` : `${r.value}% of the order`}</span>
+}
+
 function DishRateDialog({ restaurant, items, loading, savingId, onSave, onClose }) {
     const [drafts, setDrafts] = useState({})
 

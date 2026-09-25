@@ -407,3 +407,51 @@ export async function toggleDeliveryCommissionRuleStatus(id, status) {
     const updated = await prisma.foodDeliveryCommissionRule.findUnique({ where: { id: String(id) } });
     return serializeRule(updated);
 }
+
+/**
+ * What each restaurant is actually charged, for the Billing Mode screen.
+ *
+ * Commission read ₹0 across the platform because no restaurant had a rate:
+ * overall-mode restaurants had none and the dish-mode one had every dish at
+ * 0%. Nothing on the screen said so. This spells it out per restaurant, so a
+ * restaurant that will pay nothing is visible before its orders come in.
+ */
+export async function getCommissionOverview() {
+    const [restaurants, overall, dishes, dishCounts] = await Promise.all([
+        prisma.foodRestaurant.findMany({ where: { status: 'approved' }, select: { id: true, billingMode: true } }),
+        prisma.foodRestaurantCommission.findMany({
+            where: { status: true },
+            select: { restaurantId: true, commissionType: true, commissionValue: true },
+        }),
+        prisma.foodItemCommission.findMany({
+            where: { status: true },
+            select: { restaurantId: true, commissionValue: true },
+        }),
+        prisma.foodItem.groupBy({ by: ['restaurantId'], _count: { _all: true } }),
+    ]);
+    const rateOf = new Map(overall.map((r) => [r.restaurantId, r]));
+    const itemsOf = new Map(dishCounts.map((d) => [d.restaurantId, d._count._all]));
+    const dishOf = new Map();
+    for (const d of dishes) {
+        const e = dishOf.get(d.restaurantId) || { set: 0, positive: 0 };
+        e.set += 1;
+        if (Number(d.commissionValue) > 0) e.positive += 1;
+        dishOf.set(d.restaurantId, e);
+    }
+    const overview = {};
+    for (const r of restaurants) {
+        const rule = rateOf.get(r.id);
+        const restaurantRate = rule ? { type: rule.commissionType, value: Number(rule.commissionValue) } : null;
+        const dish = dishOf.get(r.id) || { set: 0, positive: 0 };
+        const totalDishes = itemsOf.get(r.id) || 0;
+        let charges;
+        if (r.billingMode === 'subscription') charges = 'subscription';
+        else if (r.billingMode === 'commission_dish') {
+            // A dish without its own rate falls back to the restaurant rate.
+            const fallbackPays = restaurantRate && restaurantRate.value > 0;
+            charges = dish.positive > 0 || fallbackPays ? 'yes' : 'nothing';
+        } else charges = restaurantRate && restaurantRate.value > 0 ? 'yes' : 'nothing';
+        overview[r.id] = { billingMode: r.billingMode, restaurantRate, dishRates: dish.set, dishRatesAboveZero: dish.positive, totalDishes, charges };
+    }
+    return { overview };
+}

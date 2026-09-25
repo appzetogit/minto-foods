@@ -1,3 +1,4 @@
+import { dayRange } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js';
@@ -198,6 +199,9 @@ export async function listUserCartsForAdmin(query = {}) {
     // itemCount is maintained on every sync, so "has items" is a plain column
     // test rather than probing for the existence of items[0].
     const where = { itemCount: { gt: 0 } };
+    // From/to, as whole India days; the list had no date filter.
+    const range = dayRange(query);
+    if (range) where.updatedAt = range;
 
     if (search) {
         // The customer is matched through the relation instead of pre-resolving

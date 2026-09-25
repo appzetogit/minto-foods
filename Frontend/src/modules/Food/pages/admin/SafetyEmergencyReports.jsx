@@ -1,3 +1,4 @@
+import DateRangeFilter from "@food/components/admin/DateRangeFilter"
 import { useState, useEffect, useMemo } from "react"
 import { Search, ArrowUpDown, Settings, Folder, ChevronDown, Eye, Trash2, AlertTriangle, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -26,6 +27,8 @@ const debugError = (...args) => {}
 
 
 export default function SafetyEmergencyReports() {
+  // From/to days (India time on the server); blank = no limit.
+  const [dateRange, setDateRange] = useState({ from: "", to: "" })
   const [searchQuery, setSearchQuery] = useState("")
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -38,7 +41,7 @@ export default function SafetyEmergencyReports() {
 
   useEffect(() => {
     fetchReports()
-  }, [statusFilter, priorityFilter, currentPage, searchQuery])
+  }, [statusFilter, priorityFilter, currentPage, searchQuery, dateRange])
 
   const fetchReports = async () => {
     try {
@@ -48,7 +51,8 @@ export default function SafetyEmergencyReports() {
         limit: 10,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         priority: priorityFilter !== 'all' ? priorityFilter : undefined,
-        search: searchQuery.trim() || undefined
+        search: searchQuery.trim() || undefined,
+        from: dateRange.from || undefined, to: dateRange.to || undefined
       }
       
       // Remove undefined params
@@ -240,6 +244,7 @@ export default function SafetyEmergencyReports() {
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             </div>
+            <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
           </div>
         </div>
       </div>

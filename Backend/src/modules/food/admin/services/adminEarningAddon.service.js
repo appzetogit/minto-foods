@@ -1,3 +1,4 @@
+import { dayRange } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { logger } from '../../../../utils/logger.js';
@@ -121,6 +122,9 @@ export async function getEarningAddonHistory(query = {}) {
     const skip = (page - 1) * limit;
 
     const where = {};
+    // From/to, as whole India days; the list had no date filter.
+    const range = dayRange(query);
+    if (range) where.completedAt = range;
     const search = typeof query.search === 'string' ? query.search.trim() : '';
 
     if (search) {

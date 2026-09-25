@@ -1,3 +1,4 @@
+import { dayRange } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -224,6 +225,9 @@ export async function getSafetyEmergencyReports(query = {}) {
     const skip = (page - 1) * limit;
 
     const where = {};
+    // From/to, as whole India days; the list had no date filter.
+    const range = dayRange(query);
+    if (range) where.createdAt = range;
     if (SAFETY_STATUSES.includes(String(query.status))) where.status = String(query.status);
     if (SAFETY_PRIORITIES.includes(String(query.priority))) where.priority = String(query.priority);
 

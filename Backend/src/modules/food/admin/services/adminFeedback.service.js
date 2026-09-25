@@ -1,3 +1,4 @@
+import { dayRange } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -128,6 +129,9 @@ export async function getRestaurantReviews(query = {}) {
     const skip = (page - 1) * limit;
 
     const where = { restaurantRating: { not: null } };
+    // From/to, as whole India days; the list had no date filter.
+    const range = dayRange(query);
+    if (range) where.restaurantRatedAt = range;
 
     if (query.search && String(query.search).trim()) {
         const contains = { contains: String(query.search).trim(), mode: 'insensitive' };
@@ -184,6 +188,9 @@ export async function getContactMessages(query = {}) {
     const skip = (page - 1) * limit;
 
     const where = {};
+    // From/to, as whole India days; the list had no date filter.
+    const range = dayRange(query);
+    if (range) where.createdAt = range;
     if (query.rating && !Number.isNaN(Number(query.rating))) {
         where.rating = parseInt(query.rating, 10);
     }
