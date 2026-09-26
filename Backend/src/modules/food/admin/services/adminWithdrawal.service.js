@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
+import { parseDayBound } from '../../../../utils/timezone.js';
 
 /**
  * Withdrawal approvals, extracted from admin.service.js.
