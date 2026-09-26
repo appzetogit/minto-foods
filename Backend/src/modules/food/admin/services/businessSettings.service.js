@@ -180,6 +180,15 @@ export const updateBusinessSettings = async (body = {}, files = null) => {
         }
     }
 
+    // Days of warning before a banner or coupon ends, 1-30.
+    if (body.expiryAlertDays !== undefined && String(body.expiryAlertDays).trim() !== '') {
+        const days = Number(body.expiryAlertDays);
+        if (!Number.isInteger(days) || days < 1 || days > 30) {
+            throw new ValidationError('Expiry alert must be a whole number of days from 1 to 30');
+        }
+        data.expiryAlertDays = days;
+    }
+
     // Uploaded one at a time on purpose: six parallel uploads of the same
     // multipart request is a lot of outbound bandwidth for a settings save.
     for (const [field, columns] of Object.entries(IMAGE_FIELDS)) {

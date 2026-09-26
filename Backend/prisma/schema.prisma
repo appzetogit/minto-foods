@@ -2525,6 +2525,10 @@ model FoodBusinessSettings {
 
   orderAcceptanceTimeMinutes Int @default(4)
 
+  /// How many days before a promotional/offer banner or an admin coupon ends
+  /// the admin bell starts warning about it.
+  expiryAlertDays Int @default(3)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

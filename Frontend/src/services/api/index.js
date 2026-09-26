@@ -579,6 +579,9 @@ export const adminAPI = {
       params,
       contextModule: "admin",
     }),
+  // Promotional/offer banners and admin coupons ending within the alert window.
+  getEndingSoonAlerts: () =>
+    apiClient.get("/food/admin/alerts/ending-soon", { contextModule: "admin" }),
   getExpiredFssaiNotifications: (params = {}) =>
     apiClient.get("/food/admin/notifications/fssai-expired", {
       params,

@@ -192,6 +192,30 @@ const mapExpiredFssai = (response) => {
   }));
 };
 
+/**
+ * Banners and coupons about to end. The id carries the end date, so dismissing
+ * the alert hides it for that end date only: extend the banner and it is
+ * announced again as the new date approaches.
+ */
+const mapEndingSoon = (response) => {
+  const payload = response?.data?.data;
+  const rows = Array.isArray(payload?.items) ? payload.items : [];
+  const now = new Date().toISOString();
+
+  return rows.map((item) => ({
+    id: `ending-${item.kind}-${item.id}-${String(item.endDate || "").slice(0, 10)}`,
+    title: `${item.typeLabel || "Banner"} ${item.endingLabel || "ending soon"}`,
+    message: `"${item.title || "Untitled"}" (${item.zoneName || "All zones"}) ends on ${item.endDateLabel || toDateLabel(item.endDate)}. Extend the end date or plan what replaces it.`,
+    type: "reminder",
+    category: "ending_soon",
+    path: item.path || "/admin/food/promotional-banner",
+    // Shown as current for as long as it is in the window, so it stays near the top.
+    createdAt: now,
+    timeLabel: item.endingLabel || "",
+    metaLabel: joinMeta(item.typeLabel, item.zoneName, item.endDateLabel),
+  }));
+};
+
 export default function useAdminNotifications(options = {}) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(Boolean(options?.autoload !== false));
@@ -201,6 +225,17 @@ export default function useAdminNotifications(options = {}) {
       setLoading(true);
       const dismissed = new Set(getDismissedIds());
 
+      // Settled, not all: a sub-admin without access to one source (a 403)
+      // used to empty the whole bell. Each source now fails on its own.
+      const settled = await Promise.allSettled([
+        adminAPI.getPendingRestaurants(),
+        adminAPI.getDeliveryPartnerJoinRequests({ page: 1, limit: 50 }),
+        adminAPI.getPendingFoodApprovals({ page: 1, limit: 50 }),
+        adminAPI.getSupportTicketsAdmin({ page: 1, limit: 50, source: "all" }),
+        adminAPI.getDeliverySupportTickets({ page: 1, limit: 50 }),
+        adminAPI.getExpiredFssaiNotifications(),
+        adminAPI.getEndingSoonAlerts(),
+      ]);
       const [
         restaurantsRes,
         deliveryJoinRes,
@@ -208,14 +243,8 @@ export default function useAdminNotifications(options = {}) {
         supportRes,
         deliverySupportRes,
         fssaiExpiredRes,
-      ] = await Promise.all([
-        adminAPI.getPendingRestaurants(),
-        adminAPI.getDeliveryPartnerJoinRequests({ page: 1, limit: 50 }),
-        adminAPI.getPendingFoodApprovals({ page: 1, limit: 50 }),
-        adminAPI.getSupportTicketsAdmin({ page: 1, limit: 50, source: "all" }),
-        adminAPI.getDeliverySupportTickets({ page: 1, limit: 50 }),
-        adminAPI.getExpiredFssaiNotifications(),
-      ]);
+        endingSoonRes,
+      ] = settled.map((r) => (r.status === "fulfilled" ? r.value : null));
 
       const restaurantRows =
         restaurantsRes?.data?.data ||
@@ -229,6 +258,7 @@ export default function useAdminNotifications(options = {}) {
         ...mapUserRestaurantSupport(supportRes),
         ...mapDeliverySupport(deliverySupportRes),
         ...mapExpiredFssai(fssaiExpiredRes),
+        ...mapEndingSoon(endingSoonRes),
       ])
         .filter((item) => !dismissed.has(item.id))
         .sort((a, b) => toDateValue(b.createdAt) - toDateValue(a.createdAt));

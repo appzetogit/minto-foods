@@ -671,5 +671,15 @@ router.put('/pages-social-media/:key', upsertAdminPageController);
 
 router.get('/sidebar-badges', adminController.getSidebarBadges);
 router.get('/notifications/fssai-expired', adminController.getExpiredFssaiNotifications);
+// Banners and coupons about to end. Any admin may ask; the service only
+// returns the kinds (banners, coupons) and zones this admin can see.
+router.get('/alerts/ending-soon', async (req, res, next) => {
+    try {
+        const { getEndingSoon } = await import('../services/adminExpiryAlerts.service.js');
+        return res.status(200).json({ success: true, message: 'Ending soon', data: await getEndingSoon(req.adminAccess) });
+    } catch (error) {
+        return next(error);
+    }
+});
 
 export default router;
