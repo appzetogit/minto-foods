@@ -830,14 +830,24 @@ export const requestAdminForgotPasswordOtp = async (email) => {
     throw new ValidationError("Email is required");
   }
 
+  const generic = {
+    success: true,
+    message: "If this email is registered, you will receive an OTP shortly.",
+  };
+
+  // Same answer whether or not the email is an admin's: saying "not
+  // registered" told anyone which addresses to attack.
   const admin = await prisma.foodAdmin.findUnique({ where: { email: normalizedEmail } });
-  if (!admin) {
-    throw new AuthError("This email is not registered as an admin account.");
+  if (!admin || admin.isDeleted || admin.isActive === false) {
+    return generic;
   }
 
-  const otp = config.useDefaultOtp
-    ? "123456"
-    : String(crypto.randomInt(100000, 999999));
+  // Always random. This used to be a fixed 123456 whenever USE_DEFAULT_OTP was
+  // on -- which it is in production for the customer/restaurant/rider apps --
+  // so anyone who knew an admin's email could reset the password and take
+  // over the admin panel. The admin code goes by email, so it never needs the
+  // SMS stand-in.
+  const otp = String(crypto.randomInt(100000, 1000000));
   const ttlMs = (config.otpExpiryMinutes || 10) * 60 * 1000;
   const expiresAt = new Date(Date.now() + ttlMs);
 
@@ -849,21 +859,12 @@ export const requestAdminForgotPasswordOtp = async (email) => {
     update: { otp, expiresAt, attempts: 0 },
   });
 
-  if (config.useDefaultOtp) {
-    logger.info(`Admin reset OTP for ${normalizedEmail}: ${otp}`);
-  }
-
   const sent = await sendAdminResetOtpEmail(normalizedEmail, otp);
-  if (!sent && !config.useDefaultOtp) {
-    logger.warn(
-      `Admin OTP not sent by email to ${normalizedEmail}; check SMTP config.`,
-    );
+  if (!sent) {
+    logger.warn(`Admin reset OTP could not be emailed to ${normalizedEmail}; check SMTP config.`);
   }
 
-  return {
-    success: true,
-    message: "If this email is registered, you will receive an OTP shortly.",
-  };
+  return generic;
 };
 
 /** Admin forgot password: verify OTP and set new password in one call. */

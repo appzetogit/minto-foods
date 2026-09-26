@@ -1742,6 +1742,31 @@ const attachRecommendedItems = async (restaurants) => {
     return restaurants.map((r) => ({ ...r, recommendedItems: byRestaurant.get(r.id) || [] }));
 };
 
+/**
+ * Open right now, by the restaurant's switch AND its hours (overnight hours
+ * included), for what customers see.
+ *
+ * The apps read `isAcceptingOrders` as "can I order from here now". It used to
+ * be only the switch in the restaurant panel, so a restaurant open 4pm-2am
+ * showed as open at 11am and the order was then refused. It is now the real
+ * answer; the switch itself is still there as `manualAcceptingOrders`.
+ * `openingTime`/`closingTime` become today's current (or next) window.
+ */
+const withOpenStatus = (r) => {
+    if (!r) return r;
+    const status = getRestaurantOperationalStatus({ ...r, outsideHoursOverride: false });
+    return {
+        ...r,
+        manualAcceptingOrders: r.isAcceptingOrders !== false,
+        isAcceptingOrders: status.isEffectivelyOnline,
+        isOpen: status.isEffectivelyOnline,
+        isOpenNow: status.isEffectivelyOnline,
+        openStatusReason: status.reason,
+        openingTime: status.openingTime || r.openingTime || null,
+        closingTime: status.closingTime || r.closingTime || null,
+    };
+};
+
 /** The card shape the user app reads. */
 const toPublicCard = (r) => ({
     ...toRestaurant(r),
@@ -1888,7 +1913,7 @@ export const listApprovedRestaurants = async (query = {}) => {
         const withOffers = await attachPublicOffersToRestaurants(withRecommended);
         const withTimings = await attachOutletTimingsToRestaurants(withOffers);
         return {
-            restaurants: withTimings.map((r) => normalizePublicRestaurantGeo(r, lat, lng)),
+            restaurants: withTimings.map((r) => withOpenStatus(normalizePublicRestaurantGeo(r, lat, lng))),
             total,
             page,
             limit,
@@ -2076,7 +2101,7 @@ export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
             }),
         ),
     ]);
-    return withTimings;
+    return withOpenStatus(withTimings);
 };
 
 export const listPublicOffers = async (query = {}) => {

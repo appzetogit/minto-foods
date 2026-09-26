@@ -2,7 +2,7 @@ import {
   getPreviousDayName,
   getRestaurantLocalTimeParts,
 } from '../../../../utils/timezone.js';
-import { readSlots, isWithinAnySlot } from './daySlots.helper.js';
+import { readSlots } from './daySlots.helper.js';
 
 const DAY_NAMES = [
   'Sunday',
@@ -85,85 +85,89 @@ const getTodayTiming = (restaurant, dayName) => {
   return null;
 };
 
-const isWithinTimeWindow = (nowMinutes, openingMinutes, closingMinutes) => {
-  if (openingMinutes === null || closingMinutes === null) return true;
-  if (openingMinutes === closingMinutes) return true;
-
-  if (closingMinutes > openingMinutes) {
-    return nowMinutes >= openingMinutes && nowMinutes <= closingMinutes;
-  }
-
-  return nowMinutes >= openingMinutes || nowMinutes <= closingMinutes;
-};
-
-const checkDayWindow = (restaurant, dayName, nowMinutes) => {
+/**
+ * One day's opening windows, in minutes, or a closed day.
+ *
+ * Reads `slots` when the day has them (lunch and dinner), otherwise the single
+ * opening/closing pair -- from the day, the delivery timings or the restaurant,
+ * in that order, as before.
+ */
+const readDay = (restaurant, dayName) => {
   const timing = getTodayTiming(restaurant, dayName);
-  const openDays = Array.isArray(restaurant?.openDays) ? restaurant.openDays : [];
-
   if (timing && timing.isOpen === false) {
-    return {
-      isWithin: false,
-      isDayClosed: true,
-      hasWindow: true,
-      dayName,
-      timing,
-    };
+    return { dayName, closedDay: true, windows: [], hasWindow: true };
   }
 
-  const openingTime =
-    timing?.openingTime ||
-    restaurant?.deliveryTimings?.openingTime ||
-    restaurant?.openingTime ||
-    null;
-  const closingTime =
-    timing?.closingTime ||
-    restaurant?.deliveryTimings?.closingTime ||
-    restaurant?.closingTime ||
-    null;
-  const openingMinutes = parseTimeToMinutes(openingTime);
-  const closingMinutes = parseTimeToMinutes(closingTime);
-  const hasExplicitWindow = Boolean(openingTime || closingTime);
-
+  const openDays = Array.isArray(restaurant?.openDays) ? restaurant.openDays : [];
   if (!timing && openDays.length > 0) {
-    const normalizedOpenDays = new Set(
-      openDays.map((d) => normalizeDay(d)).filter(Boolean),
-    );
+    const normalizedOpenDays = new Set(openDays.map((d) => normalizeDay(d)).filter(Boolean));
     if (normalizedOpenDays.size > 0 && !normalizedOpenDays.has(dayName)) {
-      return {
-        isWithin: false,
-        isDayClosed: true,
-        hasWindow: true,
-        dayName,
-        reason: 'closed-day',
-      };
+      return { dayName, closedDay: true, windows: [], hasWindow: true };
     }
   }
 
-  // A day can hold more than one window now -- lunch and dinner with a break
-  // between. `timing` still carries openingTime/closingTime mirroring the first
-  // of them, so a day stored before slots existed reads as a single window and
-  // behaves exactly as it always did.
-  const slots = readSlots(timing);
-  const hasSlots = slots.length > 1;
+  let windows = readSlots(timing).map((slot) => ({
+    open: parseTimeToMinutes(slot.open),
+    close: parseTimeToMinutes(slot.close),
+    openingTime: slot.open,
+    closingTime: slot.close,
+  }));
 
-  const isWithin = hasSlots
-    ? isWithinAnySlot(slots, nowMinutes)
-    : hasExplicitWindow
-      ? openingMinutes !== null &&
-        closingMinutes !== null &&
-        isWithinTimeWindow(nowMinutes, openingMinutes, closingMinutes)
-      : true;
+  let hasWindow = windows.length > 0;
+  if (!windows.length) {
+    const openingTime =
+      timing?.openingTime || restaurant?.deliveryTimings?.openingTime || restaurant?.openingTime || null;
+    const closingTime =
+      timing?.closingTime || restaurant?.deliveryTimings?.closingTime || restaurant?.closingTime || null;
+    hasWindow = Boolean(openingTime || closingTime);
+    const open = parseTimeToMinutes(openingTime);
+    const close = parseTimeToMinutes(closingTime);
+    if (open !== null && close !== null) windows = [{ open, close, openingTime, closingTime }];
+  }
+
+  return { dayName, closedDay: false, windows: windows.filter((w) => w.open !== null && w.close !== null), hasWindow };
+};
+
+/**
+ * Is the restaurant open at `now`, and which window is it in?
+ *
+ * A window whose closing time is earlier than its opening time runs past
+ * midnight: Wednesday 16:00-02:00 is open Wednesday from 16:00 to midnight AND
+ * Thursday from midnight to 02:00. The part after midnight belongs to the day
+ * it started on -- it used to be credited to the current day's own window, so
+ * a restaurant shut on Wednesday still showed open at 1am Thursday. And every
+ * window of yesterday is checked, not just the first, so "lunch, then dinner
+ * until 2am" stays open after midnight.
+ */
+const evaluateSchedule = (restaurant, now) => {
+  const { dayName, nowMinutes } = getRestaurantLocalTimeParts(now);
+  const today = readDay(restaurant, dayName);
+  const yesterday = readDay(restaurant, getPreviousDayName(dayName));
+
+  // No hours set anywhere for today is no restriction, as it always was.
+  const unrestricted = !today.closedDay && !today.hasWindow;
+
+  const todayWindow = today.windows.find((w) => {
+    if (w.open === w.close) return true; // all day
+    return w.close > w.open
+      ? nowMinutes >= w.open && nowMinutes <= w.close
+      : nowMinutes >= w.open; // overnight: today's part runs to midnight
+  });
+  const carriedWindow = yesterday.closedDay
+    ? null
+    : yesterday.windows.find((w) => w.close < w.open && nowMinutes <= w.close);
+
+  const isOpen = unrestricted || Boolean(todayWindow) || Boolean(carriedWindow);
+  const active = todayWindow || carriedWindow || today.windows[0] || null;
 
   return {
-    isWithin,
-    isDayClosed: false,
-    hasWindow: hasExplicitWindow,
-    dayName,
-    openingTime,
-    closingTime,
-    openingMinutes,
-    closingMinutes,
-    timing,
+    isOpen,
+    todayClosedDay: today.closedDay,
+    carriedOver: !todayWindow && Boolean(carriedWindow),
+    hasWindow: carriedWindow ? true : today.hasWindow,
+    openingTime: active?.openingTime || null,
+    closingTime: active?.closingTime || null,
+    dayName: carriedWindow && !todayWindow ? yesterday.dayName : dayName,
   };
 };
 
@@ -178,37 +182,22 @@ export function getOutletScheduleStatus(restaurant, now = new Date()) {
     };
   }
 
-  const { dayName, nowMinutes } = getRestaurantLocalTimeParts(now);
-  const today = checkDayWindow(restaurant, dayName, nowMinutes);
-  const yesterday = checkDayWindow(
-    restaurant,
-    getPreviousDayName(dayName),
-    nowMinutes,
-  );
-
-  const yesterdayCrossesMidnight =
-    yesterday.openingMinutes !== null &&
-    yesterday.closingMinutes !== null &&
-    yesterday.closingMinutes < yesterday.openingMinutes;
-  const isYesterdayStillOpen =
-    yesterdayCrossesMidnight && nowMinutes <= yesterday.closingMinutes;
-  const isTodayOpen = today.isWithin;
-  const scheduleOpen = isTodayOpen || isYesterdayStillOpen;
-  const activeWindow = isTodayOpen ? today : isYesterdayStillOpen ? yesterday : today;
+  const schedule = evaluateSchedule(restaurant, now);
+  const scheduleOpen = schedule.isOpen;
 
   return {
     isOpen: scheduleOpen,
-    isDayClosed: today.isDayClosed && !isYesterdayStillOpen,
+    isDayClosed: schedule.todayClosedDay && !schedule.carriedOver,
     isWithinTimings: scheduleOpen,
-    hasConfiguredHours: Boolean(activeWindow?.hasWindow),
-    openingTime: activeWindow?.openingTime || null,
-    closingTime: activeWindow?.closingTime || null,
-    dayName: activeWindow?.dayName || dayName,
+    hasConfiguredHours: schedule.hasWindow,
+    openingTime: schedule.openingTime,
+    closingTime: schedule.closingTime,
+    dayName: schedule.dayName,
     reason: scheduleOpen
       ? 'within-hours'
-      : today.isDayClosed
+      : schedule.todayClosedDay
         ? 'closed-day'
-        : activeWindow?.hasWindow
+        : schedule.hasWindow
           ? 'outside-hours'
           : 'no-timings',
   };
@@ -270,36 +259,21 @@ export function getRestaurantAvailabilityStatus(restaurant, now = new Date(), op
     };
   }
 
-  const { dayName, nowMinutes } = getRestaurantLocalTimeParts(now);
-  const today = checkDayWindow(restaurant, dayName, nowMinutes);
-  const yesterday = checkDayWindow(
-    restaurant,
-    getPreviousDayName(dayName),
-    nowMinutes,
-  );
-
-  const yesterdayCrossesMidnight =
-    yesterday.openingMinutes !== null &&
-    yesterday.closingMinutes !== null &&
-    yesterday.closingMinutes < yesterday.openingMinutes;
-  const isYesterdayStillOpen =
-    yesterdayCrossesMidnight && nowMinutes <= yesterday.closingMinutes;
-  const isTodayOpen = today.isWithin;
-  const isOpenNow = isTodayOpen || isYesterdayStillOpen;
-  const activeWindow = isTodayOpen ? today : isYesterdayStillOpen ? yesterday : today;
+  const schedule = evaluateSchedule(restaurant, now);
+  const isOpenNow = schedule.isOpen;
 
   return {
     isOpen: isOpenNow,
     isActive,
     isAcceptingOrders,
     isWithinTimings: isOpenNow,
-    openingTime: activeWindow?.openingTime || null,
-    closingTime: activeWindow?.closingTime || null,
+    openingTime: schedule.openingTime,
+    closingTime: schedule.closingTime,
     reason: isOpenNow
       ? isAcceptingOrders
         ? 'open'
         : 'open-by-timings'
-      : activeWindow?.hasWindow
+      : schedule.hasWindow
         ? 'outside-hours'
         : 'no-timings',
   };

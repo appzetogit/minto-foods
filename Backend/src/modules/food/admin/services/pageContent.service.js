@@ -3,7 +3,33 @@ import { prisma } from '../../../../config/prisma.js';
 
 // DbNull writes SQL NULL to a Json column; a bare null would store JSON `null`.
 const { Prisma } = pkg;
+import sanitizeHtml from 'sanitize-html';
 import { ValidationError } from '../../../../core/auth/errors.js';
+
+/**
+ * Policy pages are shown as HTML on the website, the admin panel and the apps.
+ * Whatever an admin typed was rendered as-is (and entity-decoded first, so even
+ * "&lt;script&gt;" became a live tag), so anyone allowed to edit a page could
+ * run script in the browser of every admin and customer who opened it.
+ * Formatting survives; scripts, event handlers, iframes and javascript: links
+ * do not. Applied on the way out, so pages saved before this are clean too.
+ */
+const LEGAL_HTML = {
+    allowedTags: [
+        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'sup', 'sub',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+        'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img',
+    ],
+    allowedAttributes: {
+        a: ['href', 'target', 'rel'],
+        img: ['src', 'alt', 'width', 'height'],
+        '*': ['style', 'class', 'align'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    allowedSchemesByTag: { img: ['https', 'data'] },
+    transformTags: { a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }) },
+};
+const cleanHtml = (html) => sanitizeHtml(String(html ?? ''), LEGAL_HTML);
 
 const normalizeKey = (key) => String(key || '').trim().toLowerCase();
 
@@ -24,7 +50,7 @@ const decodeHtmlEntities = (value) => {
 const normalizeLegalForResponse = (legal) => {
     if (!legal || typeof legal !== 'object') return legal;
     const title = legal.title ?? '';
-    const content = decodeHtmlEntities(legal.content ?? '');
+    const content = cleanHtml(decodeHtmlEntities(legal.content ?? ''));
     const email = legal.email ?? '';
     const mobile = legal.mobile ?? '';
     return { ...legal, title, content, email, mobile };
@@ -36,7 +62,7 @@ const normalizeAboutForResponse = (about) => {
         ...about,
         appName: decodeHtmlEntities(about.appName ?? ''),
         version: decodeHtmlEntities(about.version ?? ''),
-        description: decodeHtmlEntities(about.description ?? ''),
+        description: cleanHtml(decodeHtmlEntities(about.description ?? '')),
         logo: decodeHtmlEntities(about.logo ?? '')
     };
 };
