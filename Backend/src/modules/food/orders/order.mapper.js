@@ -18,6 +18,7 @@
 export const orderInclude = {
     items: true,
     itemRatings: true,
+    refundLegs: { orderBy: { createdAt: 'asc' } },
     statusHistory: { orderBy: { at: 'asc' } },
     dispatchOffers: { orderBy: { at: 'asc' } }
 };
@@ -103,10 +104,17 @@ export function toOrder(row) {
             roadDurationMins: row.roadDurationMins
         },
 
+        // Decimal columns; emitted as numbers like every other money field.
+        walletAmount: money(row.walletAmount),
+        onlineAmount: money(row.onlineAmount),
+
         payment: {
             method: row.paymentMethod,
             status: row.paymentStatus,
             amountDue: num(row.paymentAmountDue),
+            // How the total was paid; both 0 on a cash order.
+            walletAmount: money(row.walletAmount),
+            onlineAmount: money(row.onlineAmount),
             razorpay: {
                 orderId: row.razorpayOrderId,
                 paymentId: row.razorpayPaymentId,
@@ -117,7 +125,22 @@ export function toOrder(row) {
                 status: row.refundStatus,
                 amount: money(row.refundAmount),
                 refundId: row.refundId,
-                processedAt: row.refundProcessedAt
+                processedAt: row.refundProcessedAt,
+                // Each movement of refund money, when the query included them.
+                legs: Array.isArray(row.refundLegs)
+                    ? row.refundLegs.map((leg) => ({
+                        id: leg.id,
+                        source: leg.source,
+                        refundTo: leg.refundTo,
+                        amount: money(leg.amount),
+                        status: leg.status,
+                        gatewayRefundId: leg.gatewayRefundId,
+                        failureReason: leg.failureReason,
+                        initiatedBy: leg.initiatedBy,
+                        createdAt: leg.createdAt,
+                        processedAt: leg.processedAt
+                    }))
+                    : undefined
             }
         },
 

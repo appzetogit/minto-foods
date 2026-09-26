@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { logger } from '../../../../utils/logger.js';
 import { getRazorpayInstance } from '../helpers/razorpay.helper.js';
+import { onlineAmountDuePaise } from './order-refund.service.js';
 
 /**
  * Asking Razorpay what actually happened to an order's payment.
@@ -34,7 +35,9 @@ export async function reconcileOrderPayment(order) {
         return 'unknown';
     }
 
-    const expectedPaise = Math.round(Number(order.total || 0) * 100);
+    // The online part only: on a split order the wallet paid the rest. Callers
+    // pass a row that includes onlineAmount; without it this falls back to total.
+    const expectedPaise = onlineAmountDuePaise(order);
 
     // An authorised payment is the customer's money held but not taken. With
     // manual capture turned on in the dashboard it stays that way -- and is

@@ -4,7 +4,8 @@ import io from "socket.io-client"
 import { FileText, Package } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
-import { toast } from "sonner"
+import { toast } from "sonner"
+
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
 import OrdersTopbar from "@food/components/admin/orders/OrdersTopbar"
 import OrdersTable from "@food/components/admin/orders/OrdersTable"
@@ -645,6 +646,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       if (!paymentType) {
         if (paymentMethod === "cash" || paymentMethod === "cod") paymentType = "Cash on Delivery"
         else if (paymentMethod === "wallet") paymentType = "Wallet"
+        else if (paymentMethod === "razorpay" && Number(order.payment?.walletAmount) > 0) paymentType = "Wallet + Online"
         else if (paymentMethod) paymentType = "Online"
         else paymentType = "N/A"
       }
@@ -1204,28 +1206,16 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }
 
-  // Handle refund button click - show modal for wallet payments, confirm dialog for others
+  // Every refund goes through the modal: it shows how the order was paid, what
+  // has been refunded already, and lets the admin send it to the original
+  // method or all to the wallet.
   const handleRefund = (order) => {
-    const isWalletPayment = order.paymentType === "Wallet" || order.payment?.method === "wallet";
-    
-    if (isWalletPayment) {
-      // Show modal for wallet refunds
-      setSelectedOrderForRefund(order)
-      setRefundModalOpen(true)
-    } else {
-      // For non-wallet payments, use the old confirm dialog flow
-      const confirmMessage = `Are you sure you want to process refund for order ${order.orderId}?\n\nThis will initiate a Razorpay refund to the customer's original payment method.`;
-      
-      if (!confirm(confirmMessage)) {
-        return
-      }
-      
-      processRefund(order, null) // null amount means use default
-    }
+    setSelectedOrderForRefund(order)
+    setRefundModalOpen(true)
   }
 
   // Process refund with amount
-  const processRefund = async (order, refundAmount = null) => {
+  const processRefund = async (order, refundAmount = null, destination = "original") => {
     // Try using MongoDB _id first (more reliable for route matching), then fallback to orderId string
     // Backend accepts either MongoDB ObjectId (24 chars) or orderId string
     // Using MongoDB _id is more reliable for route matching (no dashes/special chars)
@@ -1258,23 +1248,16 @@ export default function OrdersPage({ statusKey = "all" }) {
       })
       
       // Include refundAmount in request body if provided (ensure it's a number)
-      const requestData = refundAmount !== null ? { refundAmount: parseFloat(refundAmount) } : {}
+      const requestData = {
+        ...(refundAmount !== null ? { refundAmount: parseFloat(refundAmount) } : {}),
+        destination,
+      }
       debugLog('?? Request data being sent:', requestData)
       const response = await adminAPI.processRefund(orderIdToUse, requestData)
       
       if (response.data?.success) {
-        const isWalletPayment = order.paymentType === "Wallet" || order.payment?.method === "wallet";
-        toast.success(response.data?.message || (isWalletPayment 
-          ? `Wallet refund of \u20B9${refundAmount || order.totalAmount} processed successfully for order ${order.orderId}`
-          : `Refund sent to the original payment method for order ${order.orderId}`))
-        // Update the order in the local state immediately to show "Refunded" status
-        setOrders(prevOrders => 
-          prevOrders.map(o => 
-            (o.id === order.id || o.orderId === order.orderId)
-              ? { ...o, refundStatus: 'processed' } // Wallet refunds are instant, so mark as processed
-              : o
-          )
-        )
+        toast.success(`Refund started for order ${order.orderId}`)
+        // The server's refund state (per part, pending or done) comes back with the list.
         // Refresh the orders list to get updated data
         await fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true })
       } else {
@@ -1337,9 +1320,9 @@ export default function OrdersPage({ statusKey = "all" }) {
   }
 
   // Handle refund confirmation from modal
-  const handleRefundConfirm = (amount) => {
+  const handleRefundConfirm = (amount, destination) => {
     if (selectedOrderForRefund) {
-      processRefund(selectedOrderForRefund, amount)
+      processRefund(selectedOrderForRefund, amount, destination)
     }
   }
 

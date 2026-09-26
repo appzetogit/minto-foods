@@ -4,6 +4,36 @@ import { finalizeOrderPayment } from '../../../modules/food/orders/services/orde
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 import { reconcileOrderPayment } from '../../../modules/food/orders/services/payment-reconcile.service.js';
+import {
+    applyGatewayRefundUpdate,
+    onlineAmountDuePaise,
+} from '../../../modules/food/orders/services/order-refund.service.js';
+import { getRazorpayInstance } from '../../../modules/food/orders/helpers/razorpay.helper.js';
+
+/**
+ * A payment was captured for a food order we no longer have -- the customer
+ * paid after the order was given up (the app closed the sheet, the 30-minute
+ * cleanup ran). Nobody will ever deliver it, so the money goes straight back.
+ *
+ * Only Razorpay orders this server marked `purpose: food_order` qualify, so a
+ * wallet top-up or a restaurant's subscription payment is never touched.
+ */
+async function refundOrphanPayment(paymentObj) {
+    const razorpay = getRazorpayInstance();
+    if (!razorpay) return 'razorpay not configured';
+    const rzOrder = await razorpay.orders.fetch(paymentObj.order_id);
+    if (rzOrder?.notes?.purpose !== 'food_order') return 'not a food order';
+
+    const refundable = Number(paymentObj.amount) - Number(paymentObj.amount_refunded || 0);
+    if (!(refundable > 0)) return 'already refunded';
+
+    await razorpay.payments.refund(paymentObj.id, {
+        amount: refundable,
+        speed: 'normal',
+        notes: { reason: 'order_no_longer_exists', orderId: String(rzOrder.notes.orderId || '') },
+    });
+    return `refunded ${refundable} paise`;
+}
 
 /**
  * Razorpay webhook handler.
@@ -55,13 +85,26 @@ export const handleRazorpayWebhook = async (req, res) => {
 
             const existingOrder = await prisma.foodOrder.findFirst({
                 where: { razorpayOrderId: rzOrderId },
-                select: { id: true, orderId: true, total: true, paymentStatus: true },
+                select: { id: true, orderId: true, total: true, onlineAmount: true, paymentStatus: true },
             });
 
+            if (!existingOrder) {
+                try {
+                    const outcome = await refundOrphanPayment(paymentObj);
+                    logger.warn(`Webhook [payment.captured]: no order for RZ-Order ${rzOrderId}; ${outcome}`);
+                } catch (orphanErr) {
+                    // Retried by Razorpay; the amount_refunded check keeps it to one refund.
+                    logger.error(`Webhook [payment.captured]: refunding orphan payment ${rzPaymentId} failed: ${orphanErr?.error?.description || orphanErr?.message || orphanErr}`);
+                    return res.status(500).json({ message: 'Retry' });
+                }
+                return res.status(200).json({ status: 'ok' });
+            }
+
             // Cross-check the captured amount before marking anything paid: a
-            // gateway callback is not proof of the right amount.
+            // gateway callback is not proof of the right amount. On a split
+            // order Razorpay only took the online part.
             if (existingOrder) {
-                const expectedPaise = Math.round(Number(existingOrder.total || 0) * 100);
+                const expectedPaise = onlineAmountDuePaise(existingOrder);
                 const paidPaise = Number(paymentObj.amount);
 
                 if (!Number.isFinite(paidPaise) || paidPaise !== expectedPaise) {
@@ -123,7 +166,7 @@ export const handleRazorpayWebhook = async (req, res) => {
             const order = rzOrderId
                 ? await prisma.foodOrder.findFirst({
                     where: { razorpayOrderId: rzOrderId },
-                    select: { id: true, orderId: true, total: true, razorpayOrderId: true },
+                    select: { id: true, orderId: true, total: true, onlineAmount: true, razorpayOrderId: true },
                 })
                 : null;
             if (order) {
@@ -148,56 +191,17 @@ export const handleRazorpayWebhook = async (req, res) => {
             );
         }
 
-        // --- Refund failed ---
-        if (event === 'refund.failed') {
+        // --- Refund processed / failed ---
+        // Each refund we make is its own row (food_order_refunds); the event
+        // settles that row and the order's summary is recomputed from all of
+        // them, so a partial or split refund never marks the whole order
+        // refunded. A refund made from the Razorpay dashboard is recorded too.
+        if (event === 'refund.processed' || event === 'refund.failed') {
             const refundObj = payload.refund.entity;
-            await prisma.foodOrder.updateMany({
-                where: { razorpayPaymentId: refundObj.payment_id, refundStatus: { not: 'processed' } },
-                data: { refundStatus: 'failed' },
-            });
-            logger.error(`Webhook [refund.failed]: refund ${refundObj.id} for payment ${refundObj.payment_id} failed -- needs a manual refund`);
-        }
-
-        // --- Refund processed ---
-        if (event === 'refund.processed') {
-            const refundObj = payload.refund.entity;
-            const rzPaymentId = refundObj.payment_id;
-            const rzRefundId = refundObj.id;
-            const refundAmount = refundObj.amount / 100; // paise → rupees
-
-            // Only a full refund makes the order "refunded". A partial one (a
-            // missing item, say) left the whole order marked refunded, which
-            // made paid money look returned in every report.
-            const paidOrder = await prisma.foodOrder.findFirst({
-                where: { razorpayPaymentId: rzPaymentId },
-                select: { total: true },
-            });
-            const isFullRefund = paidOrder
-                ? Math.round(refundAmount * 100) >= Math.round(Number(paidOrder.total || 0) * 100)
-                : true;
-
-            const { count } = await prisma.foodOrder.updateMany({
-                where: { razorpayPaymentId: rzPaymentId, refundStatus: { not: 'processed' } },
-                data: {
-                    ...(isFullRefund ? { paymentStatus: 'refunded' } : {}),
-                    refundStatus: 'processed',
-                    refundAmount,
-                    refundId: rzRefundId,
-                    refundProcessedAt: new Date(),
-                },
-            });
-
-            if (count) {
-                const order = await prisma.foodOrder.findFirst({
-                    where: { razorpayPaymentId: rzPaymentId },
-                    select: { orderId: true },
-                });
-                logger.info(`Webhook [refund.processed]: Synced Order ${order?.orderId} (Refunded)`);
-            } else {
-                logger.warn(
-                    `Webhook [refund.processed]: Order not found or already refunded for RZ-Payment: ${rzPaymentId}`,
-                );
-            }
+            const outcome = await applyGatewayRefundUpdate(refundObj);
+            const line = `Webhook [${event}]: refund ${refundObj.id} for payment ${refundObj.payment_id}: ${outcome}`;
+            if (event === 'refund.failed') logger.error(`${line} -- the amount is free to refund again from the admin panel`);
+            else logger.info(line);
         }
 
         res.status(200).json({ status: 'ok' });

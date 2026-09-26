@@ -378,3 +378,13 @@ CREATE INDEX IF NOT EXISTS "food_orders_rider_location_gist"
 --   DELETE FROM "food_notifications" WHERE "createdAt" < now() - interval '7 days';
 --   DELETE FROM "food_notification_broadcasts" WHERE "createdAt" < now() - interval '7 days';
 -- $$);
+
+-- Split payments: each part is non-negative and together they never exceed
+-- what the order cost. Cash orders leave both at 0.
+ALTER TABLE "food_orders" DROP CONSTRAINT IF EXISTS "order_payment_split_valid";
+ALTER TABLE "food_orders" ADD CONSTRAINT "order_payment_split_valid" CHECK (
+  "walletAmount" >= 0 AND "onlineAmount" >= 0 AND "walletAmount" + "onlineAmount" <= "total"
+);
+
+ALTER TABLE "food_order_refunds" DROP CONSTRAINT IF EXISTS "order_refund_amount_positive";
+ALTER TABLE "food_order_refunds" ADD CONSTRAINT "order_refund_amount_positive" CHECK ("amount" > 0);

@@ -1343,6 +1343,49 @@ model Settlement {
 // Orders
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Which part of what the customer paid a refund is taken from.
+enum RefundSource {
+  wallet
+  online
+}
+
+/// One movement of refund money for an order. An order can have several: the
+/// wallet part and the online part of a cancellation, a partial refund, a retry
+/// after the gateway refused. What is left to refund is always worked out from
+/// these rows (failed ones do not count), never from a running total.
+model FoodOrderRefund {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  orderId String @db.VarChar(24)
+  userId  String @db.VarChar(24)
+
+  /// The part of the payment this comes out of.
+  source   RefundSource
+  /// Where the money goes: back to the wallet, or back through Razorpay.
+  refundTo RefundTo
+  amount   Decimal      @db.Decimal(14, 2)
+  status   RefundStatus @default(pending)
+
+  gatewayPaymentId String? @db.VarChar(64)
+  gatewayRefundId  String? @unique @db.VarChar(64)
+  failureReason    String  @default("")
+
+  reason        String  @default("")
+  /// user | restaurant | admin | system
+  initiatedBy   String  @default("system") @db.VarChar(16)
+  initiatedById String? @db.VarChar(24)
+
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  order FoodOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, status])
+  @@index([status, createdAt])
+  @@map("food_order_refunds")
+}
+
 model FoodOrder {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
@@ -1416,6 +1459,10 @@ model FoodOrder {
   refundAmount      Decimal            @default(0) @db.Decimal(14, 2)
   refundId          String             @default("")
   refundProcessedAt DateTime?
+  /// How the total was paid. Both 0 on cash orders. A split order has both
+  /// set; walletAmount + onlineAmount never exceeds total (constraints.sql).
+  walletAmount      Decimal            @default(0) @db.Decimal(14, 2)
+  onlineAmount      Decimal            @default(0) @db.Decimal(14, 2)
 
   orderStatus OrderStatus @default(created)
 
@@ -1493,6 +1540,7 @@ model FoodOrder {
 
   payments          Payment[]
   refunds           Refund[]
+  refundLegs        FoodOrderRefund[]
   transactions      Transaction[]
   foodTransaction   FoodTransaction?
   chatMessages      FoodChatMessage[]

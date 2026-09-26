@@ -22,6 +22,7 @@ const SHUTDOWN_TIMEOUT_MS = 10000;
 let server = null;
 let autoDeliverInterval = null;
 let expireOffersInterval = null;
+let paymentSweepInterval = null;
 let fssaiExpiryInterval = null;
 
 const gracefulShutdown = async (signal) => {
@@ -38,6 +39,7 @@ const gracefulShutdown = async (signal) => {
             if (autoDeliverInterval) clearInterval(autoDeliverInterval);
             if (expireOffersInterval) clearInterval(expireOffersInterval);
             if (fssaiExpiryInterval) clearInterval(fssaiExpiryInterval);
+            if (paymentSweepInterval) clearInterval(paymentSweepInterval);
             logger.info('Graceful shutdown complete');
             process.exit(0);
         } catch (err) {
@@ -96,6 +98,27 @@ const startBackgroundJobs = async () => {
     };
     await runFssaiExpirySync();
     fssaiExpiryInterval = setInterval(runFssaiExpirySync, 60 * 60 * 1000);
+
+    // Money that must not wait for someone to open the app: refunds left
+    // pending (a webhook that never came, a Razorpay call that timed out) are
+    // settled, and unpaid online orders past their window are given up --
+    // which hands back the wallet part of a split order. Both are idempotent.
+    const runPaymentSweep = async () => {
+        try {
+            const { reconcilePendingRefunds } = await import('./src/modules/food/orders/services/order-refund.service.js');
+            await reconcilePendingRefunds();
+        } catch (err) {
+            logger.error(`Refund sweep error: ${err.message}`);
+        }
+        try {
+            const { expireStalePendingPaymentOrders } = await import('./src/modules/food/orders/services/order.service.js');
+            await expireStalePendingPaymentOrders({ force: true });
+        } catch (err) {
+            logger.error(`Pending payment sweep error: ${err.message}`);
+        }
+    };
+    await runPaymentSweep();
+    paymentSweepInterval = setInterval(runPaymentSweep, 5 * 60 * 1000);
 };
 
 const startServer = async () => {

@@ -22,7 +22,18 @@ const KEY_SECRET = config.razorpayKeySecret || process.env.RAZORPAY_KEY_SECRET |
  */
 const looksLikePlaceholder = (v) => /placeholder|your[_-]|changeme|xxxx|dummy/i.test(String(v || ''));
 
+/**
+ * Tests only: stand a fake in for the Razorpay client, so the payment and
+ * refund paths can be exercised without live keys. Refuses outside tests.
+ */
+let testDouble = null;
+export function __setRazorpayForTests(instance, { keySecret = 'test_secret' } = {}) {
+    if (process.env.NODE_ENV !== 'test') throw new Error('Razorpay test double is for tests only');
+    testDouble = instance ? { instance, keySecret } : null;
+}
+
 export function isRazorpayConfigured() {
+    if (testDouble) return true;
     return Boolean(
         KEY_ID && KEY_SECRET && Razorpay
         && !looksLikePlaceholder(KEY_ID) && !looksLikePlaceholder(KEY_SECRET),
@@ -34,17 +45,19 @@ export function getRazorpayKeyId() {
 }
 
 export function getRazorpayInstance() {
+    if (testDouble) return testDouble.instance;
     if (!isRazorpayConfigured()) return null;
     return new Razorpay({ key_id: KEY_ID, key_secret: KEY_SECRET });
 }
 
-export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '') {
+export function createRazorpayOrder(amountPaise, currency = 'INR', receipt = '', notes = undefined) {
     const instance = getRazorpayInstance();
     if (!instance) return Promise.reject(new Error('Razorpay not configured'));
     return instance.orders.create({
         amount: Math.round(amountPaise),
         currency,
-        receipt: receipt || undefined
+        receipt: receipt || undefined,
+        ...(notes ? { notes } : {})
     });
 }
 
@@ -64,9 +77,10 @@ export function createPaymentLink({ amountPaise, currency = 'INR', description, 
 }
 
 export function verifyPaymentSignature(orderId, paymentId, signature) {
-    if (!KEY_SECRET) return false;
+    const secret = testDouble ? testDouble.keySecret : KEY_SECRET;
+    if (!secret) return false;
     const body = `${orderId}|${paymentId}`;
-    const expected = Buffer.from(crypto.createHmac('sha256', KEY_SECRET).update(body).digest('hex'), 'utf8');
+    const expected = Buffer.from(crypto.createHmac('sha256', secret).update(body).digest('hex'), 'utf8');
     const given = Buffer.from(String(signature || ''), 'utf8');
     // Constant time, like the webhook check: === returns at the first wrong
     // character and so leaks how much of a forged signature was right.

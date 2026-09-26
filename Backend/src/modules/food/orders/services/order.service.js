@@ -10,9 +10,14 @@ import {
     verifyPaymentSignature,
     getRazorpayKeyId,
     isRazorpayConfigured,
-    initiateRazorpayRefund,
     fetchRazorpayPayment
 } from '../helpers/razorpay.helper.js';
+import { getBalance, recordTransaction } from '../../../../core/payments/transaction.service.js';
+import {
+  refundOrder,
+  describeRefundLegs,
+  onlineAmountDuePaise,
+} from './order-refund.service.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { getFirebaseDB } from '../../../../config/firebase.js';
@@ -121,22 +126,39 @@ function buildAcceptanceDeadline(date = new Date(), windowSeconds = ORDER_ACCEPT
  * than deleted — money records must survive the order they refer to, or a
  * deleted order silently erases its own wallet history.
  */
-async function purgeOrder(orderId) {
-  const id = String(orderId);
-  await prisma.$transaction([
-    prisma.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } }),
-    prisma.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } }),
-    prisma.refund.deleteMany({ where: { orderId: id } }),
-    prisma.payment.deleteMany({ where: { orderId: id } }),
-    prisma.foodTransaction.deleteMany({ where: { orderId: id } }),
-    // items, itemRatings, statusHistory and dispatchOffers cascade.
-    prisma.foodOrder.delete({ where: { id } }),
-  ]);
+async function purgeOrderWith(tx, id) {
+  await tx.foodSupportTicket.updateMany({ where: { orderId: id }, data: { orderId: null } });
+  await tx.transaction.updateMany({ where: { orderId: id }, data: { orderId: null } });
+  await tx.foodChatMessage.updateMany({ where: { orderId: id }, data: { orderId: null } });
+  await tx.foodChatConversation.updateMany({ where: { orderId: id }, data: { orderId: null } });
+  await tx.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: id } });
+  await tx.refund.deleteMany({ where: { orderId: id } });
+  await tx.payment.deleteMany({ where: { orderId: id } });
+  await tx.foodTransaction.deleteMany({ where: { orderId: id } });
+  // items, itemRatings, statusHistory and dispatchOffers cascade.
+  await tx.foodOrder.delete({ where: { id } });
 }
 
+async function purgeOrder(orderId) {
+  const id = String(orderId);
+  await prisma.$transaction((tx) => purgeOrderWith(tx, id));
+}
+
+// The wallet part of a split order is taken when the order is created and
+// handed back if the online part is never paid. Both are keyed on the order
+// id, so each happens at most once however many times cleanup runs.
+const walletDebitKey = (orderId) => `order_wallet_debit:${orderId}`;
+const walletReturnKey = (orderId) => `order_wallet_return:${orderId}`;
+
+/**
+ * Give an unpaid order up: return any wallet money it took and delete it.
+ *
+ * The row is locked and re-read first. The webhook and verify claim `paid`
+ * with a conditional update on the same row, so either they got there first
+ * (and this backs off) or they wait for this to finish and find no order --
+ * which the webhook then refunds. The wallet return and the delete commit
+ * together, so the customer can never lose the wallet part or get it twice.
+ */
 async function deletePendingPaymentOrder(orderLike) {
   const id = orderLike?.id || orderLike?._id;
   if (!id) return false;
@@ -145,8 +167,53 @@ async function deletePendingPaymentOrder(orderLike) {
   const payStatus = String(orderLike.paymentStatus || "").toLowerCase();
   if (payStatus === "paid" || payStatus === "refunded") return false;
 
-  await purgeOrder(id);
-  return true;
+  return prisma.$transaction(async (tx) => {
+    const orderId = String(id);
+    await tx.$queryRaw`SELECT "id" FROM "food_orders" WHERE "id" = ${orderId} FOR UPDATE`;
+    const row = await tx.foodOrder.findUnique({
+      where: { id: orderId },
+      select: { orderStatus: true, paymentStatus: true, userId: true, order_id: true },
+    });
+    if (!row || row.orderStatus !== "pending_payment") return false;
+    if (row.paymentStatus === "paid" || row.paymentStatus === "refunded") return false;
+
+    const debit = await tx.transaction.findUnique({ where: { idempotencyKey: walletDebitKey(orderId) } });
+    if (debit) {
+      await recordTransaction(
+        {
+          entityType: "user",
+          entityId: String(row.userId),
+          type: "credit",
+          amount: Number(debit.amount),
+          description: `Payment not completed for order #${row.order_id || orderId}: wallet amount returned`,
+          category: "order_refund",
+          orderId,
+          idempotencyKey: walletReturnKey(orderId),
+          metadata: { source: "split_payment_return", debitTransactionId: debit.id },
+        },
+        { client: tx },
+      );
+    }
+
+    await purgeOrderWith(tx, orderId);
+    return true;
+  });
+}
+
+/**
+ * How much of `total` the customer's wallet can pay, leaving the rest online.
+ * Razorpay will not take less than ₹1, so the online part is never below that.
+ *
+ * @returns {Promise<{coversAll: boolean, walletPaise: number}>}
+ */
+export async function planWalletSplit(userId, total) {
+  const totalPaise = Math.round(Number(total) * 100);
+  const { availableBalance } = await getBalance("user", String(userId));
+  const availablePaise = Math.max(0, Math.floor(Number(availableBalance) * 100 + 1e-6));
+  if (availablePaise >= totalPaise) return { coversAll: true, walletPaise: totalPaise };
+  let walletPaise = availablePaise;
+  if (totalPaise - walletPaise < 100) walletPaise = totalPaise - 100;
+  return { coversAll: false, walletPaise: Math.max(0, walletPaise) };
 }
 
 let lastExpiredCleanupAt = 0;
@@ -168,7 +235,7 @@ export async function expireStalePendingPaymentOrders({ force = false } = {}) {
       paymentStatus: { in: ["created", "pending_qr", "failed"] },
       createdAt: { lte: cutoff },
     },
-    select: { id: true, orderStatus: true, paymentStatus: true, razorpayOrderId: true, total: true },
+    select: { id: true, orderStatus: true, paymentStatus: true, razorpayOrderId: true, total: true, onlineAmount: true },
   });
 
   for (const doc of stale) {
@@ -215,115 +282,55 @@ function buildCancellationRefundDescription(order, cancelledBy = 'system') {
  * merge the patch into their own update so the status change and the refund land
  * in one write.
  */
-async function applyCancellationRefund(order, { cancelledBy = 'system', refundAmount } = {}) {
-  const none = (extra) => ({ attempted: false, processed: false, paymentPatch: {}, ...extra });
+const REFUND_INITIATOR = { user: 'user', restaurant: 'restaurant', admin: 'admin' };
 
-  if (!order?.payment) return none({ reason: 'missing_payment' });
+/**
+ * Refund a cancelled (or admin-refunded) order: the online part back through
+ * Razorpay, the wallet part back to the wallet, each as its own record in
+ * food_order_refunds. See order-refund.service.js.
+ *
+ * The order's refund summary is written by the refund itself, so the
+ * `paymentPatch` handed back is always empty; it stays in the return shape
+ * because the callers merge it into their own update.
+ *
+ * @returns {Promise<{attempted: boolean, processed: boolean, paymentPatch: object,
+ *   legs: object[], reason?: string, method: string, message: string}>}
+ */
+async function applyCancellationRefund(order, { cancelledBy = 'system', refundAmount, destination = 'original', strict = false, initiatedById = null } = {}) {
+  const method = String(order?.paymentMethod || 'cash').toLowerCase();
+  const none = (extra) => ({ attempted: false, processed: false, paymentPatch: {}, legs: [], method, message: '', ...extra });
 
-  const paymentMethod = String(order.paymentMethod || 'cash').toLowerCase();
-  const paymentStatus = String(order.paymentStatus || 'cod_pending').toLowerCase();
-  const refundStatus = String(order.refundStatus || 'none').toLowerCase();
-  const amount = Number(refundAmount ?? order?.total ?? order?.paymentAmountDue ?? 0);
-
-  if (!Number.isFinite(amount) || amount <= 0) return none({ reason: 'invalid_amount' });
-  if (paymentMethod === 'cash' || paymentMethod === 'cod') return none({ reason: 'cash_payment' });
-
-  if (paymentStatus === 'refunded' || refundStatus === 'processed') {
-    return none({ processed: true, reason: 'already_refunded', method: paymentMethod });
+  if (method === 'cash' || method === 'cod' || method === 'razorpay_qr') {
+    return none({ reason: 'cash_payment' });
   }
-  if (paymentStatus !== 'paid') {
-    return none({ reason: `payment_status_${paymentStatus || 'unknown'}`, method: paymentMethod });
-  }
-  if (paymentMethod !== 'razorpay' && paymentMethod !== 'wallet') {
-    return none({ reason: `unsupported_method_${paymentMethod}`, method: paymentMethod });
-  }
 
-  // Claim the refund before any money moves. Two cancellations landing
-  // together (admin and restaurant, or either and the expiry job) both read
-  // the order as paid-and-not-refunded from their own copy; without this the
-  // wallet was credited twice, and for Razorpay the second attempt's refusal
-  // overwrote the first's success with "failed". Only the caller that flips
-  // the status here goes on to refund.
-  const orderRowId = String(order.id ?? order._id);
-  const { count: claimed } = await prisma.foodOrder.updateMany({
-    where: {
-      id: orderRowId,
-      paymentStatus: 'paid',
-      OR: [{ refundStatus: null }, { refundStatus: { in: ['none', 'failed'] } }],
-    },
-    data: { refundStatus: 'pending' },
+  const result = await refundOrder({
+    orderId: String(order.id ?? order._id),
+    amount: refundAmount ?? null,
+    destination,
+    initiatedBy: REFUND_INITIATOR[String(cancelledBy).toLowerCase()] || 'system',
+    initiatedById,
+    reason: buildCancellationRefundDescription(order, cancelledBy),
+    strict,
   });
-  if (!claimed) {
-    return none({ reason: 'refund_already_in_progress', method: paymentMethod });
-  }
-  const releaseClaim = () =>
-    prisma.foodOrder.updateMany({
-      where: { id: orderRowId, refundStatus: 'pending' },
-      data: { refundStatus: 'failed' },
-    }).catch(() => {});
 
-  if (paymentMethod === 'razorpay') {
-    const paymentId = String(order.razorpayPaymentId || '').trim();
-    if (!paymentId) {
-      return {
-        attempted: true, processed: false, method: paymentMethod,
-        reason: 'missing_razorpay_payment_id',
-        paymentPatch: { refundStatus: 'failed', refundAmount: amount },
-      };
+  if (!result.legs.length) {
+    if (result.reason === 'nothing_left_to_refund') {
+      return none({ processed: true, reason: 'already_refunded' });
     }
-
-    let refundResult;
-    try {
-      refundResult = await initiateRazorpayRefund(paymentId, amount);
-    } catch (err) {
-      // Unreachable gateway: hand the claim back so it can be retried.
-      await releaseClaim();
-      throw err;
-    }
-    if (refundResult.success) {
-      return {
-        attempted: true, processed: true, method: paymentMethod, refundId: refundResult.refundId,
-        paymentPatch: {
-          paymentStatus: 'refunded',
-          refundStatus: 'processed',
-          refundAmount: amount,
-          refundId: refundResult.refundId,
-          refundProcessedAt: new Date(),
-        },
-      };
-    }
-
-    return {
-      attempted: true, processed: false, method: paymentMethod,
-      reason: refundResult.error || 'razorpay_refund_failed',
-      paymentPatch: { refundStatus: 'failed', refundAmount: amount },
-    };
+    return none({ reason: result.reason });
   }
 
-  if (paymentMethod === 'wallet') {
-    try {
-      await userWalletService.refundWalletBalance(
-      order.userId?.id ?? order.userId,
-      amount,
-      buildCancellationRefundDescription(order, cancelledBy),
-      { orderId: order.id ?? order._id, cancelledBy }
-      );
-    } catch (err) {
-      await releaseClaim();
-      throw err;
-    }
-    return {
-      attempted: true, processed: true, method: paymentMethod,
-      paymentPatch: {
-        paymentStatus: 'refunded',
-        refundStatus: 'processed',
-        refundAmount: amount,
-        refundProcessedAt: new Date(),
-      },
-    };
-  }
-
-  return none({ reason: `unsupported_method_${paymentMethod}`, method: paymentMethod });
+  const moving = result.legs.filter((l) => l.status === 'pending' || l.status === 'processed');
+  return {
+    attempted: true,
+    processed: moving.length > 0,
+    paymentPatch: {},
+    legs: result.legs,
+    method,
+    reason: moving.length ? undefined : (result.legs[0]?.failureReason || 'refund_failed'),
+    message: describeRefundLegs(result.legs),
+  };
 }
 
 // ----- Acceptance window expiry -----
@@ -415,9 +422,29 @@ export async function updateDispatchSettings(dispatchMode, adminId) {
 // ----- Calculate (validation + return pricing from payload) -----
 export async function calculateOrder(userId, dto) {
   const at = dto.scheduledAt ? new Date(dto.scheduledAt) : new Date();
-  return calculateOrderPricing(userId, dto, {
+  const result = await calculateOrderPricing(userId, dto, {
     at: Number.isNaN(at.getTime()) ? new Date() : at,
   });
+
+  // What "use my wallet" would do to this total, so checkout can show it
+  // before the customer commits. createOrder works it out again at placement.
+  const total = Number(result?.pricing?.total) || 0;
+  if (userId && total > 0) {
+    try {
+      const { availableBalance } = await getBalance("user", String(userId));
+      const split = await planWalletSplit(userId, total);
+      result.wallet = {
+        balance: Math.max(0, Number(availableBalance) || 0),
+        canUse: split.walletPaise > 0,
+        coversAll: split.coversAll,
+        walletAmount: split.walletPaise / 100,
+        onlineAmount: split.coversAll ? 0 : Math.round(total * 100 - split.walletPaise) / 100,
+      };
+    } catch (err) {
+      logger.warn(`Wallet preview failed for user ${userId}: ${err?.message || err}`);
+    }
+  }
+  return result;
 }
 
 // ----- Coupons -----
@@ -521,7 +548,7 @@ export async function createOrder(userId, dto) {
       ...(dto.address || {}),
     });
 
-    const paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
+    let paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
     // COD is no longer one switch for the whole platform. A zone can turn it
     // off on its own, and can require a customer to have taken delivery of a
     // few orders first. Checked here, on the server, whatever the app offered:
@@ -535,7 +562,7 @@ export async function createOrder(userId, dto) {
       if (!cod.allowed) throw new ValidationError(cod.message);
     }
     const isCash = paymentMethod === "cash";
-    const isWallet = paymentMethod === "wallet";
+    let isWallet = paymentMethod === "wallet";
 
     const pricingResult = await calculateOrderPricing(
       userId,
@@ -592,6 +619,22 @@ export async function createOrder(userId, dto) {
       throw new ValidationError("Order total must be greater than zero");
     }
     normalizedPricing.total = Math.round(normalizedPricing.total * 100) / 100;
+
+    // Part wallet, part online. The server decides the split from the balance
+    // it can see; the app only asks to use the wallet. A wallet that covers the
+    // whole order makes it a plain wallet order.
+    let walletPaise = isWallet ? Math.round(normalizedPricing.total * 100) : 0;
+    if (paymentMethod === "razorpay" && dto.useWallet === true) {
+      const split = await planWalletSplit(userId, normalizedPricing.total);
+      if (split.coversAll) {
+        paymentMethod = "wallet";
+        isWallet = true;
+      }
+      walletPaise = split.walletPaise;
+    }
+    const totalPaise = Math.round(normalizedPricing.total * 100);
+    const onlinePaise = paymentMethod === "razorpay" ? totalPaise - walletPaise : 0;
+    const isSplit = paymentMethod === "razorpay" && walletPaise > 0;
 
     const payment = {
       method: paymentMethod,
@@ -660,6 +703,8 @@ export async function createOrder(userId, dto) {
       customerName: String(dto.customerName || deliveryAddress.fullName || ""),
       customerPhone: String(dto.customerPhone || deliveryAddress.phone || ""),
       orderStatus: initialStatus,
+      walletAmount: walletPaise / 100,
+      onlineAmount: onlinePaise / 100,
       acceptanceWindowSeconds,
       acceptanceDeadlineAt:
         initialStatus === "created" ? buildAcceptanceDeadline(new Date(), acceptanceWindowSeconds) : null,
@@ -702,15 +747,44 @@ export async function createOrder(userId, dto) {
     let order = toOrder(created);
     let razorpayPayload = null;
 
+    if (isSplit) {
+      // Take the wallet part now. The ledger refuses to overdraw, so a balance
+      // spent in another tab since the split was worked out fails here.
+      try {
+        await recordTransaction({
+          entityType: "user",
+          entityId: String(userId),
+          type: "debit",
+          amount: walletPaise / 100,
+          description: `Payment for order #${order.order_id || order.id} (wallet part)`,
+          category: "order_payment",
+          orderId: order.id,
+          idempotencyKey: walletDebitKey(order.id),
+          metadata: { source: "order_payment", split: true, onlineAmount: onlinePaise / 100 },
+        });
+      } catch (err) {
+        await deletePendingPaymentOrder(order).catch(() => {});
+        if (/Insufficient balance/i.test(err?.message || "")) {
+          throw new ValidationError("Your wallet balance has changed. Please review your payment and try again.");
+        }
+        throw err;
+      }
+    }
+
     if (paymentMethod === "razorpay" && isRazorpayConfigured()) {
-      const amountPaise = Math.round((normalizedPricing.total || 0) * 100);
+      const amountPaise = onlinePaise;
       if (amountPaise < 100) {
-        await purgeOrder(order.id);
+        await deletePendingPaymentOrder(order);
         throw new ValidationError("Amount too low for online payment");
       }
       try {
         // The gateway receipt is the order id, so this can only run post-insert.
-        const rzOrder = await createRazorpayOrder(amountPaise, "INR", order.id);
+        // The notes let the webhook recognise a payment for an order that has
+        // since been given up, and refund it.
+        const rzOrder = await createRazorpayOrder(amountPaise, "INR", order.id, {
+          purpose: "food_order",
+          orderId: order.id,
+        });
         razorpayPayload = {
           key: getRazorpayKeyId(),
           orderId: rzOrder.id,
@@ -724,7 +798,10 @@ export async function createOrder(userId, dto) {
         }));
       } catch (err) {
         // Mongo threw before saving, so no order existed on gateway failure.
-        await purgeOrder(order.id).catch(() => {});
+        // Hands back the wallet part too, for a split order.
+        await deletePendingPaymentOrder(order).catch((cleanupErr) => {
+          logger.error(`[CRITICAL] Cleanup after Razorpay failure for order ${order.id}: ${cleanupErr?.message || cleanupErr}`);
+        });
         // Razorpay's SDK rejects with { statusCode, error: { description } },
         // not an Error, so err.message was always undefined in the log.
         const reason = err?.error?.description || err?.message || JSON.stringify(err);
@@ -851,7 +928,8 @@ export async function verifyPayment(userId, dto) {
     throw new ValidationError("Payment verification failed. Please retry in a moment.");
   }
 
-  const expectedPaise = Math.round((Number(order.total) || 0) * 100);
+  // The online part only: on a split order the wallet paid the rest.
+  const expectedPaise = onlineAmountDuePaise(order);
   const paidPaise = Number(rzPayment?.amount);
   const rzStatus = String(rzPayment?.status || "").toLowerCase();
   if (
@@ -984,6 +1062,18 @@ export async function abandonOnlinePaymentOrder(userId, orderId) {
 
   if (String(order.orderStatus || "").toLowerCase() !== "pending_payment") {
     throw new ValidationError("Order is not awaiting payment");
+  }
+
+  // Ask Razorpay before giving up. The app calls this when the payment sheet
+  // closes, and a success callback that never reached the app looks exactly
+  // the same -- deleting then would leave the customer charged with no order.
+  const gateway = await reconcileOrderPayment(order);
+  if (gateway === "paid") {
+    return { deleted: false, paid: true, orderId: order.id };
+  }
+  if (gateway === "pending") {
+    // Razorpay is still working on it; the 30-minute cleanup settles it.
+    return { deleted: false, paid: false, orderId: order.id };
   }
 
   const deleted = await deletePendingPaymentOrder(order);
@@ -1420,17 +1510,26 @@ export async function cancelOrder(orderId, userId, reason) {
   const paymentMethod = String(order.paymentMethod || "cash").toLowerCase();
   const paymentStatus = String(order.paymentStatus || "cod_pending").toLowerCase();
 
+  // Claim the cancellation before any money moves. The restaurant can accept
+  // at the same moment; only one of the two changes can win, and a refund for
+  // an order that then went ahead would be money given away.
+  const { count: cancelled } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: { in: allowed } },
+    data: { orderStatus: "cancelled_by_user" },
+  });
+  if (!cancelled) throw new ValidationError("Order cannot be cancelled");
+
   let refund;
   try {
-    refund = await applyCancellationRefund(order, { cancelledBy: 'user' });
+    refund = await applyCancellationRefund(order, { cancelledBy: 'user', initiatedById: userId });
   } catch (err) {
     logger.error(`Refund processing error for Order ${orderId}: ${err?.message || err}`);
-    refund = { paymentPatch: { refundStatus: "failed", refundAmount: order.total } };
+    await prisma.foodOrder.update({ where: { id: order.id }, data: { refundStatus: "failed" } }).catch(() => {});
+    refund = { paymentPatch: {}, legs: [], message: "" };
   }
 
-  const updated = toOrder(await prisma.foodOrder.update({
+  const updated = toOrder(await prisma.foodOrder.findUnique({
     where: { id: order.id },
-    data: { orderStatus: "cancelled_by_user", ...refund.paymentPatch },
     include: orderInclude,
   }));
 
@@ -1452,7 +1551,7 @@ export async function cancelOrder(orderId, userId, reason) {
   const finalPaymentMethod = String(updated.paymentMethod || paymentMethod || "cash").toLowerCase();
   const finalPaymentStatus = String(updated.paymentStatus || paymentStatus || "cod_pending").toLowerCase();
   const isOnlinePaid =
-    finalPaymentMethod === "razorpay" &&
+    (finalPaymentMethod === "razorpay" || finalPaymentMethod === "wallet") &&
     (finalPaymentStatus === "paid" || finalPaymentStatus === "refunded");
 
   try {
@@ -1466,9 +1565,13 @@ export async function cancelOrder(orderId, userId, reason) {
     logger.warn(`cancelOrder transaction sync failed: ${err?.message || err}`);
   }
 
-  const refundDetail = isOnlinePaid
-    ? ` Your refund of ₹${updated.total} is being processed and will be credited to your original payment method within 5-7 working days.`
-    : "";
+  // Says where each part went: "₹120 has been added back to your Minto
+  // wallet. ₹330 will be refunded to your original payment method...".
+  const refundDetail = refund.message
+    ? ` ${refund.message}`
+    : isOnlinePaid && updated.refundStatus === "failed"
+      ? " Your refund could not be completed automatically; our team will process it."
+      : "";
 
   await notifyOwnersSafely(
     [
@@ -2036,7 +2139,7 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       logger.error(`Automated refund failed for Order ${order.id} (Restaurant Cancel): ${err?.message || err}`);
       updated = toOrder(await prisma.foodOrder.update({
         where: { id: order.id },
-        data: { refundStatus: "failed", refundAmount: updated.total },
+        data: { refundStatus: "failed" },
         include: orderInclude,
       }));
     }
@@ -2428,7 +2531,7 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
       refundPatch = refund.paymentPatch;
     } catch (err) {
       logger.warn(`Admin cancellation refund failed for order ${order.id}: ${err?.message || err}`);
-      refundPatch = { refundStatus: "failed", refundAmount: order.total || 0 };
+      refundPatch = { refundStatus: "failed" };
     }
   }
 
@@ -2628,32 +2731,39 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
   return normalizeOrderForClient(updated);
 }
 
-export async function processRefundAdmin(orderId, amount, adminId) {
+export async function processRefundAdmin(orderId, amount, adminId, destination = 'original') {
   const identity = buildOrderIdentityFilter(orderId);
   const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
-  const currentPaymentStatus = String(order.paymentStatus || "").toLowerCase();
-  if (currentPaymentStatus === "refunded") {
-    throw new ValidationError("Order is already refunded");
-  }
+  const requested = amount == null || amount === "" ? null : Number(amount);
+  if (requested != null && !(requested > 0)) throw new ValidationError("Invalid refund amount");
 
-  const refundAmount = Number(amount) || order.total || 0;
-  if (refundAmount <= 0) throw new ValidationError("Invalid refund amount");
+  // strict: asking for more than is left is an error here, not quietly less.
+  const refundResult = await applyCancellationRefund(order, {
+    cancelledBy: 'admin',
+    refundAmount: requested,
+    destination,
+    strict: true,
+    initiatedById: adminId,
+  });
 
-  const refundResult = await applyCancellationRefund(order, { cancelledBy: 'admin', refundAmount });
-
-  if (Object.keys(refundResult.paymentPatch).length > 0) {
-    await prisma.foodOrder.update({ where: { id: order.id }, data: refundResult.paymentPatch });
-  }
-
-  if (!refundResult.processed) {
+  if (!refundResult.attempted) {
     if (refundResult.reason === 'cash_payment') {
       throw new ValidationError('Cash on Delivery orders do not require a refund');
     }
-    throw new Error('Refund processing failed');
+    if (refundResult.reason === 'already_refunded') {
+      throw new ValidationError('Nothing is left to refund on this order');
+    }
+    throw new ValidationError('This order has not been paid, so there is nothing to refund');
   }
+  if (!refundResult.processed) {
+    throw new ValidationError(`Refund failed: ${refundResult.reason || 'the payment gateway refused it'}`);
+  }
+  const refundAmount = refundResult.legs
+    .filter((l) => l.status !== 'failed')
+    .reduce((sum, l) => sum + Number(l.amount), 0);
 
   try {
     await foodTransactionService.updateTransactionStatus(order.id, order.orderStatus, {
@@ -2673,7 +2783,7 @@ export async function processRefundAdmin(orderId, amount, adminId) {
   if (updated.userId) {
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
       title: "Refund Processed! 💸",
-      body: `Your refund of ₹${refundAmount} for Order #${updated.order_id || updated.id} has been processed successfully.`,
+      body: `Refund for Order #${updated.order_id || updated.id}: ${refundResult.message || `₹${refundAmount} has been processed.`}`,
       image: BRAND_IMAGE_URL,
       data: {
         type: "refund_processed",
