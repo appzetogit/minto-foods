@@ -2411,6 +2411,14 @@ model FoodFeeSettings {
   /// nothing. Null means no floor.
   riderMinPayPerTrip Decimal? @db.Decimal(14, 2)
 
+  /// Which distance the delivery fee and rider pay are worked out on:
+  /// "road_capped" (Google driving distance, but never more than
+  /// roadDistanceCapFactor x the straight line), "road" or "straight".
+  /// Null inherits the global row, and "road_capped" when that is null too.
+  deliveryDistanceMode  String?  @db.VarChar(16)
+  /// The cap for road_capped. Null means 1.5.
+  roadDistanceCapFactor Decimal? @db.Decimal(4, 2)
+
   /// Null is the global default. A row scoped to a zone overrides it for
   /// orders in that zone; loadActiveFeeSettings falls back to the global row
   /// when a zone has none, so adding a zone never leaves it unpriced.

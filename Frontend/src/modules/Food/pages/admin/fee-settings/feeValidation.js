@@ -51,5 +51,13 @@ export const validateFeeSettings = (settings = {}) => {
         const problem = checkFee(settings[field.key], field);
         if (problem) errors[field.key] = problem;
     }
+    // Same bounds as the server: 1 (no longer than the straight line) to 5.
+    const cap = String(settings.roadDistanceCapFactor ?? "").trim();
+    if (cap !== "") {
+        const n = Number(cap);
+        if (!Number.isFinite(n) || n < 1 || n > 5) {
+            errors.roadDistanceCapFactor = "Road distance cap must be between 1 and 5";
+        }
+    }
     return errors;
 };

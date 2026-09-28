@@ -44,6 +44,8 @@ const serializeFeeSettings = (doc) => {
         gstRate: num(doc.gstRate),
         deliveryFeeGstRate: num(doc.deliveryFeeGstRate),
         riderMinPayPerTrip: num(doc.riderMinPayPerTrip),
+        deliveryDistanceMode: doc.deliveryDistanceMode || null,
+        roadDistanceCapFactor: num(doc.roadDistanceCapFactor),
         deliveryFeeRanges: toFeeRanges(deliveryFeeBands),
     };
 };
@@ -87,6 +89,12 @@ const feeColumns = (body = {}) => {
         body.deliveryFeeGstRate === null || body.deliveryFeeGstRate === undefined
             ? null
             : Number(body.deliveryFeeGstRate);
+
+    // Which distance the fee is charged on, and the road-distance cap.
+    if (body.deliveryDistanceMode !== undefined) data.deliveryDistanceMode = body.deliveryDistanceMode || null;
+    if (body.roadDistanceCapFactor !== undefined) {
+        data.roadDistanceCapFactor = body.roadDistanceCapFactor === null ? null : Number(body.roadDistanceCapFactor);
+    }
 
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
     return data;

@@ -55,6 +55,15 @@ const feeSettingsUpsertSchema = z.object({
     deliveryFeeGstRate: percentage('Delivery fee GST rate').nullable().optional(),
     // The floor under a rider's earning for one trip; null removes it.
     riderMinPayPerTrip: bounded('Minimum rider pay', MAX_AMOUNT).nullable().optional(),
+    // Which distance the fee is charged on; null inherits (global: road_capped).
+    deliveryDistanceMode: z.enum(['road_capped', 'road', 'straight'], {
+        errorMap: () => ({ message: 'Distance used for the fee must be road_capped, road or straight' }),
+    }).nullable().optional(),
+    roadDistanceCapFactor: z.number({ invalid_type_error: 'Road distance cap must be a number' })
+        .min(1, 'Road distance cap must be at least 1')
+        .max(5, 'Road distance cap must be at most 5')
+        .nullable()
+        .optional(),
     isActive: z.boolean().optional(),
     // Which zone these fees are for. Absent/null is the global default, which
     // is what every pre-zone caller means. Zod strips undeclared keys, so
@@ -102,6 +111,18 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 ? null
                 : body?.riderMinPayPerTrip !== undefined
                     ? Number(body.riderMinPayPerTrip)
+                    : undefined,
+        deliveryDistanceMode:
+            body?.deliveryDistanceMode === null || body?.deliveryDistanceMode === ''
+                ? null
+                : body?.deliveryDistanceMode !== undefined
+                    ? String(body.deliveryDistanceMode)
+                    : undefined,
+        roadDistanceCapFactor:
+            body?.roadDistanceCapFactor === null || body?.roadDistanceCapFactor === ''
+                ? null
+                : body?.roadDistanceCapFactor !== undefined
+                    ? Number(body.roadDistanceCapFactor)
                     : undefined,
         isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined,
         zoneId: body?.zoneId ? String(body.zoneId) : body?.zoneId === null ? null : undefined

@@ -19,6 +19,8 @@ export default function FeeSettings() {
     riderMinPayPerTrip: "",
     gstRate: "",
     deliveryFeeGstRate: "",
+    deliveryDistanceMode: "",
+    roadDistanceCapFactor: "",
   })
   // Which scope is being edited. "" is the global default that applies to any
   // zone without fees of its own.
@@ -57,6 +59,8 @@ export default function FeeSettings() {
           riderMinPayPerTrip: response.data.data.feeSettings.riderMinPayPerTrip ?? "",
           gstRate: response.data.data.feeSettings.gstRate ?? "",
           deliveryFeeGstRate: response.data.data.feeSettings.deliveryFeeGstRate ?? "",
+          deliveryDistanceMode: response.data.data.feeSettings.deliveryDistanceMode ?? "",
+          roadDistanceCapFactor: response.data.data.feeSettings.roadDistanceCapFactor ?? "",
         })
       } else if (response.data.success && response.data.data.feeSettings === null) {
         setScopeConfigured(false)
@@ -69,6 +73,8 @@ export default function FeeSettings() {
           riderMinPayPerTrip: "",
           gstRate: "",
           deliveryFeeGstRate: "",
+          deliveryDistanceMode: "",
+          roadDistanceCapFactor: "",
         })
       }
     } catch (error) {
@@ -135,6 +141,13 @@ export default function FeeSettings() {
           settingsToSave.riderMinPayPerTrip === "" ? null : Number(settingsToSave.riderMinPayPerTrip),
         gstRate: settingsToSave.gstRate === "" ? undefined : Number(settingsToSave.gstRate),
         deliveryFeeGstRate: settingsToSave.deliveryFeeGstRate === "" ? undefined : Number(settingsToSave.deliveryFeeGstRate),
+        // Blank inherits: a zone follows the global choice, the global row
+        // falls back to "road, capped".
+        deliveryDistanceMode: settingsToSave.deliveryDistanceMode || null,
+        roadDistanceCapFactor:
+          settingsToSave.roadDistanceCapFactor === "" || settingsToSave.roadDistanceCapFactor === null
+            ? null
+            : Number(settingsToSave.roadDistanceCapFactor),
         isActive: true,
         // Without this a zone edit would land on the global row and change
         // the fees for every zone that inherits it.
@@ -162,6 +175,8 @@ export default function FeeSettings() {
             riderMinPayPerTrip: saved.riderMinPayPerTrip ?? "",
             gstRate: saved.gstRate ?? "",
             deliveryFeeGstRate: saved.deliveryFeeGstRate ?? "",
+            deliveryDistanceMode: saved.deliveryDistanceMode ?? "",
+            roadDistanceCapFactor: saved.roadDistanceCapFactor ?? "",
           })
         }
         return true
@@ -830,6 +845,53 @@ export default function FeeSettings() {
                     <p className="text-xs font-medium text-red-600">{feeErrors.riderMinPayPerTrip}</p>
                   ) : null}
                 </div>
+
+                {/* Which distance the fee is charged on */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700">
+                    Distance used for delivery fee
+                  </label>
+                  <select
+                    value={feeSettings.deliveryDistanceMode || ""}
+                    onChange={(e) => setFee("deliveryDistanceMode", e.target.value)}
+                    className={feeInputClass("deliveryDistanceMode")}
+                  >
+                    <option value="">
+                      {selectedZoneId ? "Same as global setting" : "Road distance, capped (recommended)"}
+                    </option>
+                    <option value="road_capped">Road distance, capped</option>
+                    <option value="road">Road distance (Google Maps route)</option>
+                    <option value="straight">Straight-line distance</option>
+                  </select>
+                  <p className="text-xs text-slate-500">
+                    The fee, the rider&rsquo;s pay and the distance shown to the customer all use this.
+                    Road routes can be much longer than the real trip (one-way streets, detours);
+                    &ldquo;capped&rdquo; charges the road distance but never more than the cap below times the
+                    straight line.
+                  </p>
+                </div>
+
+                {(feeSettings.deliveryDistanceMode || "road_capped") === "road_capped" ? (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      Road distance cap (× straight line)
+                    </label>
+                    <input
+                      type="number"
+                      value={feeSettings.roadDistanceCapFactor}
+                      onChange={(e) => setFee("roadDistanceCapFactor", e.target.value)}
+                      onKeyDown={blockExponent}
+                      min="1"
+                      max="5"
+                      step="0.1"
+                      className={feeInputClass("roadDistanceCapFactor")}
+                      placeholder="1.5"
+                    />
+                    <p className="text-xs text-slate-500">
+                      1.5 means a trip 1 km away in a straight line is charged at most 1.5 km. Blank = 1.5.
+                    </p>
+                  </div>
+                ) : null}
 
                 {/* GST Rate */}
                 <div className="space-y-2">

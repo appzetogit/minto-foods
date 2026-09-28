@@ -119,6 +119,33 @@ export function assertRestaurantOpenForOrdering(restaurant, at = new Date()) {
   throw new ValidationError('Restaurant is currently closed. Please try again later.');
 }
 
+export const DISTANCE_MODES = ['road_capped', 'road', 'straight'];
+export const DEFAULT_ROAD_CAP_FACTOR = 1.5;
+
+/**
+ * Which distance to charge on.
+ *
+ * Google's driving route can be far longer than the trip really is -- one-way
+ * streets, a detour to a bridge, a pin dropped on the wrong side of a road. A
+ * Bhiwandi order 0.48 km away was charged for 2.06 km. The default,
+ * "road_capped", uses the driving distance but never more than 1.5x the
+ * straight line: real detours are still paid for, 4x surprises are not.
+ * Falls back to whichever distance is known.
+ */
+export function chooseChargedDistanceKm({ roadKm, straightKm, mode, capFactor } = {}) {
+  const road = Number.isFinite(Number(roadKm)) && roadKm !== null ? Number(roadKm) : null;
+  const straight = Number.isFinite(Number(straightKm)) && straightKm !== null ? Number(straightKm) : null;
+  const chosen = DISTANCE_MODES.includes(mode) ? mode : 'road_capped';
+
+  if (road === null) return straight;
+  if (straight === null) return road;
+  if (chosen === 'straight') return straight;
+  if (chosen === 'road') return road;
+
+  const factor = Number(capFactor) >= 1 ? Number(capFactor) : DEFAULT_ROAD_CAP_FACTOR;
+  return Math.round(Math.min(road, straight * factor) * 100) / 100;
+}
+
 /**
  * Single source of truth for restaurant ↔ customer trip distance.
  * Prefer Google driving/road km (matches delivery partner Rest→User UI);
@@ -397,6 +424,8 @@ export async function loadActiveFeeSettings(zoneId = null) {
     quickDeliveryFee: inherit('quickDeliveryFee'),
     gstRate: inherit('gstRate'),
     deliveryFeeGstRate: inherit('deliveryFeeGstRate'),
+    deliveryDistanceMode: inherit('deliveryDistanceMode'),
+    roadDistanceCapFactor: inherit('roadDistanceCapFactor'),
     deliveryFeeRanges: ranges,
     /// Rupees the running surge adds to a charged delivery fee. 0 when nothing
     /// is running, which is the normal state.
@@ -608,8 +637,16 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const packagingFee = 0;
   const platformFee = Number(feeSettings.platformFee || 0);
 
-  let distanceKm = await getDeliveryDistanceKm(restaurant, deliveryAddress);
   const straightLineKm = calculateDistanceKm(restaurant, deliveryAddress);
+  const drivingKm = await getDeliveryDistanceKm(restaurant, deliveryAddress);
+  // The distance the fee, the radius checks and the rider's pay all use --
+  // and the one the app shows, so the charge always matches the distance.
+  let distanceKm = chooseChargedDistanceKm({
+    roadKm: drivingKm,
+    straightKm: straightLineKm,
+    mode: feeSettings.deliveryDistanceMode,
+    capFactor: feeSettings.roadDistanceCapFactor,
+  });
 
   // Nothing stopped a customer ordering from a restaurant on the other side of
   // the country — one live order ran 999 km from a Punjab kitchen to an Indore
