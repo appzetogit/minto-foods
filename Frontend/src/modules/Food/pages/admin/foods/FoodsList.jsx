@@ -114,6 +114,37 @@ export default function FoodsList() {
    */
   const [foodImages, setFoodImages] = useState([])
 
+  /**
+   * The dish's one video: `{url}` when already saved, `{file, previewUrl}` when
+   * newly picked (uploaded on save), or null for none.
+   */
+  const [foodVideo, setFoodVideo] = useState(null)
+  const [videoUploadPercent, setVideoUploadPercent] = useState(null)
+  const MAX_VIDEO_MB = 12
+
+  const pickVideo = (file) => {
+    if (!file) return
+    if (!["video/mp4", "video/webm"].includes(file.type)) {
+      toast.error("Only MP4 or WebM videos can be added")
+      return
+    }
+    if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
+      toast.error(`The video must be ${MAX_VIDEO_MB} MB or smaller`)
+      return
+    }
+    setFoodVideo((prev) => {
+      if (prev?.file && prev.previewUrl) URL.revokeObjectURL(prev.previewUrl)
+      return { file, previewUrl: URL.createObjectURL(file) }
+    })
+  }
+
+  const clearVideo = () => {
+    setFoodVideo((prev) => {
+      if (prev?.file && prev.previewUrl) URL.revokeObjectURL(prev.previewUrl)
+      return null
+    })
+  }
+
   const addImageFiles = (files) => {
     setFoodImages((prev) => [
       ...prev,
@@ -393,6 +424,7 @@ export default function FoodsList() {
     setSelectedImageFile(null)
     setImagePreviewUrl("")
     setFoodImages([])
+    setFoodVideo(null)
     setCategorySearch("")
     setCategoryPopoverOpen(false)
     setShowFoodFormModal(true)
@@ -425,6 +457,7 @@ export default function FoodsList() {
     })
     setSelectedImageFile(null)
     setImagePreviewUrl(String(food.image || ""))
+    setFoodVideo(food.videoUrl ? { url: String(food.videoUrl) } : null)
     // Prefer the gallery, but fall back to the single image so dishes saved
     // before galleries existed still open with their photo attached rather than
     // appearing to have none — saving would otherwise silently clear it.
@@ -578,6 +611,29 @@ export default function FoodsList() {
 
       const imageUrl = imageUrls[0] || ""
 
+      // The video: upload a newly picked file, keep a saved one, or clear it.
+      let videoUrl = ""
+      if (foodVideo?.file) {
+        try {
+          setVideoUploadPercent(0)
+          videoUrl = await uploadAPI.uploadVideo(foodVideo.file, {
+            folder: "foods/videos",
+            onProgress: setVideoUploadPercent,
+          })
+        } catch (err) {
+          toast.error(err?.response?.data?.message || "The video could not be uploaded. Please try again.")
+          return
+        } finally {
+          setVideoUploadPercent(null)
+        }
+        if (!videoUrl) {
+          toast.error("The video could not be uploaded. Please try again.")
+          return
+        }
+      } else if (foodVideo?.url) {
+        videoUrl = foodVideo.url
+      }
+
       const rawCommission = String(foodForm.commissionValue || "").trim()
       const commissionPayload =
         rawCommission === ""
@@ -603,6 +659,7 @@ export default function FoodsList() {
         description: foodForm.description.trim(),
         image: imageUrl,
         images: imageUrls,
+        videoUrl,
         foodType: foodForm.foodType === "Veg" ? "Veg" : "Non-Veg",
         isAvailable: foodForm.isAvailable !== false,
         preparationTime: String(foodForm.preparationTime || "").trim(),
@@ -624,6 +681,7 @@ export default function FoodsList() {
       setSelectedImageFile(null)
       setImagePreviewUrl("")
       setFoodImages([])
+      setFoodVideo(null)
       await fetchAllFoods()
     } catch (error) {
       debugError("Error saving food:", error)
@@ -1188,6 +1246,7 @@ export default function FoodsList() {
             setSelectedImageFile(null)
             setImagePreviewUrl("")
             setFoodImages([])
+            setFoodVideo(null)
           }
         }}
       >
@@ -1445,6 +1504,46 @@ export default function FoodsList() {
                   </div>
                 </div>
               ) : null}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1">Video (optional)</label>
+                {foodVideo ? (
+                  <div className="flex flex-wrap items-start gap-3">
+                    <video
+                      src={foodVideo.previewUrl || foodVideo.url}
+                      controls
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="h-40 w-64 rounded-lg border border-slate-200 bg-black object-contain"
+                    />
+                    <div className="space-y-2 text-sm">
+                      <button
+                        type="button"
+                        onClick={clearVideo}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+                      >
+                        Remove video
+                      </button>
+                      {videoUploadPercent !== null ? (
+                        <p className="text-xs text-slate-500">Uploading… {videoUploadPercent}%</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm"
+                    onChange={(e) => {
+                      pickVideo(e.target.files?.[0])
+                      e.target.value = ""
+                    }}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm"
+                  />
+                )}
+                <p className="mt-1 text-xs text-slate-500">
+                  One short clip of the dish, MP4 or WebM, up to {MAX_VIDEO_MB} MB. Shown with the images in the app.
+                </p>
+              </div>
               <div className="flex items-center gap-6 pt-7">
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input

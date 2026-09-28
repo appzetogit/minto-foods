@@ -6,7 +6,7 @@ import {
 } from '../../shared/foodType.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { normalizeFoodImages } from '../../admin/services/foodImages.util.js';
+import { normalizeFoodImages, normalizeFoodVideo } from '../../admin/services/foodImages.util.js';
 import {
     extractRawFoodVariants,
     getFoodDisplayOtherPrice,
@@ -271,6 +271,7 @@ export async function createRestaurantFood(restaurantId, body = {}) {
             // Same normaliser the admin service uses, so a dish gets the same
             // image/images relationship regardless of which panel created it.
             ...(normalizeFoodImages(body) ?? { image: '', images: [] }),
+            videoUrl: normalizeFoodVideo(body) ?? '',
             foodType: toFoodTypeColumn(foodType),
             isAvailable: body.isAvailable !== false,
             isRecommended: body.isRecommended === true,
@@ -315,6 +316,8 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         update.images = nextImages.images;
         update.image = nextImages.image;
     }
+    const nextVideo = normalizeFoodVideo(body);
+    if (nextVideo !== undefined) update.videoUrl = nextVideo;
 
     const pricing = getUpdatedFoodPricing(existing, body);
     // Held back from the column update — variants live in their own table.

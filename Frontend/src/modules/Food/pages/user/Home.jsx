@@ -2060,6 +2060,8 @@ export default function Home() {
                 location: restaurantLoc || restaurant.location, // Normalized for distance recalculation
                 isActive: restaurant.isActive !== false, // Default to true if not specified
                 isAcceptingOrders: restaurant.isAcceptingOrders !== false, // Default to true if not specified
+                // The restaurant's own switch; isAcceptingOrders from the API is "open right now".
+                manualAcceptingOrders: restaurant.manualAcceptingOrders,
                 openDays: Array.isArray(restaurant.openDays)
                   ? restaurant.openDays
                   : [],

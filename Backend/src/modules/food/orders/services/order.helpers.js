@@ -167,8 +167,8 @@ export function toGeoPoint(lat, lng) {
  * table now, so this writes immediately. Pass `tx` to enlist it in a surrounding
  * transaction alongside the status change itself.
  */
-export function pushStatusHistory(orderId, { byRole, byId, from, to, note = "" }, tx = prisma) {
-  return tx.orderStatusHistory.create({
+export async function pushStatusHistory(orderId, { byRole, byId, from, to, note = "" }, tx = prisma) {
+  const row = await tx.orderStatusHistory.create({
     data: {
       orderId: String(orderId),
       at: new Date(),
@@ -179,6 +179,34 @@ export function pushStatusHistory(orderId, { byRole, byId, from, to, note = "" }
       note,
     },
   });
+  notifyAdminsOfOrderChange(orderId, from, to);
+  return row;
+}
+
+/**
+ * Tell the admin panel an order moved, so its lists update without a manual
+ * refresh. Every status change is recorded through pushStatusHistory, so this
+ * is the one place that sees them all. Order events used to go to the
+ * customer, restaurant and rider only -- the admin room never heard any.
+ *
+ * Sent a moment later so a caller still inside a transaction has committed by
+ * the time the panel re-reads the order. Best effort: the panel also re-reads
+ * on a timer.
+ */
+function notifyAdminsOfOrderChange(orderId, from, to) {
+  if (!to || from === to) return;
+  setTimeout(() => {
+    try {
+      const io = getIO();
+      if (!io) return;
+      const payload = { orderId: String(orderId), orderMongoId: String(orderId), from, orderStatus: to };
+      // 'created' is an order the restaurant has not accepted yet: the one the
+      // admin panel rings for.
+      io.to(rooms.admin()).emit(to === "created" ? "admin_new_order" : "order_status_update", payload);
+    } catch (err) {
+      logger.warn(`Admin order notify failed for ${orderId}: ${err?.message || err}`);
+    }
+  }, 500);
 }
 
 export function normalizeOrderForClient(orderDoc) {

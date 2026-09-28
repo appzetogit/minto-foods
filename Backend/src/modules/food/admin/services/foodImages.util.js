@@ -1,3 +1,5 @@
+import { ValidationError } from '../../../../core/auth/errors.js';
+
 /**
  * Normalises the dish image fields so `image` and `images` can never disagree.
  *
@@ -43,7 +45,25 @@ export function normalizeFoodImages(body = {}, existing = {}) {
 
     // De-duplicate: a panel can re-attach a file that is already there, and a
     // repeated URL renders as a duplicate slide in the gallery.
-    images = [...new Set(images)];
+    images = [...new Set(images)].slice(0, MAX_FOOD_IMAGES);
 
     return { images, image: images[0] || '' };
+}
+
+/** A dish gallery is a handful of photos, not an album. */
+export const MAX_FOOD_IMAGES = 10;
+
+/**
+ * The dish video, from the panels. Undefined when the caller did not mention it
+ * (so a price edit keeps the video), '' to remove it, else an http(s) link --
+ * in practice the url the upload endpoint handed back.
+ */
+export function normalizeFoodVideo(body = {}) {
+    if (body.videoUrl === undefined) return undefined;
+    const url = String(body.videoUrl || '').trim();
+    if (!url) return '';
+    if (!/^https?:\/\/[^\s]+$/i.test(url) || url.length > 1000) {
+        throw new ValidationError('The dish video must be an uploaded video link');
+    }
+    return url;
 }

@@ -437,7 +437,8 @@ export default function OrdersPage({ statusKey = "all" }) {
     } = options
 
     if (withRingCheck) {
-      if (socketConnectedRef.current) return
+      // Not skipped while the socket is up: a connected socket that misses an
+      // event would otherwise leave the list stale until a manual refresh.
       if (fetchInFlightRef.current) return
       if (Date.now() - lastFetchAtRef.current < 4000) return
     }
@@ -883,19 +884,18 @@ export default function OrdersPage({ statusKey = "all" }) {
     fetchOrdersRef.current({ silent: false, withRingCheck: false, page: apiPage, force: true })
   }, [statusKey, debouncedSearchQuery, appliedFilters, apiPage, pageSize])
 
+  // Every tab, not only "All": the Pending / Processing / ... tabs used to show
+  // whatever was there when they were opened until someone refreshed.
   useEffect(() => {
-    if (statusKey !== "all") return undefined
-
     const pollId = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return
       fetchOrdersRef.current({ silent: true, withRingCheck: true })
-    }, 12000)
+    }, 15000)
 
     return () => clearInterval(pollId)
   }, [statusKey])
 
   useEffect(() => {
-    if (statusKey !== "all") return undefined
-
     const backendUrl = API_BASE_URL.replace(/\/api\/?$/, "")
     // Backend disconnected - do not open Socket.IO (new backend in progress)
     if (!API_BASE_URL || !backendUrl || !backendUrl.startsWith("http")) {
@@ -904,6 +904,16 @@ export default function OrdersPage({ statusKey = "all" }) {
 
     const socket = io(backendUrl, {
       transports: ["websocket", "polling"],
+      // The server refuses a socket without a token, so this never connected
+      // and no live update ever reached the admin panel. Read on every
+      // (re)connect so a refreshed token is used.
+      auth: (cb) => {
+        let token = ""
+        try {
+          token = localStorage.getItem("admin_accessToken") || ""
+        } catch (_) {}
+        cb({ token })
+      },
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,

@@ -61,6 +61,7 @@ const buildMenuFromFoods = async (foods = []) => {
             images: Array.isArray(food.images) && food.images.length
                 ? food.images
                 : food.image ? [food.image] : [],
+            videoUrl: food.videoUrl || '',
             foodType: food.foodType || 'Non-Veg',
             isAvailable: food.isAvailable !== false,
             approvalStatus: food.approvalStatus || 'approved',

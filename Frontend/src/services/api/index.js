@@ -2923,6 +2923,9 @@ export const uploadAPI = {
     const response = await apiClient.post("/uploads/image", formData, {
       params: { folder },
       headers: { "Content-Type": "multipart/form-data" },
+      // Uploads need a signed-in user, and the URL alone says nothing about
+      // which panel is asking -- so send the token of the panel we are in.
+      contextModule: uploadContextModule(),
     });
 
     const payload = response?.data?.data;
@@ -2932,7 +2935,45 @@ export const uploadAPI = {
 
     return response;
   },
+
+  /**
+   * Upload one dish video (MP4 or WebM, up to 12 MB). Restaurant and admin
+   * panels only. Resolves to the stored video's absolute url.
+   * @param {File} file
+   * @param {{ folder?: string, onProgress?: (percent: number) => void }} options
+   */
+  uploadVideo: async (file, options = {}) => {
+    if (!file) throw new Error("File is required for upload")
+    const folder = String(options.folder || "food/items/videos").trim()
+    const formData = new FormData()
+    formData.append("folder", folder)
+    formData.append("file", file)
+
+    const response = await apiClient.post("/uploads/video", formData, {
+      params: { folder },
+      headers: { "Content-Type": "multipart/form-data" },
+      contextModule: uploadContextModule(),
+      // A video takes longer than the default request timeout.
+      timeout: 180000,
+      onUploadProgress: (event) => {
+        if (options.onProgress && event.total) {
+          options.onProgress(Math.round((event.loaded / event.total) * 100))
+        }
+      },
+    })
+    const url = response?.data?.data?.url
+    return url ? resolveMediaUrl(url) : ""
+  },
 };
+
+/** Which panel's sign-in an upload travels with, from the page it is made on. */
+function uploadContextModule() {
+  const path = typeof window !== "undefined" ? window.location.pathname : ""
+  if (path.startsWith("/admin")) return "admin"
+  if (path.startsWith("/food/restaurant") || path.startsWith("/restaurant")) return "restaurant"
+  if (path.startsWith("/food/delivery") || path.startsWith("/delivery")) return "delivery"
+  return "user"
+}
 /** Order API (user app – Bearer USER token). Minimal calls: single create/verify, list/details cached by caller. */
 export const orderAPI = {
   calculateOrder: (payload) =>

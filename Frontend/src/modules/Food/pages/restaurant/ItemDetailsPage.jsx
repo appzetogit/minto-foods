@@ -88,6 +88,9 @@ export default function ItemDetailsPage() {
   const [images, setImages] = useState([])
   const [imageFiles, setImageFiles] = useState(new Map()) // Track File objects by preview URL
   const [uploadingImages, setUploadingImages] = useState(false)
+  // The dish video: {url} when saved, {file, previewUrl} when newly picked.
+  const [itemVideo, setItemVideo] = useState(null)
+  const videoInputRef = useRef(null)
   const [isPhotoPickerOpen, setIsPhotoPickerOpen] = useState(false)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
@@ -139,6 +142,7 @@ export default function ItemDetailsPage() {
       ? item.images.filter(Boolean)
       : (item.image ? [item.image] : [])
     setImages(existingImages)
+    setItemVideo(item.videoUrl ? { url: String(item.videoUrl) } : null)
 
     setWeightPerServing("")
     setCalorieCount("")
@@ -577,14 +581,17 @@ export default function ItemDetailsPage() {
       debugLog('Existing image URLs (already uploaded):', existingImageUrls)
       debugLog('Image files map:', imageFiles)
 
-      // Upload new File objects to Cloudinary (files that are blob URLs)
-      const filesToUpload = Array.from(imageFiles.values())
-      debugLog('Files to upload:', filesToUpload.length, filesToUpload)
+      // Upload the newly picked files still in the gallery, remembering which
+      // preview each one replaces so the saved order is the order shown.
+      const pendingUploads = Array.from(imageFiles.entries()).filter(([preview]) => images.includes(preview))
+      const uploadedByPreview = new Map()
+      debugLog('Files to upload:', pendingUploads.length)
 
-      if (filesToUpload.length > 0) {
-        toast.info(`Uploading ${filesToUpload.length} image(s)...`)
-        for (let i = 0; i < filesToUpload.length; i++) {
-          const file = filesToUpload[i]
+      if (pendingUploads.length > 0) {
+        toast.info(`Uploading ${pendingUploads.length} image(s)...`)
+        for (let i = 0; i < pendingUploads.length; i++) {
+          const [previewUrl, file] = pendingUploads[i]
+          const filesToUpload = pendingUploads
           try {
             debugLog(`Uploading image ${i + 1}/${filesToUpload.length}:`, file.name)
             let uploadResponse
@@ -600,6 +607,7 @@ export default function ItemDetailsPage() {
             const imageUrl = uploadResponse?.data?.data?.url || uploadResponse?.data?.url
             if (imageUrl) {
               uploadedImageUrls.push(imageUrl)
+              uploadedByPreview.set(previewUrl, imageUrl)
               debugLog(`Successfully uploaded image ${i + 1}:`, imageUrl)
             } else {
               debugError('Upload response:', uploadResponse)
@@ -614,16 +622,32 @@ export default function ItemDetailsPage() {
         }
       }
 
-      // Single-image mode: keep only one URL
-      const allImageUrls = [
-        ...existingImageUrls,
-        ...uploadedImageUrls
-      ].filter((url, index, self) =>
-        url &&
-        typeof url === 'string' &&
-        url.trim() !== '' &&
-        self.indexOf(url) === index
-      ).slice(0, 1)
+      // The whole gallery, in the order shown (primary first). This used to be
+      // cut to one image with .slice(0, 1), so a restaurant could add six
+      // photos and only the first was ever saved.
+      const allImageUrls = images
+        .map((img) => (typeof img === 'string' && img.startsWith('blob:') ? uploadedByPreview.get(img) : img))
+        .filter((url, index, self) =>
+          typeof url === 'string' &&
+          /^https?:\/\//.test(url) &&
+          self.indexOf(url) === index
+        )
+        .slice(0, MAX_ITEM_IMAGES)
+
+      // The dish video: upload a newly picked file, keep a saved one, or clear it.
+      let videoUrl = ""
+      if (itemVideo?.file) {
+        try {
+          toast.info("Uploading video...")
+          videoUrl = await uploadAPI.uploadVideo(itemVideo.file, { folder: 'minto/restaurant/menu-videos' })
+        } catch (videoError) {
+          toast.error(videoError?.response?.data?.message || "The video could not be uploaded. Please try again.")
+          setUploadingImages(false)
+          return
+        }
+      } else if (itemVideo?.url) {
+        videoUrl = itemVideo.url
+      }
 
       if (isNewItem && allImageUrls.length === 0) {
         toast.error("Please add at least one image")
@@ -723,6 +747,7 @@ export default function ItemDetailsPage() {
           // The full gallery, primary first. `image` stays as [0] so callers
           // that only read a single image are unaffected.
           images: allImageUrls,
+          videoUrl,
           foodType: foodType,
           isAvailable: isInStock,
           preparationTime: preparationTime || "",
@@ -750,6 +775,7 @@ export default function ItemDetailsPage() {
           // The full gallery, primary first. `image` stays as [0] so callers
           // that only read a single image are unaffected.
           images: allImageUrls,
+          videoUrl,
           foodType: foodType,
           isAvailable: isInStock,
           preparationTime: preparationTime || "",
@@ -986,6 +1012,62 @@ export default function ItemDetailsPage() {
               </div>
               <span>Add Image</span>
             </button>
+
+            {/* One short video of the dish, shown with the photos in the app. */}
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/mp4,video/webm"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ""
+                if (!file) return
+                if (!["video/mp4", "video/webm"].includes(file.type)) {
+                  toast.error("Only MP4 or WebM videos can be added")
+                  return
+                }
+                if (file.size > 12 * 1024 * 1024) {
+                  toast.error("The video must be 12 MB or smaller")
+                  return
+                }
+                setItemVideo((prev) => {
+                  if (prev?.file && prev.previewUrl) URL.revokeObjectURL(prev.previewUrl)
+                  return { file, previewUrl: URL.createObjectURL(file) }
+                })
+              }}
+              className="hidden"
+            />
+            {itemVideo ? (
+              <div className="mt-3 space-y-2">
+                <video
+                  src={itemVideo.previewUrl || itemVideo.url}
+                  controls
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="w-full max-h-56 rounded-xl bg-black object-contain"
+                />
+                <button
+                  type="button"
+                  onClick={() => setItemVideo((prev) => {
+                    if (prev?.file && prev.previewUrl) URL.revokeObjectURL(prev.previewUrl)
+                    return null
+                  })}
+                  className="w-full rounded-xl border border-gray-300 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Remove video
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl border border-gray-300 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Video (optional, MP4 up to 12 MB)</span>
+              </button>
+            )}
           </div>
         </div>
         </div>

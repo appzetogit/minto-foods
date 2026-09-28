@@ -130,6 +130,7 @@ export async function listPublicFoods(query = {}) {
                 images: Array.isArray(food.images) && food.images.length
                     ? food.images
                     : food.image ? [food.image] : [],
+                videoUrl: food.videoUrl || '',
                 foodType: food.foodType || 'Non-Veg',
                 isAvailable: food.isAvailable !== false,
                 preparationTime: food.preparationTime || '',

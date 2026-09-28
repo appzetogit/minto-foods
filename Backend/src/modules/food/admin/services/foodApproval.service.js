@@ -52,7 +52,7 @@ export async function listPendingFoodApprovals(query = {}) {
             take: limit,
             select: {
                 id: true, restaurantId: true, categoryName: true, name: true,
-                image: true, foodType: true, approvalStatus: true,
+                image: true, images: true, videoUrl: true, foodType: true, approvalStatus: true,
                 requestedAt: true, createdAt: true,
                 price: true, otherPrice: true,
                 variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
@@ -91,7 +91,9 @@ export async function listPendingFoodApprovals(query = {}) {
         otherPrice: getFoodDisplayOtherPrice(f),
         variants: serializeFoodVariants(f.variants),
         image: f.image || '',
-        images: f.image ? [f.image] : [],
+        // The whole gallery and the video, so the reviewer sees what goes live.
+        images: Array.isArray(f.images) && f.images.length ? f.images : f.image ? [f.image] : [],
+        videoUrl: f.videoUrl || '',
         requestedAt: f.requestedAt || f.createdAt,
         isActionable: f.approvalStatus === 'pending',
     }));

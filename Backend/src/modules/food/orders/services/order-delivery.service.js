@@ -753,6 +753,13 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
 
   const from = row.orderStatus;
   const nextStatus = 'picked_up';
+  // The restaurant's "Preparing" and "Ready" taps are optional -- kitchens
+  // forget them and the pickup is the real handover. Accepting the order is
+  // not: 'created' counted as an earlier step, so a rider could pick up an
+  // order the restaurant never took.
+  if (from === 'created' || from === 'pending_payment') {
+    throw new ValidationError('The restaurant has not accepted this order yet. Wait for it to accept before picking up.');
+  }
   if (!isStatusAdvance(from, nextStatus)) {
     throw new ValidationError(`Order is already at status '${from}'. Cannot re-mark as '${nextStatus}'.`);
   }
@@ -1025,38 +1032,15 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
 }
 
 export async function updateOrderStatusDelivery(orderId, deliveryPartnerId, orderStatus) {
-  const { row } = await loadOrder(orderId);
-  assertOwnedBy(row, deliveryPartnerId);
-
-  const from = row.orderStatus;
-  if (!isStatusAdvance(from, orderStatus)) {
-    throw new ValidationError(
-      `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
-    );
+  // A rider may only move an order through the steps built for it. This
+  // endpoint accepted any status further along -- "delivered" skipped the
+  // customer's OTP and the cash collection, and "cancelled_by_restaurant"
+  // let a rider cancel for the restaurant. No app calls it; picked_up is kept,
+  // through the same checks as the pickup button.
+  if (orderStatus === 'picked_up') {
+    return confirmPickupDelivery(orderId, deliveryPartnerId);
   }
-
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: row.id },
-    data: { orderStatus },
-    include: orderInclude,
-  }));
-
-  await pushStatusHistory(row.id, {
-    byRole: 'DELIVERY_PARTNER',
-    byId: deliveryPartnerId,
-    from,
-    to: orderStatus,
-  });
-
-  enqueueOrderEvent('delivery_status_updated', {
-    orderMongoId: row.id,
-    orderId: row.id,
-    deliveryPartnerId,
-    from,
-    to: orderStatus,
-  });
-
-  return updated;
+  throw new ValidationError('Use the pickup and delivery steps in the app to update this order');
 }
 
 /**

@@ -3,7 +3,7 @@ import { toFoodTypeColumn, fromFoodTypeColumn } from '../../shared/foodType.util
 import { dropMenuCache } from '../../shared/menuCache.util.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
-import { normalizeFoodImages } from './foodImages.util.js';
+import { normalizeFoodImages, normalizeFoodVideo } from './foodImages.util.js';
 import {
     extractRawFoodVariants,
     getFoodDisplayOtherPrice,
@@ -58,6 +58,7 @@ const serializeFood = (f, restaurantName) => ({
     // still returns a one-entry list, rather than the panel having to special
     // case "no images but there is an image".
     images: Array.isArray(f.images) && f.images.length ? f.images : f.image ? [f.image] : [],
+    videoUrl: f.videoUrl || '',
     commission: serializeItemCommission(f.commissionRule),
     foodType: fromFoodTypeColumn(f.foodType),
     isAvailable: f.isAvailable !== false,
@@ -318,6 +319,7 @@ export async function createFood(body = {}) {
                 })),
             },
             ...(normalizeFoodImages(body) ?? { image: '', images: [] }),
+            videoUrl: normalizeFoodVideo(body) ?? '',
             foodType: toFoodTypeColumn(foodType),
             isAvailable: body.isAvailable !== false,
             preparationTime: typeof body.preparationTime === 'string' ? body.preparationTime.trim() : '',
@@ -373,6 +375,8 @@ export async function updateFood(id, body = {}) {
         data.images = nextImages.images;
         data.image = nextImages.image;
     }
+    const nextVideo = normalizeFoodVideo(body);
+    if (nextVideo !== undefined) data.videoUrl = nextVideo;
 
     if (body.foodType !== undefined) data.foodType = toFoodTypeColumn(targetFoodType);
     if (body.isAvailable !== undefined) data.isAvailable = body.isAvailable !== false;

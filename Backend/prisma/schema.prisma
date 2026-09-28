@@ -1777,6 +1777,8 @@ model FoodItem {
   /// because the user app, admin list, share previews and push payloads all read it.
   image  String   @default("")
   images String[]
+  /// One short MP4/WebM clip of the dish, shown with the gallery. "" = none.
+  videoUrl String @default("")
 
   foodType    FoodType @default(NonVeg)
   isAvailable Boolean  @default(true)

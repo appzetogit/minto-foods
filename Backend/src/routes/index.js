@@ -50,7 +50,9 @@ router.use('/v1/food', landingRoutes);
 router.use('/v1/food/search', searchRoutes);
 router.get('/v1/food/dining/categories/public', getPublicDiningCategories);
 router.get('/v1/food/dining/restaurants/public', getPublicDiningRestaurants);
-router.use('/v1/uploads', uploadRoutes);
+// Signed in only. This was open to anyone, so the internet could fill the
+// bucket; every caller is a signed-in admin, restaurant or rider screen.
+router.use('/v1/uploads', authMiddleware, uploadRoutes);
 
 // Mark business-settings/public as truly public (must be before protected admin block)
 // Offer banner artwork for the user, delivery and restaurant apps. Public on
