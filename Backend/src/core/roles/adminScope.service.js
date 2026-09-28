@@ -40,6 +40,26 @@ export const describeScope = (scope) =>
  * ignored and they keep their normal scope.
  */
 export async function applyZoneView(scope, admin, zoneId) {
+    // "city:<id>" views every zone of one city -- what an admin wants once
+    // there is more than one city, rather than picking zones one at a time.
+    const cityMatch = /^city:([0-9a-f]{24})$/i.exec(String(zoneId || ''));
+    if (cityMatch) {
+        const city = await prisma.foodCity.findUnique({
+            where: { id: cityMatch[1] },
+            select: { id: true, name: true, zones: { select: { id: true } } },
+        });
+        if (!city) return scope;
+        if (scope && !scope.cityIds.includes(city.id)) return scope;
+        return {
+            adminId: String(admin?.id || ''),
+            cityIds: [city.id],
+            cityNames: [city.name],
+            // A city with no zones yet matches nothing, rather than everything.
+            zoneIds: city.zones.length ? city.zones.map((z) => z.id) : ['000000000000000000000000'],
+            viewOnly: !scope,
+            base: scope || null,
+        };
+    }
     if (!isId(zoneId)) return scope;
     const zone = await prisma.foodZone.findUnique({
         where: { id: String(zoneId) },

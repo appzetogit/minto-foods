@@ -922,7 +922,25 @@ export default function OrdersPage({ statusKey = "all" }) {
     })
     socketRef.current = socket
 
+    // The city or zone picked in the header: alerts from elsewhere are not
+    // this screen's business (the list itself is already filtered to it).
+    const pickedArea = (() => {
+      try {
+        return localStorage.getItem("admin_zone_filter") || ""
+      } catch (_) {
+        return ""
+      }
+    })()
+    const outsidePickedArea = (payload = {}) => {
+      if (!pickedArea) return false
+      if (pickedArea.startsWith("city:")) {
+        return Boolean(payload.cityId) && `city:${payload.cityId}` !== pickedArea
+      }
+      return Boolean(payload.zoneId) && payload.zoneId !== pickedArea
+    }
+
     const handleIncomingRealtimeOrder = (payload = {}) => {
+      if (outsidePickedArea(payload)) return
       const orderId = payload?.orderId || payload?.orderMongoId || ""
       if (!orderId) {
         activeOrderAlertRef.current = payload || { orderId: "socket-new-order" }
@@ -943,10 +961,11 @@ export default function OrdersPage({ statusKey = "all" }) {
       if (now - lastHandledAt < 8000) return
       recentRealtimeOrderRef.current.set(orderId, now)
 
-      const title = "New order received"
-      const body = payload?.restaurantName
-        ? `${payload.restaurantName} • ${orderId}`
-        : `Order ${orderId}`
+      // Where it is from, once there is more than one city: "Bhiwandi · Md.ALi · FOD-123".
+      const title = payload?.cityName ? `New order · ${payload.cityName}` : "New order received"
+      const body = [payload?.zoneName, payload?.restaurantName, payload?.displayOrderId || orderId]
+        .filter(Boolean)
+        .join(" · ")
 
       activeOrderAlertRef.current = payload || { orderId }
       playDefaultRing()
@@ -966,6 +985,7 @@ export default function OrdersPage({ statusKey = "all" }) {
     // An order moving past 'created' (restaurant accepted / cancelled) means it no longer
     // needs admin action — stop the alarm and refresh so the popup clears.
     const handleRealtimeStatusChange = (payload = {}) => {
+      if (outsidePickedArea(payload)) return
       const status = String(payload?.orderStatus || payload?.status || "").toLowerCase()
       if (!status || status === "created") return
       activeOrderAlertRef.current = null

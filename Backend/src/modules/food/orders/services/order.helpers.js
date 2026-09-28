@@ -195,14 +195,39 @@ export async function pushStatusHistory(orderId, { byRole, byId, from, to, note 
  */
 function notifyAdminsOfOrderChange(orderId, from, to) {
   if (!to || from === to) return;
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
       const io = getIO();
       if (!io) return;
-      const payload = { orderId: String(orderId), orderMongoId: String(orderId), from, orderStatus: to };
+      // Where the order is, so it reaches the admins of that city only, and
+      // the alert can say "Bhiwandi · Md.ALi" rather than just an id.
+      const order = await prisma.foodOrder.findUnique({
+        where: { id: String(orderId) },
+        select: {
+          order_id: true,
+          zoneId: true,
+          restaurant: { select: { restaurantName: true } },
+          zone: { select: { name: true, cityId: true, cityRef: { select: { name: true } } } },
+        },
+      });
+      const payload = {
+        orderId: String(orderId),
+        orderMongoId: String(orderId),
+        displayOrderId: order?.order_id || "",
+        from,
+        orderStatus: to,
+        zoneId: order?.zoneId || null,
+        zoneName: order?.zone?.name || "",
+        cityId: order?.zone?.cityId || null,
+        cityName: order?.zone?.cityRef?.name || "",
+        restaurantName: order?.restaurant?.restaurantName || "",
+      };
       // 'created' is an order the restaurant has not accepted yet: the one the
       // admin panel rings for.
-      io.to(rooms.admin()).emit(to === "created" ? "admin_new_order" : "order_status_update", payload);
+      const event = to === "created" ? "admin_new_order" : "order_status_update";
+      let target = io.to(rooms.adminOrdersAll());
+      if (order?.zoneId) target = target.to(rooms.adminOrdersZone(order.zoneId));
+      target.emit(event, payload);
     } catch (err) {
       logger.warn(`Admin order notify failed for ${orderId}: ${err?.message || err}`);
     }

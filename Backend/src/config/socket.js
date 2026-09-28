@@ -39,8 +39,35 @@ const roomNames = {
     user: (id) => `user:${String(id)}`,
     delivery: (id) => `delivery:${String(id)}`,
     tracking: (orderId) => `tracking:${String(orderId)}`,
-    admin: () => 'admin:all'
+    admin: () => 'admin:all',
+    // Order alerts for the admin panel, by city: a super admin hears every
+    // order, a city sub-admin only the zones of their own cities.
+    adminOrdersAll: () => 'admin:orders:all',
+    adminOrdersZone: (zoneId) => `admin:orders:zone:${String(zoneId)}`
 };
+
+/** Put an admin's socket in the order-alert rooms their cities allow. */
+async function joinAdminOrderRooms(socket, adminId) {
+    try {
+        const [{ prisma }, { loadAdminScope }] = await Promise.all([
+            import('./prisma.js'),
+            import('../core/roles/adminScope.service.js'),
+        ]);
+        const admin = await prisma.foodAdmin.findUnique({
+            where: { id: String(adminId) },
+            select: { id: true, adminType: true, isActive: true, isDeleted: true },
+        });
+        if (!admin || admin.isDeleted || admin.isActive === false) return;
+        const scope = await loadAdminScope(admin);
+        if (!scope) {
+            socket.join(roomNames.adminOrdersAll());
+            return;
+        }
+        for (const zoneId of scope.zoneIds) socket.join(roomNames.adminOrdersZone(zoneId));
+    } catch (err) {
+        logger.warn(`Admin order rooms not joined for ${adminId}: ${err?.message || err}`);
+    }
+}
 
 /**
  * Initializes Socket.IO with the provided HTTP server.
@@ -135,7 +162,10 @@ export const initSocket = async (server) => {
                     room: roomNames.delivery(userId),
                 });
             }
-            if (role === 'ADMIN') socket.join(roomNames.admin());
+            if (role === 'ADMIN') {
+                socket.join(roomNames.admin());
+                void joinAdminOrderRooms(socket, userId);
+            }
         }
 
         // ─── Chat: typing indicator relay (messages themselves go over REST) ───

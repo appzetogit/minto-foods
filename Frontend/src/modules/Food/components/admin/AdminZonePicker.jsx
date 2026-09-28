@@ -49,8 +49,26 @@ export default function AdminZonePicker() {
     window.location.reload()
   }
 
-  // A zone that no longer exists would silently empty every screen.
-  const known = !zone || zones.some((z) => (z._id || z.id) === zone)
+  // Zones grouped under their city, so a whole city can be picked at once.
+  const cities = []
+  const byCity = new Map()
+  for (const z of zones) {
+    const cityId = z.cityRef?.id || z.cityId || ""
+    const cityName = z.cityRef?.name || z.city || "Other"
+    if (!byCity.has(cityId)) {
+      const group = { id: cityId, name: cityName, zones: [] }
+      byCity.set(cityId, group)
+      cities.push(group)
+    }
+    byCity.get(cityId).zones.push(z)
+  }
+  cities.sort((a, b) => a.name.localeCompare(b.name))
+
+  // A zone or city that no longer exists would silently empty every screen.
+  const known =
+    !zone ||
+    zones.some((z) => (z._id || z.id) === zone) ||
+    cities.some((c) => c.id && `city:${c.id}` === zone)
   useEffect(() => {
     if (zones.length && zone && !known) choose("")
   }, [zones.length]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -58,20 +76,25 @@ export default function AdminZonePicker() {
   return (
     <label
       className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm ${zone ? "border-blue-300 bg-blue-50 text-blue-800" : "border-neutral-200 bg-white text-neutral-700"}`}
-      title="Show only this zone on every screen"
+      title="Show only this city or zone on every screen"
     >
       <MapPin className="h-4 w-4 shrink-0" />
       <select
         value={zone}
         onChange={(e) => choose(e.target.value)}
-        className="max-w-[140px] bg-transparent text-sm font-medium outline-none"
-        aria-label="Zone shown on every screen"
+        className="max-w-[170px] bg-transparent text-sm font-medium outline-none"
+        aria-label="City or zone shown on every screen"
       >
-        <option value="">All zones</option>
-        {zones.map((z) => (
-          <option key={z._id || z.id} value={z._id || z.id}>
-            {z.name || z.zoneName}
-          </option>
+        <option value="">All cities</option>
+        {cities.map((city) => (
+          <optgroup key={city.id || city.name} label={city.name}>
+            {city.id ? <option value={`city:${city.id}`}>All of {city.name}</option> : null}
+            {city.zones.map((z) => (
+              <option key={z._id || z.id} value={z._id || z.id}>
+                {z.name || z.zoneName}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </label>
