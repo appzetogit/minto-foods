@@ -1842,7 +1842,14 @@ export async function listOrdersRestaurant(restaurantId, query) {
   const [rows, total] = await Promise.all([
     prisma.foodOrder.findMany({
       where,
-      include: { ...orderInclude, user: { select: { ...USER_CARD, profileImage: true } } },
+      // The rider has to be loaded here too. Without it the mapper can only
+      // emit the partner's id, so the restaurant's live card read "Looking for
+      // partner…" even for an order a rider had already picked up.
+      include: {
+        ...orderInclude,
+        user: { select: { ...USER_CARD, profileImage: true } },
+        deliveryPartner: { select: PARTNER_CARD },
+      },
       orderBy: { createdAt: 'desc' },
       skip,
       take: limit,

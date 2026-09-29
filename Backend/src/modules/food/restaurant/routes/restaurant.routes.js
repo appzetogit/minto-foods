@@ -295,6 +295,8 @@ router.delete('/addons/:id', authMiddleware, requireRestaurant, deleteAddonContr
 
 // Orders (restaurant dashboard)
 router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrdersRestaurantController);
+// Before /orders/:orderId, or Express reads "rejection-reasons" as an order id.
+router.get('/orders/rejection-reasons', authMiddleware, requireRestaurant, orderController.listRejectionReasonsRestaurantController);
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);

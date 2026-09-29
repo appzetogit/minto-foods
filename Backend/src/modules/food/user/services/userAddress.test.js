@@ -63,6 +63,25 @@ test('adding a second address of the same label keeps both', async () => {
     assert.equal(others.length, 2);
 });
 
+test('saving the same place twice keeps one address', async () => {
+    // Two identical rows in the list, with no way to tell them apart.
+    const { address: first } = await addAddress(
+        userId,
+        address({ label: 'other', street: '17/C', city: 'Indore', zipCode: '452001' }),
+    );
+    const { address: again } = await addAddress(
+        userId,
+        // Same place, typed less tidily.
+        address({ label: 'other', street: '  17/C  ', city: 'indore', zipCode: '452001' }),
+    );
+
+    assert.equal(again.id, first.id, 'the existing address is returned, not a copy');
+
+    const { addresses } = await listAddresses(userId);
+    const matches = addresses.filter((a) => a.id === first.id);
+    assert.equal(matches.length, 1);
+});
+
 test('coordinates come back as a usable point', async () => {
     const { addresses } = await listAddresses(userId);
     const [first] = addresses;

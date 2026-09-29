@@ -153,7 +153,15 @@ const restaurantRegisterSchema = z.object({
 export const validateRestaurantRegisterDto = (body) => {
     const result = restaurantRegisterSchema.safeParse(body);
     if (!result.success) {
-        throw new ValidationError(result.error.errors[0].message);
+        const issue = result.error.errors[0];
+        // Zod's default for a missing field is the bare word "Required", which
+        // reached the restaurant as an error naming nothing at all. Say which
+        // field when the message does not already.
+        const field = issue.path?.join('.');
+        const message = issue.message === 'Required' && field
+            ? `${field} is required`
+            : issue.message;
+        throw new ValidationError(message);
     }
 
     const data = result.data;

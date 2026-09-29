@@ -48,6 +48,8 @@ export default function RestaurantBilling() {
     const [savingId, setSavingId] = useState(null)
     // What each restaurant is actually charged, so one paying nothing stands out.
     const [overview, setOverview] = useState({})
+    // The restaurant whose overall commission is being set, or null.
+    const [commissionFor, setCommissionFor] = useState(null)
     const loadOverview = useCallback(async () => {
         try {
             const res = await apiClient.get("/food/admin/commission-overview", { contextModule: "admin" })
@@ -264,7 +266,18 @@ export default function RestaurantBilling() {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <ChargeCell info={overview[id]} />
+                                                    <div className="flex flex-col items-start gap-1.5">
+                                                        <ChargeCell info={overview[id]} />
+                                                        {mode !== "subscription" ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCommissionFor({ restaurant, rate: overview[id]?.restaurantRate || null })}
+                                                                className="text-xs font-medium text-blue-700 hover:underline"
+                                                            >
+                                                                {overview[id]?.restaurantRate ? "Change commission" : "Set commission"}
+                                                            </button>
+                                                        ) : null}
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
                                                     <button
@@ -287,6 +300,18 @@ export default function RestaurantBilling() {
                 </div>
             </div>
 
+            {commissionFor && (
+                <RestaurantRateDialog
+                    restaurant={commissionFor.restaurant}
+                    rate={commissionFor.rate}
+                    onClose={() => setCommissionFor(null)}
+                    onSaved={() => {
+                        setCommissionFor(null)
+                        loadOverview()
+                    }}
+                />
+            )}
+
             {dishOpen && (
                 <DishRateDialog
                     restaurant={dishRestaurant}
@@ -306,6 +331,113 @@ export default function RestaurantBilling() {
  * none -- and so fall back to the restaurant rate -- is exactly what an admin
  * needs to see before switching a restaurant to dish-based billing.
  */
+/**
+ * Set a restaurant's overall commission: a percentage of each order, or a
+ * fixed amount per order. On dish-based billing it is the rate every dish
+ * without its own rate falls back to.
+ */
+function RestaurantRateDialog({ restaurant, rate, onClose, onSaved }) {
+    const [type, setType] = useState(rate?.type === "amount" ? "amount" : "percentage")
+    const [value, setValue] = useState(rate?.value != null ? String(rate.value) : "")
+    const [saving, setSaving] = useState(false)
+    const id = restaurant?.id || restaurant?._id
+    const name = restaurant?.restaurantName || restaurant?.name || "Restaurant"
+
+    const save = async () => {
+        const n = Number(value)
+        if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
+            toast.error("Enter a commission of 0 or more")
+            return
+        }
+        if (type === "percentage" && n > 100) {
+            toast.error("A percentage cannot be more than 100")
+            return
+        }
+        try {
+            setSaving(true)
+            await apiClient.put(
+                `/food/admin/restaurants/${String(id)}/commission`,
+                { type, value: n },
+                { contextModule: "admin" },
+            )
+            toast.success(`Commission saved for ${name}`)
+            onSaved()
+        } catch (error) {
+            toast.error(error?.response?.data?.message || "Could not save the commission")
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                <div className="mb-4 flex items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-base font-semibold text-slate-900">Restaurant commission</h3>
+                        <p className="text-sm text-slate-500">{name}</p>
+                    </div>
+                    <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100" aria-label="Close">
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+
+                <div className="mb-3 grid grid-cols-2 gap-2">
+                    {[
+                        { value: "percentage", label: "% of order", icon: Percent },
+                        { value: "amount", label: "₹ per order", icon: IndianRupee },
+                    ].map((opt) => (
+                        <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setType(opt.value)}
+                            className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${type === opt.value ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+                        >
+                            <opt.icon className="h-4 w-4" />
+                            {opt.label}
+                        </button>
+                    ))}
+                </div>
+
+                <input
+                    type="number"
+                    min="0"
+                    max={type === "percentage" ? 100 : undefined}
+                    step="0.01"
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    placeholder={type === "percentage" ? "e.g. 15" : "e.g. 20"}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    autoFocus
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                    {type === "percentage"
+                        ? "The platform keeps this percentage of each order."
+                        : "The platform keeps this fixed amount from each order."}
+                    {(restaurant?.billingMode || "commission_overall") === "commission_dish"
+                        ? " Dishes with their own rate use that instead."
+                        : ""}
+                </p>
+
+                <div className="mt-5 flex justify-end gap-2">
+                    <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        onClick={save}
+                        disabled={saving}
+                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 /** One line on what a restaurant is charged, red when it is nothing. */
 function ChargeCell({ info }) {
     if (!info) return <span className="text-xs text-slate-400">…</span>

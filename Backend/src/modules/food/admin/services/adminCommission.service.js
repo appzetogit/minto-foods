@@ -248,6 +248,36 @@ export async function updateRestaurantCommission(id, body = {}) {
     return getRestaurantCommissionById(id);
 }
 
+/**
+ * Set one restaurant's commission from the Billing Mode screen: creates its
+ * rule or updates the one it has (switching it back on), keyed on the
+ * restaurant, so the admin never has to know whether a row exists yet.
+ */
+export async function setRestaurantCommissionForRestaurant(restaurantId, body = {}) {
+    if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const rate = fromDefaultCommission(body.defaultCommission ?? { type: body.type, value: body.value });
+    // Read through the admin's city scope first: the commission table has no
+    // zone of its own, so this is what stops a city sub-admin setting the rate
+    // of a restaurant in another city.
+    const restaurant = await prisma.foodRestaurant.findUnique({
+        where: { id: String(restaurantId) },
+        select: { id: true },
+    });
+    if (!restaurant) throw new ValidationError('Restaurant not found');
+    try {
+        const saved = await prisma.foodRestaurantCommission.upsert({
+            where: { restaurantId: String(restaurantId) },
+            create: { restaurantId: String(restaurantId), ...rate, status: true },
+            update: { ...rate, status: true },
+            include: WITH_RESTAURANT,
+        });
+        return serializeCommission(saved);
+    } catch (error) {
+        if (error?.code === 'P2003') throw new ValidationError('Restaurant not found');
+        throw error;
+    }
+}
+
 export async function deleteRestaurantCommission(id) {
     if (!isId(id)) return null;
     const { count } = await prisma.foodRestaurantCommission.deleteMany({ where: { id: String(id) } });

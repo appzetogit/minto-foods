@@ -463,6 +463,30 @@ export async function markOrderDeliveredAdminController(req, res, next) {
     }
 }
 
+/**
+ * Reasons a restaurant can pick when rejecting an order.
+ *
+ * Served rather than built into the app so the list can change without a
+ * release. The app keeps the same list as a fallback, so rejecting is never
+ * blocked on this call.
+ */
+const RESTAURANT_REJECTION_REASONS = [
+    'Item out of stock',
+    'Kitchen is too busy',
+    'Restaurant is closing soon',
+    'Unable to deliver to this address',
+];
+
+export async function listRejectionReasonsRestaurantController(req, res, next) {
+    try {
+        return sendResponse(res, 200, 'Rejection reasons', {
+            reasons: RESTAURANT_REJECTION_REASONS,
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function processRefundAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;

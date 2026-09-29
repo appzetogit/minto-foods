@@ -322,6 +322,16 @@ router.get('/commission-overview', async (req, res, next) => {
         return res.status(200).json({ success: true, message: 'Commission overview', data: await getCommissionOverview() });
     } catch (error) { return next(error); }
 });
+// One restaurant's overall commission, created or updated in one call.
+router.put('/restaurants/:id/commission', async (req, res, next) => {
+    try {
+        const { setRestaurantCommissionForRestaurant } = await import('../services/adminCommission.service.js');
+        const commission = await setRestaurantCommissionForRestaurant(req.params.id, req.body || {});
+        return res.status(200).json({ success: true, message: 'Commission saved', data: { commission } });
+    } catch (error) {
+        return next(error);
+    }
+});
 router.get('/restaurants/:id/item-commissions', adminController.getItemCommissions);
 router.patch('/restaurants/:id/item-commissions/:itemId', adminController.upsertItemCommission);
 

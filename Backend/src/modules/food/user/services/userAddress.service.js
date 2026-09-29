@@ -42,6 +42,34 @@ export const listAddresses = async (userId) => {
     return { addresses: rows.map((address) => normalizeDeliveryAddress(address)) };
 };
 
+/** Trimmed, case- and whitespace-insensitive, for comparing two addresses. */
+const addressKeyPart = (value) =>
+    String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+const addressKey = (address) =>
+    [
+        normalizeLabel(address.label),
+        addressKeyPart(address.street),
+        // Included so two flats in one building stay two addresses.
+        addressKeyPart(address.additionalDetails),
+        addressKeyPart(address.city),
+        addressKeyPart(address.state),
+        addressKeyPart(address.zipCode),
+    ].join('|');
+
+/**
+ * An address this customer has already saved for the same place, or null.
+ *
+ * Compared in JS rather than as a query: a customer has a handful of addresses,
+ * and the normalisation (case, stray whitespace) is the whole point -- a SQL
+ * equality check would miss "17/C , Indore" against "17/C, Indore".
+ */
+const findDuplicateAddress = async (userId, dto) => {
+    const existing = await prisma.userAddress.findMany({ where: { userId }, orderBy: BY_AGE });
+    const key = addressKey(dto);
+    return existing.find((address) => addressKey(address) === key) || null;
+};
+
 export const addAddress = async (userId, dto) => {
     const user = await prisma.foodUser.findUnique({
         where: { id: String(userId) },
@@ -58,6 +86,16 @@ export const addAddress = async (userId, dto) => {
     // labels that capped everyone at three addresses and silently destroyed the
     // old one — saving a second "Other" wiped the first with no warning. Adding
     // now always adds; editing an address is what PATCH is for.
+    //
+    // The exception is an address that is the same *place*, not merely the same
+    // label: saving one twice left two identical rows in the list with no way
+    // to tell them apart. Keyed on the whole address, so "Other" in Indore and
+    // "Other" in Bhiwandi still both save.
+    const duplicate = await findDuplicateAddress(user.id, dto);
+    if (duplicate) {
+        return { address: normalizeDeliveryAddress(duplicate) };
+    }
+
     const address = await prisma.userAddress.create({
         data: {
             userId: user.id,
