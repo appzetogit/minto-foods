@@ -1028,6 +1028,14 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     paymentStatus: updated.payment?.status,
   });
 
+  // Did this delivery complete an incentive target? Checked here rather than
+  // only when an admin ran the sweep by hand, so a rider who hits the target
+  // shows as "completed, awaiting approval" straight away. It only records the
+  // completion; paying it is still the admin's approval. Never blocks delivery.
+  void import('../../admin/services/adminEarningAddon.service.js')
+    .then((m) => m.checkEarningAddonCompletions(String(deliveryPartnerId), false, { afterDelivery: true }))
+    .catch((err) => logger.warn(`Incentive check after delivery failed: ${err?.message || err}`));
+
   return sanitizeOrderForDeliveryPartner(updated);
 }
 

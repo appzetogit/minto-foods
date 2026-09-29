@@ -907,6 +907,17 @@ export const getActiveEarningAddonsForPartner = async (deliveryPartnerId) => {
         return Number(addon.currentRedemptions || 0) < maxRedemptions;
     });
 
+    // Where this rider stands on each offer once the target is reached:
+    // recorded and waiting for an admin, paid, or turned down.
+    const claims = liveAddons.length
+        ? await prisma.foodEarningAddonHistory.findMany({
+              where: { deliveryPartnerId: partnerId, offerId: { in: liveAddons.map((a) => a.id) } },
+              orderBy: { createdAt: 'desc' },
+              select: { offerId: true, status: true, creditedAt: true, cancelReason: true },
+          })
+        : [];
+    const claimFor = (offerId) => claims.find((c) => c.offerId === offerId) || null;
+
     const offers = await Promise.all(
         liveAddons.map(async (addon) => {
             const startDate = addon.startDate ? new Date(addon.startDate) : null;
@@ -974,6 +985,16 @@ export const getActiveEarningAddonsForPartner = async (deliveryPartnerId) => {
                 endDate,
                 validTill: endDate ? endDate.toISOString() : null,
                 isLive: true,
+                // in_progress | pending_approval | credited | rejected
+                status: (() => {
+                    const claim = claimFor(addon.id);
+                    if (!claim) return 'in_progress';
+                    if (claim.status === 'credited') return 'credited';
+                    if (claim.status === 'cancelled') return 'rejected';
+                    return 'pending_approval';
+                })(),
+                creditedAt: claimFor(addon.id)?.creditedAt || null,
+                rejectedReason: claimFor(addon.id)?.status === 'cancelled' ? claimFor(addon.id)?.cancelReason || '' : '',
             };
         }),
     );

@@ -13,6 +13,7 @@ import {
     cancelEarningAddonHistory,
     checkEarningAddonCompletions,
 } from './adminEarningAddon.service.js';
+import { getActiveEarningAddonsForPartner } from '../../delivery/services/delivery.service.js';
 import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
@@ -54,7 +55,7 @@ const makeAddon = async (over = {}) => {
     return addon;
 };
 
-const makeDeliveredOrders = async (partner, count) => {
+const makeDeliveredOrders = async (partner, count, { createdAt, deliveredAt = new Date() } = {}) => {
     const restaurant = await prisma.foodRestaurant.create({
         data: {
             restaurantName: `Inc Rest ${stamp()}`,
@@ -82,6 +83,8 @@ const makeDeliveredOrders = async (partner, count) => {
                 addrState: 'MP',
                 subtotal: 100,
                 total: 100,
+                deliveredAt,
+                ...(createdAt ? { createdAt } : {}),
             },
         });
         created.orders.push(order.id);
@@ -319,4 +322,81 @@ test('history lists and searches by partner or offer', async () => {
     assert.ok(byOffer.history.some((h) => h.offerTitle === addon.title));
 
     assert.equal((await getEarningAddonHistory({ search: `nothing${stamp()}` })).pagination.total, 0);
+});
+
+test('an order placed before the offer but delivered during it counts', async () => {
+    const partner = await makePartner();
+    const addon = await makeAddon({ requiredOrders: 1 });
+    // Placed two days ago (before the offer began), delivered now.
+    await makeDeliveredOrders(partner, 1, { createdAt: new Date(Date.now() - 2 * DAY) });
+
+    await checkEarningAddonCompletions(partner.id);
+    assert.equal(await grantsFor(addon.id, partner.id), 1);
+});
+
+test('an order delivered before the offer began does not count', async () => {
+    const partner = await makePartner();
+    const addon = await makeAddon({ requiredOrders: 1 });
+    await makeDeliveredOrders(partner, 1, { deliveredAt: new Date(Date.now() - 2 * DAY) });
+
+    await checkEarningAddonCompletions(partner.id);
+    assert.equal(await grantsFor(addon.id, partner.id), 0);
+});
+
+test('the rider sees each offer move from in progress to paid', async () => {
+    const partner = await makePartner();
+    const addon = await makeAddon({ requiredOrders: 1 });
+    const statusOf = async () => {
+        const { offers } = await getActiveEarningAddonsForPartner(partner.id);
+        return offers.find((o) => o.id === addon.id);
+    };
+
+    let offer = await statusOf();
+    assert.equal(offer.status, 'in_progress');
+    assert.equal(offer.currentOrders, 0);
+
+    await makeDeliveredOrders(partner, 1);
+    await checkEarningAddonCompletions(partner.id);
+    offer = await statusOf();
+    assert.equal(offer.status, 'pending_approval');
+    assert.equal(offer.currentOrders, 1);
+
+    const grant = await prisma.foodEarningAddonHistory.findFirst({
+        where: { offerId: addon.id, deliveryPartnerId: partner.id },
+    });
+    await creditEarningAddonHistory(grant.id, 'ok');
+    offer = await statusOf();
+    assert.equal(offer.status, 'credited');
+    assert.ok(offer.creditedAt);
+});
+
+test('a rejected offer shows the reason to the rider', async () => {
+    const partner = await makePartner();
+    const addon = await makeAddon({ requiredOrders: 1 });
+    await makeDeliveredOrders(partner, 1);
+    await checkEarningAddonCompletions(partner.id);
+    const grant = await prisma.foodEarningAddonHistory.findFirst({
+        where: { offerId: addon.id, deliveryPartnerId: partner.id },
+    });
+    await cancelEarningAddonHistory(grant.id, 'Fake deliveries');
+
+    const { offers } = await getActiveEarningAddonsForPartner(partner.id);
+    const offer = offers.find((o) => o.id === addon.id);
+    assert.equal(offer.status, 'rejected');
+    assert.equal(offer.rejectedReason, 'Fake deliveries');
+});
+
+test('a delivery after a rejection does not put the claim back in the queue', async () => {
+    const partner = await makePartner();
+    const addon = await makeAddon({ requiredOrders: 1 });
+    await makeDeliveredOrders(partner, 1);
+    await checkEarningAddonCompletions(partner.id);
+    const grant = await prisma.foodEarningAddonHistory.findFirst({
+        where: { offerId: addon.id, deliveryPartnerId: partner.id },
+    });
+    await cancelEarningAddonHistory(grant.id, 'Fake deliveries');
+
+    await makeDeliveredOrders(partner, 1);
+    await checkEarningAddonCompletions(partner.id, false, { afterDelivery: true });
+    assert.equal(await grantsFor(addon.id, partner.id), 1, 'only the rejected row');
 });

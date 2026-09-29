@@ -326,7 +326,13 @@ async function onlineMinutesInWindow(partnerId, from, to) {
     return Math.round(ms / 60000);
 }
 
-export async function checkEarningAddonCompletions(deliveryPartnerId, _force = false) {
+/**
+ * `afterDelivery` is the automatic check run when a rider completes a delivery.
+ * It leaves alone any offer an admin already rejected for that rider; otherwise
+ * the rider's very next delivery would put the rejected claim straight back in
+ * the approval queue. The admin's own sweep can still re-grant it.
+ */
+export async function checkEarningAddonCompletions(deliveryPartnerId, _force = false, { afterDelivery = false } = {}) {
     const now = new Date();
 
     const activeOffers = await prisma.foodEarningAddon.findMany({
@@ -356,16 +362,19 @@ export async function checkEarningAddonCompletions(deliveryPartnerId, _force = f
                 where: {
                     deliveryPartnerId: partnerId,
                     offerId: offer.id,
-                    status: { in: ['pending', 'credited'] },
+                    status: { in: afterDelivery ? ['pending', 'credited', 'cancelled'] : ['pending', 'credited'] },
                 },
             });
             if (already) continue;
 
+            // Counted by when the order was delivered, the same way the rider's
+            // app shows progress. By createdAt, an order placed before the offer
+            // and delivered during it showed as progress but never counted.
             const orderCount = await prisma.foodOrder.count({
                 where: {
                     dispatchDeliveryPartnerId: partnerId,
                     orderStatus: 'delivered',
-                    createdAt: { gte: offer.startDate, lte: offer.endDate },
+                    deliveredAt: { gte: offer.startDate, lte: offer.endDate },
                 },
             });
 
