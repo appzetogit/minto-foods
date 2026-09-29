@@ -219,7 +219,16 @@ export async function updateRestaurantById(id, body = {}) {
 
     const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.foodRestaurant.update({ where: { id: existing.id }, data });
-        if (body.openingTime !== undefined || body.closingTime !== undefined) {
+        // Only when the simple pair actually changed. The admin form sent it on
+        // every save, so saving a phone number reset every day to that one
+        // pair -- wiping per-day hours, split lunch/dinner slots and late
+        // Friday closes set in the day-by-day editor.
+        const pairChanged =
+            (body.openingTime !== undefined &&
+                normalizeRestaurantTime(body.openingTime) !== normalizeRestaurantTime(existing.openingTime)) ||
+            (body.closingTime !== undefined &&
+                normalizeRestaurantTime(body.closingTime) !== normalizeRestaurantTime(existing.closingTime));
+        if (pairChanged) {
             await syncOutletTimings(tx, row);
         }
         return row;

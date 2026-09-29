@@ -360,8 +360,9 @@ export default function EditRestaurant() {
         // overrides it for this restaurant only.
         deliveryRadiusKm:
           detailsForm.deliveryRadiusKm === "" ? "" : Number(detailsForm.deliveryRadiusKm),
-        openingTime: detailsForm.openingTime,
-        closingTime: detailsForm.closingTime,
+        // No opening/closing time here: hours are set day by day in Opening
+        // Hours below. This form used to send the old pair on every save,
+        // which reset every day's hours to it.
         isActive: detailsForm.isActive !== false,
       }
 

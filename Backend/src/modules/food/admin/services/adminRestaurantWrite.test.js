@@ -244,3 +244,25 @@ test('changing the hours rewrites the timings, keeping closed days closed', asyn
     assert.equal(sunday.isOpen, false);
     assert.equal(sunday.openingTime, '');
 });
+
+test('saving other details keeps the day-by-day hours', async () => {
+    const r = await track(baseBody({ openingTime: '09:00', closingTime: '21:00' }));
+
+    // Late Friday, set in the day-by-day editor.
+    const before = await prisma.foodRestaurantOutletTimings.findUnique({ where: { restaurantId: r.id } });
+    await prisma.foodRestaurantOutletTimings.update({
+        where: { restaurantId: r.id },
+        data: {
+            timings: before.timings.map((t) =>
+                t.day === 'Friday' ? { ...t, openingTime: '16:00', closingTime: '02:00' } : t),
+        },
+    });
+
+    // The admin form re-sends the same simple pair with every save.
+    await updateRestaurantById(r.id, { name: 'Renamed Kitchen', openingTime: '09:00', closingTime: '21:00' });
+
+    const after = await prisma.foodRestaurantOutletTimings.findUnique({ where: { restaurantId: r.id } });
+    const friday = after.timings.find((t) => t.day === 'Friday');
+    assert.equal(friday.openingTime, '16:00', 'Friday was not reset to the simple pair');
+    assert.equal(friday.closingTime, '02:00');
+});

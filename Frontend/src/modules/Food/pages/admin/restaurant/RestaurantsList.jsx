@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { Search, Download, ChevronDown, ChevronLeft, ChevronRight, Eye, Settings, ArrowUpDown, Loader2, X, MapPin, Phone, Mail, Clock, Star, Building2, User, FileText, FileSpreadsheet, CreditCard, Calendar, Image as ImageIcon, ExternalLink, ShieldX, AlertTriangle, Trash2, Plus } from "lucide-react"
+import { Search, Download, ChevronDown, ChevronLeft, ChevronRight, Eye, Settings, ArrowUpDown, Loader2, X, MapPin, Phone, Mail, Clock, Star, Building2, User, FileText, FileSpreadsheet, CreditCard, Calendar, Image as ImageIcon, ExternalLink, ShieldX, AlertTriangle, Trash2, Plus, Pencil } from "lucide-react"
 import { adminAPI, restaurantAPI, uploadAPI } from "@food/api"
 import { clearModuleAuth } from "@food/utils/auth"
 import { resolveMediaUrl } from "../../../../../shared/utils/mediaUrl.js"
@@ -1011,17 +1011,8 @@ export default function RestaurantsList() {
         }
       }
 
-      const normalizedOpeningTime = normalizeTimeValue(detailsForm.openingTime.trim())
-      const normalizedClosingTime = normalizeTimeValue(detailsForm.closingTime.trim())
-      const openingMinutes = timeToMinutes(normalizedOpeningTime)
-      const closingMinutes = timeToMinutes(normalizedClosingTime)
-      if (openingMinutes !== null && closingMinutes !== null) {
-        if (openingMinutes === closingMinutes) {
-          alert("Opening time and closing time cannot be same")
-          return
-        }
-      }
-
+      // Hours are not edited here (see the Edit restaurant page), so they are
+      // not sent: sending them reset every day's hours to one pair.
       const payload = {
         name: detailsForm.name.trim(),
         pureVegRestaurant: detailsForm.pureVegRestaurant === true,
@@ -1031,8 +1022,6 @@ export default function RestaurantsList() {
         primaryContactNumber: detailsForm.primaryContactNumber.trim(),
         email: detailsForm.email.trim(),
         estimatedDeliveryTime: detailsForm.estimatedDeliveryTime.trim(),
-        openingTime: normalizedOpeningTime,
-        closingTime: normalizedClosingTime,
         isActive: detailsForm.isActive,
       }
 
@@ -1508,6 +1497,15 @@ export default function RestaurantsList() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
+                            {/* Details, photos, location and day-by-day opening hours. The
+                                page existed, but nothing linked to it. */}
+                            <button
+                              onClick={() => navigate(`/admin/food/restaurants/edit/${restaurant._id || restaurant.id}`)}
+                              className="p-1.5 rounded text-slate-700 hover:bg-slate-100 transition-colors"
+                              title="Edit restaurant & opening hours"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
                             <button
                               onClick={() => handleBanRestaurant(restaurant)}
                               className={`p-1.5 rounded transition-colors ${!restaurant.isActive
@@ -1710,13 +1708,16 @@ export default function RestaurantsList() {
                       <label className="block text-xs text-slate-500 mb-1">Primary Contact</label>
                       <input type="text" value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((prev) => ({ ...prev, primaryContactNumber: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
                     </div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Opening Time</label>
-                      <input type="text" value={detailsForm.openingTime} onChange={(e) => setDetailsForm((prev) => ({ ...prev, openingTime: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Closing Time</label>
-                      <input type="text" value={detailsForm.closingTime} onChange={(e) => setDetailsForm((prev) => ({ ...prev, closingTime: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+                    <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      Opening hours are set day by day (closed days, lunch/dinner slots, past midnight) on the{" "}
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/admin/food/restaurants/edit/${selectedRestaurant?._id || selectedRestaurant?.id || restaurantDetails?.id || ""}`)}
+                        className="font-medium text-blue-700 hover:underline"
+                      >
+                        Edit restaurant page
+                      </button>
+                      .
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Estimated Delivery Time</label>

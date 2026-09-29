@@ -41,6 +41,17 @@ const formatTime12Hour = (time24) => {
   return `${hours12}:${minutesStr} ${period}`
 }
 
+/** A close earlier than the open runs past midnight: 16:00 to 02:00 is open until 2 AM. */
+const toMinutes = (value) => {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(value || ""))
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null
+}
+const closesNextDay = (day) => {
+  const open = toMinutes(day?.openingTime)
+  const close = toMinutes(day?.closingTime)
+  return open !== null && close !== null && close < open
+}
+
 const getDefaultDays = () => ({
   Monday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
   Tuesday: { isOpen: true, openingTime: "09:00", closingTime: "22:00" },
@@ -304,6 +315,9 @@ export default function OutletTimings() {
                           onChange={(value) => handleTimeChange(day, "closingTime", value)}
                           placeholder="Closing time"
                         />
+                        {closesNextDay(dayData) ? (
+                          <p className="mt-1 text-[11px] font-medium text-indigo-700">Closes next day</p>
+                        ) : null}
                       </div>
                     ) : (
                       <span className="text-sm text-gray-400 pt-2 block">—</span>
@@ -399,6 +413,7 @@ export default function OutletTimings() {
                                 </div>
                                 <p className="text-xs text-gray-500">
                                   Current: {formatTime12Hour(dayData.closingTime)}
+                                  {closesNextDay(dayData) ? " (next day)" : ""}
                                 </p>
                               </div>
                             </>

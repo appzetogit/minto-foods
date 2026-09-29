@@ -6,6 +6,7 @@ import { ArrowLeft, Settings, ChevronRight } from "lucide-react"
 import { Switch } from "@food/components/ui/switch"
 import { Card, CardContent } from "@food/components/ui/card"
 import { restaurantAPI } from "@food/api"
+import { evaluateOpeningHours } from "@food/utils/openingHours"
 import {
   getRestaurantOperationalStatus,
   broadcastRestaurantOperationalStatus,
@@ -138,49 +139,12 @@ export default function RestaurantStatus() {
   useEffect(() => {
     const checkIfOpen = () => {
       if (typeof document !== "undefined" && document.hidden) return
-      const now = new Date()
-      const currentDayFull = now.toLocaleDateString('en-US', { weekday: 'long' }) // "Monday", "Tuesday", etc.
-      const currentHour = now.getHours()
-      const currentMinute = now.getMinutes()
-      const currentTimeInMinutes = currentHour * 60 + currentMinute
-
-      const outletTimingsData = outletTimings
-
-      if (!outletTimingsData || !outletTimingsData[currentDayFull]) {
-        // No outlet timings configured for today yet
-        setIsDayClosed(false)
-        setIsWithinTimings(true)
-        return
-      }
-
-      const dayData = outletTimingsData[currentDayFull]
-      if (dayData.isOpen === false) {
-        setIsDayClosed(true)
-        setIsWithinTimings(false)
-        return
-      }
-
-      if (!dayData.openingTime || !dayData.closingTime) {
-        setIsDayClosed(false)
-        setIsWithinTimings(true)
-        return
-      }
-
-      const [openHour, openMinute] = dayData.openingTime.split(':').map(Number)
-      const [closeHour, closeMinute] = dayData.closingTime.split(':').map(Number)
-      
-      const openingTimeInMinutes = openHour * 60 + openMinute
-      const closingTimeInMinutes = closeHour * 60 + closeMinute
-
-      let isWithin = false
-      if (closingTimeInMinutes > openingTimeInMinutes) {
-        isWithin = currentTimeInMinutes >= openingTimeInMinutes && currentTimeInMinutes <= closingTimeInMinutes
-      } else {
-        isWithin = currentTimeInMinutes >= openingTimeInMinutes || currentTimeInMinutes <= closingTimeInMinutes
-      }
-
-      setIsDayClosed(false)
-      setIsWithinTimings(isWithin)
+      // Same rules as the server (India time, every slot of the day, and the
+      // hours after midnight belong to the day they started on), so this
+      // screen never disagrees with what customers see.
+      const hours = evaluateOpeningHours({ outletTimings: outletTimings || {} }, new Date())
+      setIsDayClosed(hours.todayClosedDay && !hours.carriedOver)
+      setIsWithinTimings(hours.isOpen)
     }
 
     checkIfOpen()

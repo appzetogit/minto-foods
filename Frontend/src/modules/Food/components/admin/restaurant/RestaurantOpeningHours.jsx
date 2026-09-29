@@ -134,6 +134,8 @@ export default function RestaurantOpeningHours({ restaurantId }) {
       </div>
       <p className="text-xs text-slate-500 mb-3">
         A day can have more than one slot &mdash; add a second for a kitchen that closes between lunch and dinner.
+        A closing time earlier than the opening time runs past midnight: Monday 16:00 to 02:00 is open until
+        2 AM on Tuesday.
       </p>
 
       {error ? <p className="text-sm text-red-600 mb-3">{error}</p> : null}
@@ -188,6 +190,12 @@ export default function RestaurantOpeningHours({ restaurantId }) {
                           onChange={(e) => editSlot(day, i, { closingTime: e.target.value })}
                           className="rounded-md border border-slate-300 px-2 py-1 text-sm"
                         />
+                        {/* 16:00 to 02:00 is a late-night kitchen, not a mistake: say so. */}
+                        {slot.openingTime && slot.closingTime && slot.closingTime < slot.openingTime ? (
+                          <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                            closes next day
+                          </span>
+                        ) : null}
                         {d.slots.length > 1 ? (
                           <button
                             type="button"
