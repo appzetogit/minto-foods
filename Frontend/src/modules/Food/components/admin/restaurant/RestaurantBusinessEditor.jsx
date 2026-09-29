@@ -26,7 +26,8 @@ const TEXT_FIELDS = [
   "panNumber", "nameOnPan", "aadhaarNumber",
   "gstRegistered", "gstNumber", "gstLegalName", "gstAddress",
   "accountHolderName", "accountNumber", "ifscCode", "accountType", "upiId",
-  "deliveryRadiusKm", "freeDeliveryAbove",
+  // Free delivery is no longer set per restaurant from here.
+  "deliveryRadiusKm",
 ]
 
 const urlOf = (v) => (typeof v === "string" ? v : v?.url || "")
@@ -115,9 +116,6 @@ export default function RestaurantBusinessEditor({ restaurant, onSaved }) {
     if (acct && !/^\d{9,18}$/.test(acct)) return "Account number must be 9 to 18 digits."
     if (form.deliveryRadiusKm !== "" && !(Number(form.deliveryRadiusKm) > 0)) {
       return "Delivery radius must be more than 0 km, or blank to follow the platform."
-    }
-    if (form.freeDeliveryAbove !== "" && !(Number(form.freeDeliveryAbove) >= 0)) {
-      return "Free delivery amount must be 0 or more, or blank for none."
     }
     return null
   }
@@ -270,9 +268,6 @@ export default function RestaurantBusinessEditor({ restaurant, onSaved }) {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label="Delivery radius (km)" hint="Blank follows the platform setting in Business Setup.">
             <input type="number" min="0" step="0.1" className={inputClass} value={form.deliveryRadiusKm} onChange={(e) => set("deliveryRadiusKm", e.target.value)} />
-          </Field>
-          <Field label="Free delivery above (Rs)" hint="Blank means delivery is always charged.">
-            <input type="number" min="0" step="1" className={inputClass} value={form.freeDeliveryAbove} onChange={(e) => set("freeDeliveryAbove", e.target.value)} />
           </Field>
         </div>
       </section>

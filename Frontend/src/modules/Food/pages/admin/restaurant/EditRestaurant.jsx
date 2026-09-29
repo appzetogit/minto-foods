@@ -8,6 +8,8 @@ import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { ArrowLeft, Loader2, Trash2, Upload } from "lucide-react"
 import RestaurantVideos from "@food/components/admin/restaurant/RestaurantVideos"
 import RestaurantOpeningHours from "@food/components/admin/restaurant/RestaurantOpeningHours"
+import RestaurantBusinessEditor from "@food/components/admin/restaurant/RestaurantBusinessEditor"
+import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
 
 const debugError = (..._args) => {}
 
@@ -101,7 +103,7 @@ const normalizeDetailsFormFromRestaurant = (restaurant) => {
     ownerPhone: restaurant?.ownerPhone || "",
     primaryContactNumber: restaurant?.primaryContactNumber || "",
     email: restaurant?.email || "",
-    cuisinesText: Array.isArray(restaurant?.cuisines) ? restaurant.cuisines.join(", ") : "",
+    cuisines: Array.isArray(restaurant?.cuisines) ? restaurant.cuisines.filter(Boolean) : [],
     estimatedDeliveryTimeMinutes:
       restaurant?.estimatedDeliveryTimeMinutes ??
       restaurant?.estimatedDeliveryTime ??
@@ -331,10 +333,12 @@ export default function EditRestaurant() {
     try {
       setSavingDetails(true)
 
-      const cuisines = String(detailsForm.cuisinesText || "")
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean)
+      const cuisines = Array.isArray(detailsForm.cuisines) ? detailsForm.cuisines : []
+      if (!cuisines.length) {
+        alert("Pick at least one cuisine")
+        setSavingDetails(false)
+        return
+      }
 
       const payload = {
         name: detailsForm.name,
@@ -350,16 +354,7 @@ export default function EditRestaurant() {
             ? undefined
             : Number(detailsForm.estimatedDeliveryTimeMinutes),
         offer: detailsForm.offer,
-        aadhaarNumber: detailsForm.aadhaarNumber,
-        aadhaarImage: detailsForm.aadhaarImage,
         highlightBadge: detailsForm.highlightBadge,
-        // "" clears the threshold; the API treats blank as "no free delivery".
-        freeDeliveryAbove:
-          detailsForm.freeDeliveryAbove === "" ? "" : Number(detailsForm.freeDeliveryAbove),
-        // "" hands the restaurant back to the platform-wide radius; a number
-        // overrides it for this restaurant only.
-        deliveryRadiusKm:
-          detailsForm.deliveryRadiusKm === "" ? "" : Number(detailsForm.deliveryRadiusKm),
         // No opening/closing time here: hours are set day by day in Opening
         // Hours below. This form used to send the old pair on every save,
         // which reset every day's hours to it.
@@ -624,8 +619,14 @@ export default function EditRestaurant() {
                   <Input value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((p) => ({ ...p, primaryContactNumber: e.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
-                  <Label>Cuisines (comma separated)</Label>
-                  <Input value={detailsForm.cuisinesText} onChange={(e) => setDetailsForm((p) => ({ ...p, cuisinesText: e.target.value }))} />
+                  <Label>Cuisines (up to 3)</Label>
+                  <div className="mt-1">
+                    <CuisinePicker
+                      value={detailsForm.cuisines}
+                      onChange={(cuisines) => setDetailsForm((p) => ({ ...p, cuisines }))}
+                      max={3}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label>Estimated Delivery Time (minutes)</Label>
@@ -652,89 +653,26 @@ export default function EditRestaurant() {
                   </select>
                   <p className="mt-1 text-xs text-slate-500">Pill shown on the app's Top Restaurants card.</p>
                 </div>
-                <div>
-                  <Label>Free Delivery Above (₹)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={detailsForm.freeDeliveryAbove}
-                    onChange={(e) => setDetailsForm((p) => ({ ...p, freeDeliveryAbove: e.target.value }))}
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    Blank = no free delivery. Orders at or above this subtotal are charged no delivery fee.
-                  </p>
-                </div>
-                <div>
-                  <Label>Delivery radius (km)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    placeholder="Blank = platform default"
-                    value={detailsForm.deliveryRadiusKm}
-                    onChange={(e) => setDetailsForm((p) => ({ ...p, deliveryRadiusKm: e.target.value }))}
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    How far this restaurant will deliver. Blank follows the platform default.
-                  </p>
-                </div>
-                <div>
-                  <Label>Aadhaar Number</Label>
-                  <Input
-                    value={detailsForm.aadhaarNumber}
-                    onChange={(e) => setDetailsForm((p) => ({ ...p, aadhaarNumber: e.target.value }))}
-                    placeholder="12 digits"
-                  />
-                </div>
-                <div>
-                  <Label>Aadhaar Card</Label>
-                  <div className="mt-1 flex items-center gap-3">
-                    <label className="inline-flex items-center gap-2 text-sm font-medium text-emerald-700 cursor-pointer">
-                      {uploadingMedia === "aadhaar" ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Upload className="w-4 h-4" />
-                      )}
-                      <span>{detailsForm.aadhaarImage ? "Replace" : "Upload"}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={uploadingMedia === "aadhaar"}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0]
-                          if (file) handleAadhaarUpload(file)
-                          e.target.value = ""
-                        }}
-                      />
-                    </label>
-                    {detailsForm.aadhaarImage ? (
-                      <>
-                        <a
-                          href={detailsForm.aadhaarImage}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="h-12 w-20 rounded border border-slate-200 overflow-hidden bg-slate-50"
-                        >
-                          <img src={detailsForm.aadhaarImage} alt="Aadhaar" className="w-full h-full object-cover" />
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => setDetailsForm((p) => ({ ...p, aadhaarImage: "" }))}
-                          className="p-1 text-slate-400 hover:text-red-600"
-                          title="Remove"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <span className="text-xs text-slate-500">Not uploaded</span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">Saved with Save Details.</p>
-                </div>
+                <p className="md:col-span-2 text-xs text-slate-500">
+                  Aadhaar, PAN, GST, FSSAI, bank details and delivery radius are in
+                  &ldquo;Licences, Tax &amp; Bank Details&rdquo; below.
+                </p>
               </div>
             </section>
+
+            {/* FSSAI, PAN, GST, bank account and their documents. Was only in the
+                View popup of the Restaurants list, not on this page. */}
+            {restaurant ? (
+              <section className="bg-white rounded-xl border border-slate-200 p-6">
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Licences, Tax &amp; Bank Details</h2>
+                <RestaurantBusinessEditor
+                  restaurant={restaurant}
+                  onSaved={(updated) => {
+                    if (updated) setRestaurant((prev) => ({ ...(prev || {}), ...updated }))
+                  }}
+                />
+              </section>
+            ) : null}
 
             <section className="bg-white rounded-xl border border-slate-200 p-6">
               <div className="flex items-center justify-between gap-3 mb-1">

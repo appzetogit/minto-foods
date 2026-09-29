@@ -8,20 +8,11 @@ import { Label } from "@food/components/ui/label"
 import { Button } from "@food/components/ui/button"
 import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
 import { toast } from "sonner"
+import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => { console.warn(...args) }
 const debugError = (...args) => { console.error(...args) }
 
-
-const cuisinesOptions = [
-  "North Indian",
-  "South Indian",
-  "Chinese",
-  "Pizza",
-  "Burgers",
-  "Bakery",
-  "Cafe",
-]
 
 const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9\-]+(?:\.[a-zA-Z0-9\-]+)*\.[a-zA-Z]{2,6}$/
@@ -203,6 +194,10 @@ export default function AddRestaurant() {
     panNumber: "",
     nameOnPan: "",
     panImage: null,
+    // Aadhaar was editable on an existing restaurant but could not be given
+    // when adding one. Optional, like on the edit page.
+    aadhaarNumber: "",
+    aadhaarImage: null,
     gstRegistered: false,
     gstNumber: "",
     gstLegalName: "",
@@ -312,6 +307,9 @@ export default function AddRestaurant() {
           (step3.panImage?.url || (typeof step3.panImage === "string" && step3.panImage.trim()))
             ? step3.panImage
             : null,
+        // A picked file cannot be saved as text; it is re-picked after a reload.
+        aadhaarImage:
+          !isUploadableFile(step3.aadhaarImage) && step3.aadhaarImage?.url ? step3.aadhaarImage : null,
         gstImage:
           !isUploadableFile(step3.gstImage) &&
           (step3.gstImage?.url || (typeof step3.gstImage === "string" && step3.gstImage.trim()))
@@ -483,6 +481,9 @@ export default function AddRestaurant() {
       errors.push("Name on PAN must contain characters only")
     }
     if (!step3.panImage) errors.push("PAN image is required")
+    if (step3.aadhaarNumber?.trim() && !/^\d{12}$/.test(step3.aadhaarNumber.trim())) {
+      errors.push("Aadhaar number must be 12 digits")
+    }
     if (!step3.fssaiNumber?.trim()) errors.push("FSSAI number is required")
     if (step3.fssaiNumber?.trim() && !FSSAI_REGEX.test(step3.fssaiNumber.trim())) errors.push("FSSAI number must be 14 digits")
     if (!step3.fssaiExpiry?.trim()) errors.push("FSSAI expiry date is required")
@@ -581,6 +582,13 @@ export default function AddRestaurant() {
         panImageData = step3.panImage
       }
 
+      let aadhaarImageData = null
+      if (step3.aadhaarImage instanceof File) {
+        aadhaarImageData = await handleUpload(step3.aadhaarImage, "minto/restaurant/aadhaar")
+      } else if (step3.aadhaarImage?.url) {
+        aadhaarImageData = step3.aadhaarImage
+      }
+
       let gstImageData = null
       if (step3.gstRegistered && step3.gstImage) {
         if (step3.gstImage instanceof File) {
@@ -620,6 +628,8 @@ export default function AddRestaurant() {
         panNumber: step3.panNumber,
         nameOnPan: step3.nameOnPan,
         panImage: panImageData,
+        aadhaarNumber: step3.aadhaarNumber?.trim() || "",
+        aadhaarImage: aadhaarImageData?.url || aadhaarImageData || "",
         gstRegistered: step3.gstRegistered,
         gstNumber: step3.gstNumber,
         gstLegalName: step3.gstLegalName,
@@ -1220,27 +1230,13 @@ export default function AddRestaurant() {
       <section className="bg-white p-4 sm:p-6 rounded-md space-y-5">
         <div>
           <Label className="text-xs text-gray-700">Select cuisines (up to 3)*</Label>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {cuisinesOptions.map((cuisine) => {
-              const active = step2.cuisines.includes(cuisine)
-              return (
-                <button
-                  key={cuisine}
-                  type="button"
-                  onClick={() => {
-                    setStep2((prev) => {
-                      const exists = prev.cuisines.includes(cuisine)
-                      if (exists) return { ...prev, cuisines: prev.cuisines.filter((c) => c !== cuisine) }
-                      if (prev.cuisines.length >= 3) return prev
-                      return { ...prev, cuisines: [...prev.cuisines, cuisine] }
-                    })
-                  }}
-                  className={`px-3 py-1.5 text-xs rounded-full ${active ? "bg-black text-white" : "bg-gray-100 text-gray-800"}`}
-                >
-                  {cuisine}
-                </button>
-              )
-            })}
+          <div className="mt-2">
+            {/* From the Cuisines master list, not a list written into this page. */}
+            <CuisinePicker
+              value={step2.cuisines}
+              onChange={(cuisines) => setStep2((prev) => ({ ...prev, cuisines }))}
+              max={3}
+            />
           </div>
         </div>
 
@@ -1377,6 +1373,40 @@ export default function AddRestaurant() {
               <p className="text-xs text-gray-600">Selected: {getStoredFileLabel(step3.panImage)}</p>
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="bg-white p-4 sm:p-6 rounded-md space-y-4">
+        <h2 className="text-lg font-semibold text-black">Aadhaar details</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <Label className="text-xs text-gray-700">Aadhaar number</Label>
+            <Input
+              value={step3.aadhaarNumber || ""}
+              onChange={(e) => setStep3({ ...step3, aadhaarNumber: e.target.value.replace(/\D/g, "").slice(0, 12) })}
+              className="mt-1 bg-white text-sm text-black placeholder-black"
+              placeholder="12 digits"
+              inputMode="numeric"
+              maxLength={12}
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-gray-700">Aadhaar card</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setStep3({ ...step3, aadhaarImage: e.target.files?.[0] || null })}
+              className="mt-1 bg-white text-sm text-black placeholder-black"
+            />
+            {step3.aadhaarImage && (
+              <div className="mt-2 flex items-center gap-3">
+                <div className="h-14 w-14 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
+                  <img src={getStoredImageSrc(step3.aadhaarImage)} alt="Aadhaar card" className="h-full w-full object-cover" />
+                </div>
+                <p className="text-xs text-gray-600">Selected: {getStoredFileLabel(step3.aadhaarImage)}</p>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
