@@ -740,10 +740,11 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   }
 
   // GST is charged on the post-discount item value (discount is already clamped to <= subtotal).
+  // Rounded to paise, not whole rupees: 5% of ₹50 is ₹2.50, which used to bill as ₹3.
   const gstRate = Number(feeSettings.gstRate || 0);
   const tax =
     Number.isFinite(gstRate) && gstRate > 0
-      ? Math.round(Math.max(0, subtotal - discount) * (gstRate / 100))
+      ? round2(Math.max(0, subtotal - discount) * (gstRate / 100))
       : 0;
 
   const deliveryFeeGstRate = resolveDeliveryFeeGstRate(feeSettings);
