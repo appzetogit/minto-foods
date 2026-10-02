@@ -1148,22 +1148,29 @@ async function buildAdminTransactionView(orderId) {
  * Restaurant-safe earnings breakdown. Never includes platform economics
  * (platformNetProfit, riderShare, adminDiscountShare).
  */
-function buildRestaurantFinanceViewSync(order, tx = null) {
+export function buildRestaurantFinanceViewSync(order, tx = null) {
   const subtotal = Number(order?.subtotal) || 0;
   const packagingFee = Number(order?.packagingFee) || 0;
 
   if (tx) {
+    // Callers pass either the mapped transaction or a hand-built
+    // { amounts, settlement } object, so read the nested values first. The
+    // commission is `commissionAmount`: the flat `restaurantCommission` is the
+    // checkout-time pricing snapshot and is usually 0, which showed the
+    // restaurant no commission even when one was deducted.
+    const a = tx.amounts || {};
+    const st = tx.settlement || {};
     return {
       itemTotal: subtotal,
       packagingFee,
-      commission: Number(tx.restaurantCommission) || 0,
-      restaurantDiscountShare: Number(tx.restaurantDiscountShare) || 0,
+      commission: Number(a.restaurantCommission ?? tx.commissionAmount) || 0,
+      restaurantDiscountShare: Number(a.restaurantDiscountShare ?? tx.restaurantDiscountShare) || 0,
       discount: Number(order?.discount) || 0,
-      taxAmount: Number(tx.taxAmount ?? order?.tax) || 0,
-      totalCustomerPaid: Number(tx.totalCustomerPaid ?? order?.total) || 0,
-      netPayout: Number(tx.restaurantShare) || 0,
-      isSettled: Boolean(tx.isRestaurantSettled),
-      settledAt: tx.restaurantSettledAt || null,
+      taxAmount: Number(a.taxAmount ?? tx.taxAmount ?? order?.tax) || 0,
+      totalCustomerPaid: Number(a.totalCustomerPaid ?? tx.totalCustomerPaid ?? order?.total) || 0,
+      netPayout: Number(a.restaurantShare ?? tx.restaurantShare) || 0,
+      isSettled: Boolean(st.isRestaurantSettled ?? tx.isRestaurantSettled),
+      settledAt: st.restaurantSettledAt || tx.restaurantSettledAt || null,
     };
   }
 
