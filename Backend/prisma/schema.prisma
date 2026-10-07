@@ -3864,3 +3864,18 @@ model FoodPriceRuleLog {
   @@index([ruleId, createdAt(sort: Desc)])
   @@map("food_price_rule_logs")
 }
+
+/// One row per customer order notification sent, so each of the order's
+/// pushes goes out once however many code paths reach it (retries, a second
+/// "delivered", support re-marking). `key` is the event, plus the rider id for
+/// "rider assigned", which is re-sent when a different rider takes over.
+model FoodOrderNotification {
+  id      String   @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  orderId String   @db.VarChar(24)
+  key     String   @db.VarChar(80)
+  event   String   @db.VarChar(32)
+  sentAt  DateTime @default(now())
+
+  @@unique([orderId, key])
+  @@map("food_order_notifications")
+}

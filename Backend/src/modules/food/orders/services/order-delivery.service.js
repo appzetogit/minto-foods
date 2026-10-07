@@ -1,3 +1,4 @@
+import { notifyCustomer } from './customerNotify.service.js';
 import { isManualForOrder, manualOrderFilter } from './manualDispatch.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { toOrder, toOrders, orderInclude } from '../order.mapper.js';
@@ -73,7 +74,13 @@ async function loadTransactionsByOrder(orderIds) {
   return new Map(rows.map((tx) => [tx.orderId, toFoodTransaction(tx)]));
 }
 
-function emitOrderUpdate(order, deliveryPartnerId) {
+/**
+ * Live update to rider, restaurant and customer screens, plus the pushes for
+ * this step. `customerEvent` is the customer's notification for the step (see
+ * customerNotify.service.js); the customer gets nothing else from here.
+ */
+function emitOrderUpdate(order, deliveryPartnerId, customerEvent = null) {
+  if (customerEvent) void notifyCustomer(order.id, customerEvent);
   try {
     const io = getIO();
     if (io) {
@@ -94,24 +101,16 @@ function emitOrderUpdate(order, deliveryPartnerId) {
     if (!['picked_up', 'reached_drop', 'delivered'].includes(status)) return;
 
     const orderId = order.id;
-    let userTitle = '';
-    let userBody = '';
     let riderTitle = '';
     let riderBody = '';
 
     if (status === 'picked_up') {
-      userTitle = 'Order on the way!';
-      userBody = `Partner has picked up your order #${orderId} and is heading your way.`;
       riderTitle = 'Order picked up!';
       riderBody = `You have picked up order #${orderId}. Proceed to the customer location.`;
     } else if (status === 'reached_drop') {
-      userTitle = 'Partner nearby!';
-      userBody = `Your delivery partner has reached your location for order #${orderId}.`;
       riderTitle = 'Arrived at drop!';
       riderBody = `You have reached the customer location for order #${orderId}.`;
     } else if (status === 'delivered') {
-      userTitle = `Order #${orderId} delivered!`;
-      userBody = "Hope you enjoyed your meal! Don't forget to rate your experience.";
       riderTitle = 'Delivery successful!';
       riderBody = `Order #${orderId} has been successfully delivered.`;
 
@@ -120,22 +119,6 @@ function emitOrderUpdate(order, deliveryPartnerId) {
         const amt = order.pricing?.total || order.amounts?.totalCustomerPaid || 0;
         riderBody = `You have collected Rs ${amt} cash for Order #${orderId}.`;
       }
-    }
-
-    if (userTitle) {
-      void notifyOwnersSafely(
-        [
-          { ownerType: 'RESTAURANT', ownerId: order.restaurantId?.id ?? order.restaurantId },
-          { ownerType: 'USER', ownerId: order.userId?.id ?? order.userId },
-        ],
-        {
-          title: userTitle,
-          body: userBody,
-          // Visible banner + data for deep-linking. Without the notification block
-          // these milestones stay silent when the app is backgrounded.
-          data: { type: 'order_status_update', orderId, orderMongoId: orderId, orderStatus: status },
-        },
-      );
     }
 
     if (riderTitle) {
@@ -604,9 +587,10 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         }
       }
 
+      // The customer gets "Rider {name} is assigned" from notifyCustomer.
+      void notifyCustomer(id, 'rider_assigned', { riderId: partnerId });
       await notifyOwnersSafely(
         [
-          { ownerType: 'USER', ownerId: row.userId },
           { ownerType: 'RESTAURANT', ownerId: row.restaurantId },
           { ownerType: 'DELIVERY_PARTNER', ownerId: partnerId },
         ],
@@ -749,7 +733,7 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     note: 'Reached pickup location',
   });
 
-  emitOrderUpdate(updated, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId, 'rider_at_restaurant');
 
   try {
     const [restaurant, partner] = await Promise.all([
@@ -834,7 +818,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     note: 'Order picked up',
   });
 
-  emitOrderUpdate(updated, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId, 'picked_up');
   enqueueOrderEvent('picked_up', {
     orderMongoId: row.id,
     orderId: row.id,
@@ -887,7 +871,7 @@ export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {
   }
 
   emitDeliveryDropOtpToUser(updated, String(updated.deliveryOtp || '').trim());
-  emitOrderUpdate(updated, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId, 'rider_at_location');
   enqueueOrderEvent('reached_drop', {
     orderMongoId: row.id,
     orderId: row.id,
@@ -1059,7 +1043,7 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     note: `Delivery completed. Prev status: ${prevPayStatus}`,
   });
 
-  emitOrderUpdate(updated, deliveryPartnerId);
+  emitOrderUpdate(updated, deliveryPartnerId, 'delivered');
   enqueueOrderEvent('delivery_completed', {
     orderMongoId: row.id,
     orderId: row.id,

@@ -140,19 +140,8 @@ export const awardOrderCashback = async (orderId) => {
             },
         });
 
-        try {
-            const { notifyOwnerSafely } = await import('../../orders/services/order.helpers.js');
-            void notifyOwnerSafely(
-                { ownerType: 'USER', ownerId: order.userId },
-                {
-                    title: 'Cashback credited! 🎁',
-                    body: `₹${amount} cashback added to your wallet for order ${order.order_id || ''}.`,
-                    data: { type: 'cashback_credited', amount: String(amount), orderId: order.id },
-                },
-            );
-        } catch {
-            /* notification failure must not affect the credit */
-        }
+        // No push: customers get only their order notifications (see
+        // customerNotify.service.js). The cashback shows in their wallet.
 
         logger.info(`Cashback ₹${amount} credited to user ${order.userId} for order ${order.id}`);
         return { awarded: true, amount };

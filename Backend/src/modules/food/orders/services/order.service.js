@@ -1,3 +1,4 @@
+import { notifyCustomer, notifyCustomerForStatus } from './customerNotify.service.js';
 import { normalizeRecipientFields } from '../validators/order.validator.js';
 import { prisma } from '../../../../config/prisma.js';
 import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
@@ -902,17 +903,7 @@ export async function createOrder(userId, rawDto) {
       // Nothing is pushed for an order still awaiting online payment — that push
       // fired while the customer was sitting on the Razorpay sheet actually paying.
       if (!isAwaitingOnlinePayment) {
-        await notifyOwnersSafely([{ ownerType: "USER", ownerId: userId }], {
-          title: "Order Confirmed! 🍔",
-          body: `Your order #${order.order_id || order.id} from ${restaurant.restaurantName || "the restaurant"} has been placed successfully.`,
-          image: BRAND_IMAGE_URL,
-          data: {
-            type: "order_created",
-            orderId: order.id,
-            orderMongoId: order.id,
-            link: `/food/user/orders/${order.id}`,
-          },
-        });
+        await notifyCustomer(order.id, "placed");
 
         await notifyRestaurantNewOrder(order);
       }
@@ -1087,8 +1078,10 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
     recordedById: userId ? String(userId) : undefined,
   });
 
-  // Now that payment is confirmed, tell the restaurant about the new order.
+  // Now that payment is confirmed, tell the restaurant -- and the customer:
+  // an online order is only "placed" for them once the money has gone through.
   await notifyRestaurantNewOrder(updated);
+  await notifyCustomer(updated.id, "placed");
 
   return updated;
 }
@@ -2083,11 +2076,14 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     const status = String(orderStatus || "");
     const isCancellation = status.includes("cancel");
     // ready_for_pickup and preparing are kitchen states the customer cannot act on.
-    const CUSTOMER_RELEVANT = ["confirmed", "picked_up", "delivered"];
+    // The customer's own pushes (accepted, ready, ...) come from notifyCustomer
+    // with their fixed wording; only a cancellation is sent from here.
     const notifyList = [];
 
-    if (isCancellation || CUSTOMER_RELEVANT.includes(status)) {
+    if (isCancellation) {
       notifyList.push({ ownerType: "USER", ownerId: updated.userId });
+    } else {
+      void notifyCustomerForStatus(updated.id, status);
     }
     // The restaurant is making these changes; echoing its own tap back is noise.
     // A cancellation may come from support or the customer, so that one it needs.
@@ -2588,13 +2584,17 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     }
   }
 
+  // The customer hears about a support change the same way as any other: the
+  // fixed customer events, or the cancellation push below.
+  const isAdminCancel = String(orderStatus).includes("cancel");
   const notifyList = [
-    { ownerType: "USER", ownerId: updated.userId },
+    ...(isAdminCancel ? [{ ownerType: "USER", ownerId: updated.userId }] : []),
     { ownerType: "RESTAURANT", ownerId: updated.restaurantId },
   ];
   if (row.dispatchDeliveryPartnerId) {
     notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: row.dispatchDeliveryPartnerId });
   }
+  if (!isAdminCancel) void notifyCustomerForStatus(updated.id, orderStatus);
 
   let title = `Order Status Updated 📋`;
   let body = `Order #${updated.order_id || updated.id} status changed to ${String(orderStatus).replace(/_/g, " ")} by support.`;
@@ -2707,8 +2707,9 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
   }
 
   const orderLabel = updated.order_id || updated.id;
+  // The customer gets the one "delivered" push, however delivery was marked.
+  void notifyCustomer(updated.id, "delivered");
   const notifyList = [
-    { ownerType: "USER", ownerId: updated.userId },
     { ownerType: "RESTAURANT", ownerId: updated.restaurantId },
   ];
   if (row.dispatchDeliveryPartnerId) {

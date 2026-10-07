@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { checkRiderNearDrop } from '../../orders/services/customerNotify.service.js';
 
 /**
  * Writes a rider's current position to the database.
@@ -16,6 +17,8 @@ import { prisma } from '../../../../config/prisma.js';
 export async function saveRiderPosition({ orderId, riderId, lat, lng, at = new Date() }) {
     const id = String(orderId);
     const rider = String(riderId);
+    // "Rider has reached your location" when they get close, tap or no tap.
+    void checkRiderNearDrop({ orderId: id, riderId: rider, lat, lng });
     await Promise.all([
         prisma.foodDeliveryPartner.updateMany({
             where: { id: rider },

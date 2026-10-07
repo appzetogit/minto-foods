@@ -170,7 +170,8 @@ async function deassignOrderForRedispatch({
         [
             { ownerType: 'DELIVERY_PARTNER', ownerId: assignedPartnerId },
             { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
-            { ownerType: 'USER', ownerId: order.userId },
+            // Not the customer: they hear "Rider {name} is assigned" when the
+            // new rider accepts.
         ],
         {
             title: 'Delivery partner reassignment',

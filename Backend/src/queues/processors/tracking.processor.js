@@ -56,6 +56,12 @@ const handleHotSync = async ({ userId, orderId }) => {
             );
         }
 
+        // "Rider has reached your location" when they get close, tap or no tap.
+        if (riderData && userId && orderId) {
+            const { checkRiderNearDrop } = await import('../../modules/food/orders/services/customerNotify.service.js');
+            void checkRiderNearDrop({ orderId, riderId: userId, lat: riderData.lat, lng: riderData.lng });
+        }
+
         if (orderData && orderId) {
             updates.push(
                 prisma.foodOrder.updateMany({
