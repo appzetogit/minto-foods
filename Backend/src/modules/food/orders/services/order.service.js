@@ -493,23 +493,32 @@ async function incrementCouponUsageForOrder(order, userId) {
 // ----- Create order -----
 
 /**
- * "FOD-" + 6 timestamp digits + 4 random.
+ * The order number people see: "MFB" + the order date as DDMMYY (India time)
+ * + a running number that never resets, e.g. MFB03102610004 for the 10,004th
+ * order, placed on 3 Oct 2026.
  *
- * Was a pre('save') hook that probed the collection for collisions; the unique
- * index does that job here, so a clash just retries. The old 4+3 format collided
- * after a few thousand orders and made display-id lookups match the wrong order.
+ * The number comes from a Postgres sequence (food_order_number_seq, from
+ * 10001), so it is unique without a retry. Orders placed before this keep
+ * their FOD-... numbers; lookups accept either.
  */
-function buildOrderDisplayId(entropyDigits = 4) {
-  const timestamp = Date.now().toString().slice(-6);
-  const floor = 10 ** (entropyDigits - 1);
-  const random = Math.floor(floor + Math.random() * (floor * 9));
-  return `FOD-${timestamp}${random}`;
+export function formatOrderDisplayId(sequenceNumber, at = new Date()) {
+  const ist = new Date(at.getTime() + 330 * 60 * 1000);
+  const dd = String(ist.getUTCDate()).padStart(2, "0");
+  const mm = String(ist.getUTCMonth() + 1).padStart(2, "0");
+  const yy = String(ist.getUTCFullYear()).slice(-2);
+  return `MFB${dd}${mm}${yy}${sequenceNumber}`;
+}
+
+async function nextOrderDisplayId(at = new Date()) {
+  const [row] = await prisma.$queryRaw`SELECT nextval('food_order_number_seq')::bigint AS n`;
+  return formatOrderDisplayId(String(row.n), at);
 }
 
 async function createOrderRow(data) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    // Widen the random part on later attempts rather than retrying the same odds.
-    const displayId = buildOrderDisplayId(attempt < 3 ? 4 : 8);
+    // A sequence number never repeats; the retry only covers an old FOD- style
+    // number that happens to collide, which a fresh number then avoids.
+    const displayId = await nextOrderDisplayId();
     try {
       return await prisma.foodOrder.create({
         data: { ...data, order_id: displayId, orderId: displayId },

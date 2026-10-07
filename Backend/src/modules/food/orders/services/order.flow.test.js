@@ -132,7 +132,7 @@ test('a cash order is written with the money the quote promised', async () => {
     const { order } = await createOrder(userId, cartOf(2));
 
     assert.ok(order, 'an order comes back');
-    assert.match(order.orderId, /^FOD-/, 'it gets a readable display id');
+    assert.match(order.orderId, /^MFB\d{6}\d{5,}$/, 'it gets a readable display id: MFB + DDMMYY + running number');
     created.orders.push(order._id || order.id);
 
     // What the customer was quoted is what the order records.
