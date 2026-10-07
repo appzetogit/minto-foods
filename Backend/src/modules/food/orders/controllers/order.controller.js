@@ -167,7 +167,7 @@ export async function updateDispatchSettingsController(req, res, next) {
     try {
         const adminId = req.user?.userId;
         const dto = validateDispatchSettingsDto(req.body);
-        const result = await orderService.updateDispatchSettings(dto.dispatchMode, adminId);
+        const result = await orderService.updateDispatchSettings(dto.dispatchMode, adminId, dto);
         return sendResponse(res, 200, 'Dispatch settings updated', result);
     } catch (err) {
         next(err);

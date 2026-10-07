@@ -418,8 +418,8 @@ export async function getDispatchSettings() {
   return dispatchService.getDispatchSettings();
 }
 
-export async function updateDispatchSettings(dispatchMode, adminId) {
-  return dispatchService.updateDispatchSettings(dispatchMode, adminId);
+export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) {
+  return dispatchService.updateDispatchSettings(dispatchMode, adminId, extra);
 }
 
 // ----- Calculate (validation + return pricing from payload) -----
@@ -2462,49 +2462,10 @@ export async function listOrdersAdmin(query) {
 }
 
 export async function assignDeliveryPartnerAdmin(orderId, deliveryPartnerId, adminId) {
-  const row = await prisma.foodOrder.findUnique({
-    where: { id: String(orderId) },
-    include: orderInclude,
-  });
-  if (!row) throw new NotFoundError("Order not found");
-  if (row.dispatchStatus === "accepted") {
-    throw new ValidationError("Order already accepted by partner");
-  }
-
-  const partner = await prisma.foodDeliveryPartner.findUnique({
-    where: { id: String(deliveryPartnerId) },
-    select: { status: true },
-  });
-  if (!partner || partner.status !== "approved") {
-    throw new ValidationError("Delivery partner not available");
-  }
-
-  const updated = toOrder(await prisma.foodOrder.update({
-    where: { id: row.id },
-    data: {
-      dispatchStatus: 'assigned',
-      dispatchDeliveryPartnerId: String(deliveryPartnerId),
-      dispatchAssignedAt: new Date(),
-    },
-    include: orderInclude,
-  }));
-
-  await pushStatusHistory(row.id, {
-    byRole: 'ADMIN',
-    byId: adminId,
-    from: row.orderStatus,
-    to: row.orderStatus,
-    note: 'Delivery partner assigned by admin',
-  });
-
-  enqueueOrderEvent('delivery_partner_assigned', {
-    orderMongoId: row.id,
-    orderId: row.id,
-    deliveryPartnerId,
-    adminId,
-  });
-
-  return normalizeOrderForClient(updated);
+  // Kept for old callers. It set the order to 'assigned' without telling the
+  // rider or timing out; the manual-dispatch assign does both.
+  const { assignRiderManually } = await import('./manualDispatch.service.js');
+  return assignRiderManually(orderId, deliveryPartnerId, adminId);
 }
 
 export async function deleteOrderAdmin(orderId, adminId) {

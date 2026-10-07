@@ -3,6 +3,7 @@ import { runWithAdminScope } from '../../../../core/roles/adminScope.context.js'
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
 import * as adminController from '../controllers/admin.controller.js';
+import * as manualDispatchController from '../../orders/controllers/manualDispatch.controller.js';
 import { createDeliveryPartnerByAdmin } from '../controllers/adminDeliveryPartnerCreate.controller.js';
 import * as priceRulesController from '../../pricing/priceRules.controller.js';
 import * as foodApprovalController from '../controllers/foodApproval.controller.js';
@@ -107,7 +108,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     ) return 'restaurant_management';
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods') || path.startsWith('/price-rules')) return 'food_management';
     if (path.startsWith('/offers')) return 'promotions_management';
-    if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery')) return 'order_management';
+    if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/dispatch')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
     // Where a restaurant's payouts go: the same people who handle withdrawals.
@@ -540,6 +541,14 @@ router.patch(
     requireAdminPermission('delivery_management', 'edit'),
     adminController.deassignAndResendOrderEmergencyRequest
 );
+// Rider assignment: automatic or manual, platform-wide and per zone.
+router.get('/dispatch/settings', manualDispatchController.getDispatchSettings);
+router.patch('/dispatch/settings', manualDispatchController.updateGlobalDispatch);
+router.patch('/dispatch/zones/:zoneId', manualDispatchController.updateZoneDispatch);
+router.get('/dispatch/queue', manualDispatchController.getQueue);
+router.get('/orders/:id/eligible-riders', manualDispatchController.getEligibleRiders);
+router.post('/orders/:id/assign-rider', manualDispatchController.assignRider);
+router.post('/orders/:id/unassign-rider', manualDispatchController.unassignRider);
 router.get('/delivery/partners', adminController.getDeliveryPartners);
 // Add Deliveryman: an admin-created rider, approved at once.
 router.post('/delivery/partners', upload.any(), createDeliveryPartnerByAdmin);

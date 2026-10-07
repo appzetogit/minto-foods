@@ -246,7 +246,9 @@ export function validateAssignDeliveryDto(body) {
 
 export function validateDispatchSettingsDto(body) {
     const schema = z.object({
-        dispatchMode: z.enum(['auto', 'manual'])
+        dispatchMode: z.enum(['auto', 'manual']),
+        manualAcceptWindowSeconds: z.number().int().min(30).max(900).optional(),
+        manualQueueAlertMinutes: z.number().int().min(1).max(120).optional()
     });
     const result = schema.safeParse(body);
     if (!result.success) {

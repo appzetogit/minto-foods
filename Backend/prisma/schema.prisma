@@ -204,6 +204,8 @@ enum DispatchOfferAction {
   rejected
   timeout
   deassigned
+  /// An admin took a manual assignment back before the rider accepted.
+  withdrawn
 }
 
 enum DeliveryPhase {
@@ -1406,6 +1408,9 @@ model FoodOrder {
   /// Delivered to someone other than the account holder. customerName/Phone
   /// stay the account holder (who pays and gets the OTP); the rider calls the
   /// recipient, whose name and phone are also the delivery address contact.
+  /// When the order started waiting for an admin to assign a rider (manual
+  /// dispatch). Cleared once a rider accepts.
+  awaitingManualAt DateTime?
   isForSomeoneElse Boolean @default(false)
   recipientName    String  @default("")
   recipientPhone   String  @default("")
@@ -1760,7 +1765,13 @@ model FoodSettings {
   id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
 
   key              String    @unique
+  /// 'auto' (offer to nearby riders) or 'manual' (an admin assigns each order).
+  /// The global default; a zone can override it (FoodZone.dispatchMode).
   dispatchMode     String    @default("auto")
+  /// How long a rider has to accept an order an admin assigned them.
+  manualAcceptWindowSeconds Int @default(120)
+  /// Re-alert admins when an order has waited this long for a rider.
+  manualQueueAlertMinutes   Int @default(5)
   updatedByRole    String?
   updatedByAdminId String?   @db.VarChar(24)
   updatedAtBy      DateTime?
@@ -2229,6 +2240,9 @@ model FoodZone {
   /// 0 offers it to everyone. Counted platform-wide rather than per zone: a
   /// good customer ordering in a new area is not a stranger.
   codMinDeliveredOrders Int @default(0)
+
+  /// 'auto' | 'manual' rider assignment for this zone; null = the global default.
+  dispatchMode String? @db.VarChar(8)
 
   isActive Boolean @default(true)
 

@@ -73,6 +73,7 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/food-approval", section: "food_management" },
   { prefix: "/admin/food/foods", section: "food_management" },
   { prefix: "/admin/food/price-management", section: "food_management" },
+  { prefix: "/admin/food/dispatch", section: "order_management" },
   { prefix: "/admin/food/addons", section: "food_management" },
   { prefix: "/admin/food/categories", section: "food_management" },
   { prefix: "/admin/food/zone-setup", section: "restaurant_management" },

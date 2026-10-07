@@ -13,6 +13,7 @@ import { formatDeliveryFeeBreakdownSubtext, getDeliveryFeeTotal, resolveDelivery
 import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/foodVariants"
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
 import { restaurantLabel } from "@food/utils/entityLabels"
+import { RiderPicker } from "@food/pages/admin/dispatch/AssignRider"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -50,7 +51,11 @@ const formatDialogMoney = (value) => {
   return `${num < 0 ? "-" : ""}₹${Math.abs(num).toFixed(2)}`
 }
 
+/** Statuses where an admin can still give the order a rider (before pickup). */
+const RIDER_ASSIGNABLE = ["confirmed", "preparing", "ready_for_pickup"]
+
 export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
+  const [pickingRider, setPickingRider] = useState(false)
   // Full order detail (statusHistory + transaction split) fetched on open;
   // the `order` prop only carries the mapped list-row fields.
   const [detail, setDetail] = useState(null)
@@ -349,6 +354,37 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
               )}
             </div>
           </div>
+
+          {/* Assign / re-assign a rider: any order not yet accepted by one. */}
+          {RIDER_ASSIGNABLE.includes(String(order.orderStatus || order.status || "")) &&
+          String(order.dispatch?.status || order.dispatchStatus || "unassigned") !== "accepted" ? (
+            <div className="border-t border-slate-200 pt-4 flex items-center justify-between gap-3">
+              <div className="text-sm text-slate-600 flex items-center gap-2">
+                <Truck className="w-4 h-4" />
+                {String(order.dispatch?.status || order.dispatchStatus) === "assigned"
+                  ? "A rider has been assigned and hasn't accepted yet."
+                  : "No rider has accepted this order yet."}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPickingRider(true)}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium"
+              >
+                {String(order.dispatch?.status || order.dispatchStatus) === "assigned" ? "Re-assign rider" : "Assign rider"}
+              </button>
+            </div>
+          ) : null}
+          {pickingRider ? (
+            <RiderPicker
+              order={{
+                id: order._id || order.id || order.orderMongoId,
+                displayId: order.orderId || order.order_id,
+                restaurantName: order.restaurant?.restaurantName || (typeof order.restaurant === "string" ? order.restaurant : ""),
+              }}
+              onClose={() => setPickingRider(false)}
+              onAssigned={() => setPickingRider(false)}
+            />
+          ) : null}
 
           {/* Restaurant Information */}
           {order.restaurant && (

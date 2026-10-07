@@ -109,6 +109,18 @@ export const adminSidebarMenu = [
         path: "/admin/food/order-detect-delivery",
         icon: "Truck",
       },
+      {
+        type: "link",
+        label: "Assign Rider",
+        path: "/admin/food/dispatch/assign",
+        icon: "Truck",
+      },
+      {
+        type: "link",
+        label: "Dispatch Settings",
+        path: "/admin/food/dispatch/settings",
+        icon: "Settings",
+      },
     ],
   },
   {

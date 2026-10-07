@@ -1267,6 +1267,24 @@ export const adminAPI = {
     apiClient.get("/food/admin/zones/cities", { contextModule: "admin" }),
 
   /** Cities that zones belong to and sub-admins are assigned. `q` filters by name. */
+  /** Rider assignment: automatic / manual, platform-wide and per zone. */
+  getDispatchSettings: () =>
+    apiClient.get("/food/admin/dispatch/settings", { contextModule: "admin" }),
+  updateDispatchSettings: (body) =>
+    apiClient.patch("/food/admin/dispatch/settings", body ?? {}, { contextModule: "admin" }),
+  updateZoneDispatchMode: (zoneId, dispatchMode) =>
+    apiClient.patch(`/food/admin/dispatch/zones/${String(zoneId)}`, { dispatchMode }, { contextModule: "admin" }),
+  getDispatchQueue: () =>
+    apiClient.get("/food/admin/dispatch/queue", { contextModule: "admin" }),
+  getEligibleRiders: (orderId, includeOffline = false) =>
+    apiClient.get(`/food/admin/orders/${String(orderId)}/eligible-riders`, {
+      params: includeOffline ? { includeOffline: 1 } : {},
+      contextModule: "admin",
+    }),
+  assignRider: (orderId, body) =>
+    apiClient.post(`/food/admin/orders/${String(orderId)}/assign-rider`, body ?? {}, { contextModule: "admin" }),
+  unassignRider: (orderId) =>
+    apiClient.post(`/food/admin/orders/${String(orderId)}/unassign-rider`, {}, { contextModule: "admin" }),
   /** Add Deliveryman: creates an approved rider (multipart: fields + document photos). */
   createDeliveryPartner: (formData) =>
     apiClient.post("/food/admin/delivery/partners", formData, { contextModule: "admin" }),

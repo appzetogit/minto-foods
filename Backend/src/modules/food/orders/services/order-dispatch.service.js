@@ -23,7 +23,7 @@ const dispatchInclude = { ...orderInclude, restaurant: true, user: true };
  * Resolve restaurant → customer road distance once per dispatch broadcast.
  * Falls back to pricing Haversine when Directions is unavailable.
  */
-async function enrichPayloadWithTripRoadDistance(order, payload) {
+export async function enrichPayloadWithTripRoadDistance(order, payload) {
   const existingRoadKm = order?.tripDistanceKm ?? order?.pricing?.roadDistanceKm;
   if (Number.isFinite(Number(existingRoadKm))) {
     const km = Number(Number(existingRoadKm).toFixed(2));
@@ -82,7 +82,7 @@ const DRIVER_ACCEPT_WINDOW_MS = 45000;
  * included so the app can render it with no follow-up API call — important when
  * the device is locked or the app was killed.
  */
-function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
+export function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt, windowMs = DRIVER_ACCEPT_WINDOW_MS) {
   const s = (v) => (v === undefined || v === null ? '' : String(v));
 
   const earning = s(payload?.riderEarning ?? 0);
@@ -118,7 +118,7 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
     // than a constant compiled into the app. The absolute deadline above is more
     // accurate, but a message delayed in Doze arrives already expired — sending
     // both lets the app prefer the deadline and fall back to this.
-    acceptTimeoutSeconds: s(Math.round(DRIVER_ACCEPT_WINDOW_MS / 1000)),
+    acceptTimeoutSeconds: s(Math.round(windowMs / 1000)),
     pickupAddress: s(payload?.restaurantAddress),
     dropAddress: s(payload?.customerAddress),
     price: s(payload?.earnings ?? payload?.riderEarning ?? 0),
@@ -149,7 +149,7 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
  *
  * @returns {Promise<Set<string>>} partner ids to skip
  */
-async function getCashBlockedPartnerIds(partnerIds) {
+export async function getCashBlockedPartnerIds(partnerIds) {
   if (!partnerIds.length) return new Set();
 
   const settings = await prisma.foodDeliveryCashLimit.findFirst({
@@ -173,7 +173,7 @@ async function getCashBlockedPartnerIds(partnerIds) {
 }
 
 /** Cash the rider has to physically collect, so it counts against their float. */
-function orderCollectsCash(order) {
+export function orderCollectsCash(order) {
   const method = String(order?.payment?.method || order?.paymentMethod || '').toLowerCase();
   return method === 'cash' || method === 'razorpay_qr';
 }
@@ -243,34 +243,64 @@ async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit 
   return { partners: final };
 }
 
+/** The platform-wide dispatch settings row, with defaults. */
 export async function getDispatchSettings() {
-  return { dispatchMode: 'auto' };
+  const row = await prisma.foodSettings.findUnique({ where: { key: 'dispatch' } });
+  return {
+    dispatchMode: row?.dispatchMode === 'manual' ? 'manual' : 'auto',
+    manualAcceptWindowSeconds: Number(row?.manualAcceptWindowSeconds) || 120,
+    manualQueueAlertMinutes: Number(row?.manualQueueAlertMinutes) || 5,
+  };
 }
 
-export async function updateDispatchSettings(dispatchMode, adminId) {
-  // Always set to auto.
+/**
+ * Saves the global dispatch mode. This used to write 'auto' whatever was sent,
+ * so the admin's choice never took effect.
+ */
+export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) {
+  const mode = dispatchMode === 'manual' ? 'manual' : 'auto';
+  const data = {
+    dispatchMode: mode,
+    updatedByRole: 'ADMIN',
+    updatedByAdminId: adminId ? String(adminId) : null,
+    updatedAtBy: new Date(),
+  };
+  const window = Number(extra.manualAcceptWindowSeconds);
+  if (Number.isFinite(window)) {
+    if (window < 30 || window > 900) throw new ValidationError('Accept window must be 30 to 900 seconds');
+    data.manualAcceptWindowSeconds = Math.round(window);
+  }
+  const alertMin = Number(extra.manualQueueAlertMinutes);
+  if (Number.isFinite(alertMin)) {
+    if (alertMin < 1 || alertMin > 120) throw new ValidationError('Alert time must be 1 to 120 minutes');
+    data.manualQueueAlertMinutes = Math.round(alertMin);
+  }
+  const before = await getDispatchSettings();
   await prisma.foodSettings.upsert({
     where: { key: 'dispatch' },
-    create: {
-      key: 'dispatch',
-      dispatchMode: 'auto',
-      updatedByRole: 'ADMIN',
-      updatedByAdminId: adminId ? String(adminId) : null,
-      updatedAtBy: new Date(),
-    },
-    update: {
-      dispatchMode: 'auto',
-      updatedByRole: 'ADMIN',
-      updatedByAdminId: adminId ? String(adminId) : null,
-      updatedAtBy: new Date(),
-    },
+    create: { key: 'dispatch', ...data },
+    update: data,
   });
+  const { clearDispatchModeCache, sweepWaitingOrdersToAuto } = await import('./manualDispatch.service.js');
+  clearDispatchModeCache();
+  // Manual -> auto: whatever was waiting for an admin goes out to riders now.
+  if (before.dispatchMode === 'manual' && mode === 'auto') {
+    void sweepWaitingOrdersToAuto().catch((err) => logger.warn(`Dispatch sweep failed: ${err?.message || err}`));
+  }
   return getDispatchSettings();
 }
 
 export async function tryAutoAssign(orderId, options = {}) {
   const id = String(orderId);
   const attempt = options.attempt || 1;
+
+  // Manual dispatch: in a zone set to manual nothing is offered to riders; the
+  // order waits for an admin to assign it. Every caller (restaurant confirm,
+  // rider reject, timeouts, resend, emergency) comes through here.
+  const { isManualForOrder, enterManualQueue } = await import('./manualDispatch.service.js');
+  if (await isManualForOrder(id)) {
+    return enterManualQueue(id, options);
+  }
   // Small buffer above the accept window so an in-flight offer isn't reclaimed early.
   const lockTimeout = DRIVER_ACCEPT_WINDOW_MS + 5000; // 50s
 
@@ -523,7 +553,9 @@ export async function processDispatchTimeout(orderId, partnerId) {
       data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },
     });
 
-    await tryAutoAssign(id, { attempt: offerCount + 1 });
+    // reason/partnerId only matter in a manual zone: they tell the admins who
+    // let the order time out.
+    await tryAutoAssign(id, { attempt: offerCount + 1, reason: 'timeout', partnerId });
   } else if (row.dispatchStatus === 'unassigned') {
     // Already unassigned (e.g. from a previous timeout) — just keep hunting.
     await tryAutoAssign(id, { attempt: offerCount + 1 });

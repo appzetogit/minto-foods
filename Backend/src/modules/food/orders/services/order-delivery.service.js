@@ -1,3 +1,4 @@
+import { isManualForOrder, manualOrderFilter } from './manualDispatch.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { toOrder, toOrders, orderInclude } from '../order.mapper.js';
 import {
@@ -203,6 +204,7 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const partnerId = String(deliveryPartnerId);
   const hasActiveDelivery = await partnerHasActiveDelivery(partnerId);
+  const manualFilter = hasActiveDelivery ? { kind: 'none' } : await manualOrderFilter();
 
   const where = hasActiveDelivery
     ? {
@@ -212,13 +214,18 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
       }
     : {
         OR: [
-          {
-            dispatchStatus: 'unassigned',
-            // The $not/$elemMatch guard becomes a relation filter: no deassign
-            // record for this rider on this order.
-            dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-            orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
-          },
+          // Open orders anyone nearby can take -- except in manual-dispatch
+          // zones, where only the rider an admin assigned sees the order.
+          ...(manualFilter.kind === 'all'
+            ? []
+            : [{
+                dispatchStatus: 'unassigned',
+                // The $not/$elemMatch guard becomes a relation filter: no deassign
+                // record for this rider on this order.
+                dispatchOffers: { none: { partnerId, action: 'deassigned' } },
+                orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
+                ...(manualFilter.kind === 'some' ? { NOT: manualFilter.where } : {}),
+              }]),
           {
             dispatchDeliveryPartnerId: partnerId,
             dispatchStatus: { in: ['assigned', 'accepted'] },
@@ -398,6 +405,10 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   // ceiling must not end up holding a cash trip they cannot be given.
   await assertCashLimitAllows(partnerId, { paymentMethod: requested.paymentMethod });
 
+  // Manual dispatch: an order in a manual zone can only be accepted by the rider
+  // an admin assigned it to -- never picked up while unassigned.
+  const manualOnly = await isManualForOrder(id);
+
   // Atomic claim. The guard replaces findOneAndUpdate's filter — only one rider
   // can flip the order to accepted.
   const { count } = await prisma.foodOrder.updateMany({
@@ -405,10 +416,12 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       id,
       orderStatus: { in: acceptedStatuses },
       OR: [
-        {
-          dispatchStatus: 'unassigned',
-          dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-        },
+        ...(manualOnly
+          ? []
+          : [{
+              dispatchStatus: 'unassigned',
+              dispatchOffers: { none: { partnerId, action: 'deassigned' } },
+            }]),
         { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
       ],
     },
@@ -417,8 +430,15 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
       dispatchStatus: 'accepted',
       dispatchAssignedAt: now,
       dispatchAcceptedAt: now,
+      awaitingManualAt: null,
     },
   });
+  if (count === 0 && manualOnly) {
+    const cur = await prisma.foodOrder.findUnique({ where: { id }, select: { dispatchStatus: true, dispatchDeliveryPartnerId: true } });
+    if (cur && cur.dispatchStatus !== 'accepted' && cur.dispatchDeliveryPartnerId !== partnerId) {
+      throw new ValidationError('This order is assigned by the dispatcher and is not assigned to you.');
+    }
+  }
 
   if (count === 0) {
     const existing = await prisma.foodOrder.findUnique({
@@ -671,8 +691,9 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
     deliveryPartnerId,
   });
 
+  // In a manual zone this puts the order back in the admin queue and says who declined.
   void dispatchService
-    .tryAutoAssign(row.id)
+    .tryAutoAssign(row.id, { reason: 'declined', partnerId: String(deliveryPartnerId) })
     .catch((error) => logger.error(`SmartDispatch: Auto-assign after reject failed: ${error.message}`));
 
   return order;

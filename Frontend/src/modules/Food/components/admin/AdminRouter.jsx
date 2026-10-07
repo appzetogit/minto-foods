@@ -56,6 +56,8 @@ const OfferBanners = lazy(() => import("@food/pages/admin/OfferBanners"));
 const TipManagement = lazy(() => import("@food/pages/admin/TipManagement"));
 const SurgePricing = lazy(() => import("@food/pages/admin/SurgePricing"));
 const PriceManagement = lazy(() => import("@food/pages/admin/PriceManagement"));
+const AssignRider = lazy(() => import("@food/pages/admin/dispatch/AssignRider"));
+const DispatchSettings = lazy(() => import("@food/pages/admin/dispatch/DispatchSettings"));
 const NewAdvertisement = lazy(() => import("@food/pages/admin/advertisement/NewAdvertisement"));
 const AdRequests = lazy(() => import("@food/pages/admin/advertisement/AdRequests"));
 const AdsList = lazy(() => import("@food/pages/admin/advertisement/AdsList"));
@@ -308,6 +310,8 @@ export default function AdminRouter() {
             <Route path="tip-management" element={<TipManagement />} />
             <Route path="surge-pricing" element={<SurgePricing />} />
             <Route path="price-management" element={<PriceManagement />} />
+            <Route path="dispatch/assign" element={<AssignRider />} />
+            <Route path="dispatch/settings" element={<DispatchSettings />} />
             <Route path="advertisement" element={<AdsList />} />
             <Route path="advertisement/new" element={<NewAdvertisement />} />
             <Route path="advertisement/requests" element={<AdRequests />} />

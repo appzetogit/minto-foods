@@ -116,6 +116,13 @@ const startBackgroundJobs = async () => {
         } catch (err) {
             logger.error(`Pending payment sweep error: ${err.message}`);
         }
+        // Manual dispatch: remind admins of orders still waiting for a rider.
+        try {
+            const { remindStaleManualQueue } = await import('./src/modules/food/orders/services/manualDispatch.service.js');
+            await remindStaleManualQueue();
+        } catch (err) {
+            logger.error(`Manual dispatch reminder error: ${err.message}`);
+        }
     };
     await runPaymentSweep();
     paymentSweepInterval = setInterval(runPaymentSweep, 5 * 60 * 1000);
