@@ -301,10 +301,32 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
             <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
               <User className="w-4 h-4" />
               Customer Information
+              {order.isForSomeoneElse ? (
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-xs font-medium">
+                  Order for someone else
+                </span>
+              ) : null}
             </h3>
+            {order.isForSomeoneElse ? (
+              <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50 p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-violet-600 uppercase tracking-wider">Receiver (rider calls)</p>
+                  <p className="text-sm font-medium text-slate-900">{order.recipient?.name || order.recipientName || "N/A"}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-violet-600 uppercase tracking-wider flex items-center gap-2">
+                    <Phone className="w-4 h-4" />
+                    Receiver Phone
+                  </p>
+                  <p className="text-sm font-medium text-slate-900">{order.recipient?.phone || order.recipientPhone || "N/A"}</p>
+                </div>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer Name</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  {order.isForSomeoneElse ? "Ordered by (account)" : "Customer Name"}
+                </p>
                 <p className="text-sm font-medium text-slate-900">{order.customerName || "N/A"}</p>
               </div>
               {order.customerPhone && (

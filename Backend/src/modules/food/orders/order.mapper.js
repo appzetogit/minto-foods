@@ -188,6 +188,15 @@ export function toOrder(row) {
 
         lastRiderLocation: geoPoint(row.riderLat, row.riderLng),
 
+        // Order for someone else: the account holder is customerName/Phone,
+        // the person it is delivered to is the recipient.
+        isForSomeoneElse: Boolean(row.isForSomeoneElse),
+        // Always an object (empty strings when not a gift) so clients can read
+        // recipient.name without a null check.
+        recipient: row.isForSomeoneElse
+            ? { name: row.recipientName || '', phone: row.recipientPhone || '' }
+            : { name: '', phone: '' },
+
         riderEarning: money(row.riderEarning),
         platformProfit: money(row.platformProfit),
         priceMarkupAmount: money(row.priceMarkupAmount),

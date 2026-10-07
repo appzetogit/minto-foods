@@ -1403,6 +1403,12 @@ model FoodOrder {
 
   customerName  String @default("")
   customerPhone String @default("")
+  /// Delivered to someone other than the account holder. customerName/Phone
+  /// stay the account holder (who pays and gets the OTP); the rider calls the
+  /// recipient, whose name and phone are also the delivery address contact.
+  isForSomeoneElse Boolean @default(false)
+  recipientName    String  @default("")
+  recipientPhone   String  @default("")
 
   // ── delivery address (was an embedded subdoc) ──
   addrLabel             AddressLabel                           @default(Home)

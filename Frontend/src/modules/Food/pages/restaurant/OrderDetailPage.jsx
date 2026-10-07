@@ -207,6 +207,11 @@ export default function OrderDetailPage({
               <div>
                 <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Customer</h3>
                 <p className="text-base font-black text-gray-900">{customerName}</p>
+                {order.isForSomeoneElse ? (
+                  <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[10px] font-bold">
+                    Order for someone else
+                  </span>
+                ) : null}
               </div>
             </div>
             {customerPhone && customerPhone !== "No phone provided" && (

@@ -104,20 +104,79 @@ export function toRestaurantPrices(order) {
   return out;
 }
 
+/**
+ * An order for someone else, as the restaurant sees it: the receiver's name
+ * on the ticket, the isForSomeoneElse tag, and neither phone number -- the
+ * restaurant never needs to call either person.
+ */
+export function toRestaurantContact(order) {
+  if (!order?.isForSomeoneElse) return order;
+  const name = order.recipientName || order.recipient?.name || "";
+  const out = { ...order, customerName: name, customerPhone: "", recipient: { name, phone: "" } };
+  // The mapped order also carries the raw columns; none of the numbers stay.
+  delete out.recipientPhone;
+  delete out.addrPhone;
+  if (out.user && typeof out.user === "object") out.user = { ...out.user, name, phone: "" };
+  if (out.deliveryAddress) out.deliveryAddress = { ...out.deliveryAddress, phone: "" };
+  if (out.userId && typeof out.userId === "object") out.userId = { ...out.userId, name, phone: "" };
+  return out;
+}
+
+/** Everything a restaurant is shown: its own prices, and gift orders tidied. */
+export function toRestaurantView(order) {
+  return toRestaurantContact(toRestaurantPrices(order));
+}
+
 export function sanitizeOrderForRestaurant(orderDoc) {
-  return toRestaurantPrices(sanitizeOrderForExternal(orderDoc));
+  return toRestaurantView(sanitizeOrderForExternal(orderDoc));
+}
+
+/**
+ * Who the rider meets at the door, and who placed the order.
+ *
+ * For an order for someone else the rider deals only with the receiver:
+ * customerName/customerPhone become the receiver's, so the shipped rider app
+ * shows and calls the right person with no update. The account holder is
+ * given separately as orderedBy (name only).
+ */
+export function riderContact(order) {
+  const o = order || {};
+  if (o.isForSomeoneElse) {
+    return {
+      name: o.recipientName || o.recipient?.name || o.deliveryAddress?.fullName || o.deliveryAddress?.name || "",
+      phone: o.recipientPhone || o.recipient?.phone || o.deliveryAddress?.phone || "",
+      orderedBy: { name: o.customerName || o.userId?.name || "" },
+    };
+  }
+  return {
+    name: o.customerName || o.deliveryAddress?.fullName || o.deliveryAddress?.name || o.userId?.name || "",
+    phone: o.customerPhone || o.deliveryAddress?.phone || o.userId?.phone || "",
+    orderedBy: { name: o.customerName || o.userId?.name || "" },
+  };
 }
 
 export function sanitizeOrderForDeliveryPartner(orderDoc) {
   const o = sanitizeOrderForExternal(orderDoc);
   const cookingNote = String(o.note || "").trim();
   const deliveryInstructions = String(o.deliveryInstructions || "").trim();
-  return {
+  const out = {
     ...o,
     cookingNote,
     deliveryInstructions,
     note: deliveryInstructions,
   };
+  const contact = riderContact(o);
+  out.orderedBy = contact.orderedBy;
+  if (o.isForSomeoneElse) {
+    out.customerName = contact.name;
+    out.customerPhone = contact.phone;
+    out.customerCallUri = buildTelUri(contact.phone);
+    // The account holder's own number is not the rider's business.
+    if (out.userId && typeof out.userId === "object") {
+      out.userId = { ...out.userId, name: contact.name, phone: contact.phone };
+    }
+  }
+  return out;
 }
 
 export function emitDeliveryDropOtpToUser(order, plainOtp) {
@@ -554,13 +613,14 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     tripDurationMins,
     distanceKm: tripDistanceKm,
     customerAddress: customerAddressParts.length ? customerAddressParts.join(', ') : "",
-    customerName: order?.customerName || order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.userId?.name || "",
-    customerPhone: order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone || "",
-    customerCallUri: buildTelUri(
-      order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone,
-    ),
-    userName: order?.customerName || order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.userId?.name || "",
-    userPhone: order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone || "",
+    // The receiver for an order for someone else (see riderContact).
+    customerName: riderContact(order).name,
+    customerPhone: riderContact(order).phone,
+    customerCallUri: buildTelUri(riderContact(order).phone),
+    userName: riderContact(order).name,
+    userPhone: riderContact(order).phone,
+    orderedBy: riderContact(order).orderedBy,
+    isForSomeoneElse: Boolean(order?.isForSomeoneElse),
     note: order?.deliveryInstructions || "",
     cookingNote: order?.note || "",
     deliveryInstructions: order?.deliveryInstructions || "",
@@ -593,7 +653,7 @@ export async function notifyRestaurantNewOrder(orderDoc) {
     const io = getIO();
     if (io) {
       const payload = {
-        ...toRestaurantPrices(orderDoc),
+        ...toRestaurantView(orderDoc),
         orderMongoId: orderDoc._id || undefined,
         orderId: orderDoc.order_id || orderDoc._id,
       };
@@ -633,13 +693,18 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           .filter(Boolean)
           .join(", ")
       : "";
-    const total = orderDoc.pricing?.total ?? 0;
-    
+    // What the restaurant may see: its own prices, the receiver's name.
+    const view = toRestaurantView(orderDoc);
+    const total = view.pricing?.total ?? 0;
+    const customerLabel = view.customerName
+      ? `${view.customerName}${view.isForSomeoneElse ? " (order for someone else)" : ""}`
+      : "";
+
     // Construct rich body for the custom notification layout in Flutter
     let bodyText = `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`;
     if (itemsList) bodyText += `\nItems: ${itemsList}`;
     if (total > 0) bodyText += `\nTotal: ₹${total}`;
-    if (orderDoc.customerName) bodyText += `\nCustomer: ${orderDoc.customerName}`;
+    if (customerLabel) bodyText += `\nCustomer: ${customerLabel}`;
     if (addressStr) bodyText += `\nAddress: ${addressStr}`;
 
     // Two messages, not one — see notifyOwnersActionableAlert.
@@ -669,7 +734,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           link: `/restaurant/orders/${orderDoc._id?.toString?.() || ""}`,
           // Everything the notification needs to render without a follow-up API
           // call, which matters when the device is locked or the app was killed.
-          customerName: str(orderDoc.customerName),
+          customerName: str(view.customerName),
+          isForSomeoneElse: str(Boolean(view.isForSomeoneElse)),
           itemCount: str(itemCount),
           itemsList: str(itemsList),
           address: str(addressStr),

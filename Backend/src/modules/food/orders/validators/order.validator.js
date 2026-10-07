@@ -103,8 +103,27 @@ export function validateCalculateOrderDto(body) {
     return result.data;
 }
 
+/** The person a gift / "order for someone else" is delivered to. */
+export const RECIPIENT_PHONE_RE = /^[6-9]\d{9}$/;
+const recipientSchema = z.object({
+    name: z
+        .string({ required_error: 'Receiver name required' })
+        .trim()
+        .min(1, "Enter the receiver's name")
+        .max(60, "Receiver's name can be at most 60 characters"),
+    phone: z
+        .string({ required_error: 'Receiver phone required' })
+        .trim()
+        .regex(RECIPIENT_PHONE_RE, "Enter the receiver's 10-digit mobile number"),
+});
+
 export function validateCreateOrderDto(body) {
     const schema = z.object({
+        // Delivered to someone else: the order is still the logged-in user's
+        // (they pay, they get the pushes and the OTP), but the rider calls the
+        // receiver. Declared so zod does not strip them.
+        orderForSomeoneElse: z.boolean().optional(),
+        recipient: z.unknown().optional(),
         items: z.array(orderItemSchema).min(1, 'At least one item required'),
         address: addressSchema,
         restaurantId: z.string().min(1, 'Restaurant id required'),
@@ -136,7 +155,37 @@ export function validateCreateOrderDto(body) {
         const msg = result.error.errors?.[0]?.message || 'Validation failed';
         throw new ValidationError(msg);
     }
-    return result.data;
+    return normalizeRecipientFields(result.data);
+}
+
+/**
+ * Checks and tidies the "order for someone else" fields on a create DTO.
+ * Shared by the HTTP validator and createOrder itself, so the rules hold
+ * whichever way an order is created.
+ */
+export function normalizeRecipientFields(dto) {
+    const data = { ...(dto || {}) };
+    if (data.orderForSomeoneElse === true) {
+        if (!data.recipient || typeof data.recipient !== 'object') {
+            throw new ValidationError("Add the receiver's name and phone number");
+        }
+        const r = recipientSchema.safeParse(data.recipient);
+        if (!r.success) {
+            throw new ValidationError(r.error.errors?.[0]?.message || 'Invalid receiver details');
+        }
+        data.recipient = r.data;
+        // The receiver must be priced and routed from their own pin, never a
+        // fallback to the account's default address.
+        const coords = data.address?.location?.coordinates;
+        if (!Array.isArray(coords) || coords.length !== 2 || !coords.every(Number.isFinite)) {
+            throw new ValidationError("The receiver's address needs a location on the map");
+        }
+    } else {
+        // Without the flag these are ignored, so an order behaves as before.
+        delete data.recipient;
+        data.orderForSomeoneElse = false;
+    }
+    return data;
 }
 
 export function validateVerifyPaymentDto(body) {

@@ -596,10 +596,15 @@ async function resolveDeliveryAddress(userId, dto) {
   if (addresses.length === 0) return dto.deliveryAddress;
 
   const wantedId = String(dto.deliveryAddressId || '').trim();
-  const chosen =
-    (wantedId && addresses.find((entry) => entry.id === wantedId)) || addresses[0];
-
-  return chosen || dto.deliveryAddress;
+  if (wantedId) {
+    // A specific address was asked for (any saved one, e.g. a receiver's for
+    // an order for someone else). Price that one or refuse -- quietly falling
+    // back to the default address quoted the wrong distance and fee.
+    const chosen = addresses.find((entry) => entry.id === wantedId);
+    if (!chosen) throw new ValidationError('That delivery address was not found. Please choose it again.');
+    return chosen;
+  }
+  return addresses[0] || dto.deliveryAddress;
 }
 
 export async function calculateOrderPricing(userId, dto, options = {}) {

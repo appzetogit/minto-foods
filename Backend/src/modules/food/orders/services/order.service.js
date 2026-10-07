@@ -1,3 +1,4 @@
+import { normalizeRecipientFields } from '../validators/order.validator.js';
 import { prisma } from '../../../../config/prisma.js';
 import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
@@ -39,7 +40,7 @@ import {
   enqueueOrderEvent,
   sanitizeOrderForExternal,
   sanitizeOrderForRestaurant,
-  toRestaurantPrices,
+  toRestaurantView,
   sanitizeOrderForDeliveryPartner,
   notifyOwnersSafely,
   buildOrderIdentityFilter,
@@ -523,8 +524,10 @@ async function createOrderRow(data) {
   throw new ValidationError('Could not allocate an order id. Please try again.');
 }
 
-export async function createOrder(userId, dto) {
+export async function createOrder(userId, rawDto) {
   try {
+    const dto = normalizeRecipientFields(rawDto);
+    const forSomeoneElse = dto.orderForSomeoneElse === true;
     const restaurantId = requireId(dto.restaurantId, 'Restaurant ID');
     const restaurant = await loadRestaurantForOrdering(restaurantId);
 
@@ -548,7 +551,24 @@ export async function createOrder(userId, dto) {
       zipCode: dto.address?.zipCode || "",
       phone: dto.address?.phone || "",
       ...(dto.address || {}),
+      // For someone else, the address contact is always the receiver: it is
+      // who the rider meets at the door.
+      ...(forSomeoneElse
+        ? { name: dto.recipient.name, fullName: dto.recipient.name, phone: dto.recipient.phone }
+        : {}),
     });
+
+    // The order stays the account holder's: their own name and phone from the
+    // account, never the body (the app puts the receiver there for older
+    // servers).
+    let customer = { name: String(dto.customerName || deliveryAddress.fullName || ""), phone: String(dto.customerPhone || deliveryAddress.phone || "") };
+    if (forSomeoneElse) {
+      const owner = await prisma.foodUser.findUnique({
+        where: { id: requireId(userId, 'User ID') },
+        select: { name: true, phone: true },
+      });
+      customer = { name: String(owner?.name || ""), phone: String(owner?.phone || "") };
+    }
 
     let paymentMethod = dto.paymentMethod === "card" ? "razorpay" : dto.paymentMethod;
     // COD is no longer one switch for the whole platform. A zone can turn it
@@ -707,8 +727,11 @@ export async function createOrder(userId, dto) {
       userId: requireId(userId, 'User ID'),
       restaurantId,
       zoneId: dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : restaurant.zoneId || null,
-      customerName: String(dto.customerName || deliveryAddress.fullName || ""),
-      customerPhone: String(dto.customerPhone || deliveryAddress.phone || ""),
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      isForSomeoneElse: forSomeoneElse,
+      recipientName: forSomeoneElse ? dto.recipient.name : "",
+      recipientPhone: forSomeoneElse ? dto.recipient.phone : "",
       orderStatus: initialStatus,
       walletAmount: walletPaise / 100,
       onlineAmount: onlinePaise / 100,
@@ -894,7 +917,7 @@ export async function createOrder(userId, dto) {
 
     return { order: normalizeOrderForClient(order), razorpay: razorpayPayload };
   } catch (err) {
-    logger.error(`Order placement error: ${err.message}`, { stack: err.stack, userId, dto });
+    logger.error(`Order placement error: ${err.message}`, { stack: err.stack, userId, dto: rawDto });
     if (err instanceof ValidationError || err instanceof ForbiddenError || err instanceof NotFoundError) {
       throw err;
     }
@@ -1886,7 +1909,7 @@ export async function listOrdersRestaurant(restaurantId, query) {
   const txByOrderId = new Map(transactions.map((tx) => [tx.orderId, tx]));
 
   const normalizedOrders = toOrders(rows).map((order) => {
-    const out = toRestaurantPrices(normalizeOrderForClient(order));
+    const out = toRestaurantView(normalizeOrderForClient(order));
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,
@@ -2258,12 +2281,16 @@ function applyAdminOrderSearchFilter(AND, searchRaw) {
     { order_id: { contains: search, mode: 'insensitive' } },
     { customerName: { contains: search, mode: 'insensitive' } },
     { customerPhone: { contains: search, mode: 'insensitive' } },
+    // An order for someone else is found by either person.
+    { recipientName: { contains: search, mode: 'insensitive' } },
+    { recipientPhone: { contains: search, mode: 'insensitive' } },
     // Matched through the relation rather than a separate id lookup.
     { restaurant: { restaurantName: { contains: search, mode: 'insensitive' } } },
   ];
 
   if (phoneDigits.length >= 4) {
     orConditions.push({ customerPhone: { contains: phoneDigits } });
+    orConditions.push({ recipientPhone: { contains: phoneDigits } });
   }
 
   AND.push({ OR: orConditions });
