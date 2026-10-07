@@ -346,6 +346,11 @@ export async function tryAutoAssign(orderId, options = {}) {
     const permanentlyExcludedIds = new Set(
       offers.filter((o) => o.action === 'deassigned').map((o) => String(o.partnerId)),
     );
+    // Riders who said no to this order. Left out of re-offer rounds while
+    // anyone else nearby can still take it.
+    const declinedIds = new Set(
+      offers.filter((o) => o.action === 'rejected').map((o) => String(o.partnerId)),
+    );
 
     // Radius expansion: attempt 1 → 15km, 2 → 25km, 3 → 40km, 4+ → 60km.
     let maxKm = 15;
@@ -397,12 +402,17 @@ export async function tryAutoAssign(orderId, options = {}) {
     if (eligible.length === 0) {
       logger.info(`tryAutoAssign: No NEW eligible partners in ${maxKm}km for order ${id}. Restarting hunt...`);
 
-      const reofferEligible = partners.filter((partner) => {
+      const reofferPool = partners.filter((partner) => {
         const key = String(partner.partnerId);
         if (permanentlyExcludedIds.has(key)) return false;
         if (busyPartnerIds.has(key)) return false;
+        if (cashBlockedIds.has(key)) return false;
         return true;
       });
+      // Those who declined only come back when nobody else is left, so the
+      // order is never stranded but a "no" is respected while there's a choice.
+      const notDeclined = reofferPool.filter((p) => !declinedIds.has(String(p.partnerId)));
+      const reofferEligible = notDeclined.length ? notDeclined : reofferPool;
 
       if (reofferEligible.length > 0) {
         const basePayload = buildDeliverySocketPayload(order, row.restaurant);

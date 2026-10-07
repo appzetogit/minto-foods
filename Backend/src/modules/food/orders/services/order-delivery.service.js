@@ -640,6 +640,26 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
 export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
   const { row, order } = await loadOrder(orderId);
+
+  // A broadcast offer (automatic dispatch) belongs to nobody yet: the order is
+  // in front of several riders at once. Declining it used to fail with "Not
+  // your order" and nothing was recorded, so a later re-offer round could send
+  // the same order straight back to the rider who said no. Record the decline
+  // against their offer and leave the order with the other riders.
+  if (String(row.dispatchDeliveryPartnerId || '') !== String(deliveryPartnerId)) {
+    const pending = (row.dispatchOffers || []).find(
+      (item) => String(item.partnerId) === String(deliveryPartnerId) && item.action === 'offered',
+    );
+    if (pending && row.dispatchStatus !== 'accepted') {
+      await prisma.orderDispatchOffer.update({ where: { id: pending.id }, data: { action: 'rejected' } });
+      enqueueOrderEvent('delivery_offer_declined', {
+        orderMongoId: row.id,
+        orderId: row.id,
+        deliveryPartnerId,
+      });
+      return order;
+    }
+  }
   assertOwnedBy(row, deliveryPartnerId);
 
   // Only an order that hasn't been collected may be rejected. Without this a rider
