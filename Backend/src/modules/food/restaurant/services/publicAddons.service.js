@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { findApprovedRestaurant, toAddonGroup } from './restaurantLookup.helper.js';
+import { addonRuleForRestaurant, toAppPrice } from '../../pricing/priceRules.service.js';
 
 /**
  * Folds a flat add-on list into the grouped, rule-carrying shape the item sheet
@@ -87,6 +88,10 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { fo
         },
     });
 
+    // Add-ons follow an admin price rule only when it says so (applyToAddons).
+    const addonRule = await addonRuleForRestaurant(restaurant.id);
+    const appPrice = (base) => (addonRule ? toAppPrice(base, addonRule) : Number(base) || 0);
+
     const flat = (addons || [])
         // `published` is Json, so "has been published" is a plain JS check rather
         // than a null comparison Prisma spells three different ways.
@@ -100,7 +105,7 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { fo
                 description: p.description || '',
                 foodType: p.foodType === 'non-veg' ? 'non-veg' : 'veg',
                 isVeg: p.foodType !== 'non-veg',
-                price: Number(p.price) || 0,
+                price: appPrice(Number(p.price) || 0),
                 image: p.image || '',
                 images: Array.isArray(p.images) ? p.images : [],
                 // Lets the app group add-ons per item from one unfiltered fetch.
@@ -111,7 +116,7 @@ export async function getPublicApprovedRestaurantAddons(restaurantIdOrSlug, { fo
                 // server prices the order from the same rows.
                 variantPrices: (a.variantPrices || []).map((v) => ({
                     variantId: v.variantId,
-                    price: Number(v.price) || 0,
+                    price: appPrice(Number(v.price) || 0),
                 })),
                 group: toAddonGroup(a),
             };

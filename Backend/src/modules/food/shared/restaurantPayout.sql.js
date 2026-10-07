@@ -31,7 +31,7 @@ export const EARNED_ORDER = Prisma.sql`
 export const RESTAURANT_SHARE = Prisma.sql`
     COALESCE(
         t."restaurantShare",
-        GREATEST(0, o."subtotal" + o."packagingFee" - o."restaurantCommission")
+        GREATEST(0, o."subtotal" - o."priceMarkupAmount" + o."packagingFee" - o."restaurantCommission")
     )
 `;
 
@@ -68,7 +68,7 @@ export async function discountedOrdersWithoutTransaction(where) {
         select: {
             id: true, restaurantId: true, orderStatus: true, deliveryPhase: true,
             subtotal: true, packagingFee: true, restaurantCommission: true,
-            discount: true, couponCode: true,
+            priceMarkupAmount: true, discount: true, couponCode: true,
         },
     });
 }
@@ -91,7 +91,8 @@ export async function shareOverCountByRestaurant(where, offersByRestaurantId) {
         // What SQL produced for this row, minus what the JS formula says.
         const sqlValue = Math.max(
             0,
-            Number(money.subtotal) + Number(money.packagingFee) - Number(money.restaurantCommission),
+            Number(money.subtotal) - (Number(money.priceMarkupAmount) || 0) +
+                Number(money.packagingFee) - Number(money.restaurantCommission),
         );
         const actual = computeRestaurantOrderShare(money, offers, order.restaurantId);
 

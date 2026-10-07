@@ -8,6 +8,7 @@ import {
 } from '../../admin/services/foodVariant.service.js';
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
 import { findApprovedRestaurant } from './restaurantLookup.helper.js';
+import { applyAppPricing } from '../../pricing/priceRules.service.js';
 
 const buildMenuFromFoods = async (foods = []) => {
     const categoryIds = [
@@ -142,7 +143,9 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
         orderBy: { createdAt: 'desc' },
         take: 2000,
     });
-    return buildMenuFromFoods(foods);
+    // Customers see the app price (admin price rules); the restaurant's own
+    // menu endpoint above keeps the restaurant's prices.
+    return buildMenuFromFoods(await applyAppPricing(foods));
 }
 
 export async function syncMenuItemApprovalStatus() {

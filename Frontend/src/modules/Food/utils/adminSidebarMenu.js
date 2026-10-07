@@ -36,6 +36,12 @@ export const adminSidebarMenu = [
         icon: "FolderTree",
         path: "/admin/food/categories",
       },
+      {
+        type: "link",
+        label: "Price Management",
+        icon: "IndianRupee",
+        path: "/admin/food/price-management",
+      },
     ],
   },
   {

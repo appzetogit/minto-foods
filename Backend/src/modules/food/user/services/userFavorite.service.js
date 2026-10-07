@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { applyAppPricing } from '../../pricing/priceRules.service.js';
 
 const requireId = (value, label) => {
     const raw = String(value || '').trim();
@@ -47,7 +48,7 @@ export const getUserFavorites = async (userId) => {
                 where: { id: { in: foodIds }, approvalStatus: 'approved' },
                 select: {
                     id: true, name: true, description: true, price: true, otherPrice: true,
-                    image: true, images: true, foodType: true, restaurantId: true,
+                    image: true, images: true, foodType: true, restaurantId: true, categoryId: true,
                     rating: true, totalRatings: true, isAvailable: true,
                     // A relation now, so it has to be asked for — the favourites
                     // screen renders a size picker from it.
@@ -60,7 +61,8 @@ export const getUserFavorites = async (userId) => {
     // Preserve the newest-first order the ids came back in; `in` does not guarantee it.
     const byId = (list) => new Map(list.map((d) => [d.id, d]));
     const restaurantMap = byId(restaurants);
-    const foodMap = byId(foods);
+    // Customer prices (admin price rules), same as the menu shows.
+    const foodMap = byId(await applyAppPricing(foods));
 
     return {
         restaurantIds,

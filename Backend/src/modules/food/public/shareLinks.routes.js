@@ -3,6 +3,7 @@ import express from 'express';
 import { config } from '../../../config/env.js';
 import { prisma } from '../../../config/prisma.js';
 import { isId } from '../../../utils/helpers.js';
+import { applyAppPricingOne } from '../pricing/priceRules.service.js';
 
 const router = express.Router();
 
@@ -213,14 +214,14 @@ router.get('/food-detail', async (req, res, next) => {
             return notFoundPage(req, res, 'dish');
         }
 
-        const food = await prisma.foodItem.findFirst({
+        const food = await applyAppPricingOne(await prisma.foodItem.findFirst({
             where: { id, approvalStatus: 'approved' },
             select: {
-                name: true, description: true, price: true, image: true,
-                images: true, restaurantId: true,
+                id: true, name: true, description: true, price: true, image: true,
+                images: true, restaurantId: true, categoryId: true,
                 restaurant: { select: { restaurantName: true } },
             },
-        });
+        }));
 
         if (!food) return notFoundPage(req, res, 'dish');
 

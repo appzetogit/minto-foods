@@ -59,6 +59,55 @@ export function sanitizeOrderForExternal(orderDoc) {
   return o;
 }
 
+/**
+ * The order as a restaurant sees it: at the restaurant's own prices.
+ *
+ * Admin price rules can make the customer pay more (or less) than the
+ * restaurant charges. The restaurant never sees that: each line shows its own
+ * price, and the subtotal and total come down by the markup. Lines from before
+ * price rules have no base price and are left as they are.
+ */
+export function toRestaurantPrices(order) {
+  if (!order) return order;
+  const markup = Number(order.priceMarkupAmount) || 0;
+  const out = { ...order };
+  delete out.priceMarkupAmount;
+  delete out.platformProfit;
+  if (Array.isArray(order.items)) {
+    out.items = order.items.map((item) => {
+      const line = { ...item };
+      if (item?.basePrice != null) {
+        line.price = Number(item.basePrice) || 0;
+        line.variantPrice = Number(item.baseVariantPrice ?? item.basePrice) || 0;
+        line.otherPrice = 0;
+        if (Array.isArray(item.addons)) {
+          line.addons = item.addons.map((a) =>
+            a?.basePrice != null ? { ...a, price: a.basePrice } : a,
+          );
+        }
+      }
+      delete line.basePrice;
+      delete line.baseVariantPrice;
+      delete line.markupPercent;
+      delete line.priceRuleId;
+      return line;
+    });
+  }
+  if (markup && order.pricing) {
+    const round2 = (n) => Math.round(n * 100) / 100;
+    out.pricing = {
+      ...order.pricing,
+      subtotal: round2((Number(order.pricing.subtotal) || 0) - markup),
+      total: round2((Number(order.pricing.total) || 0) - markup),
+    };
+  }
+  return out;
+}
+
+export function sanitizeOrderForRestaurant(orderDoc) {
+  return toRestaurantPrices(sanitizeOrderForExternal(orderDoc));
+}
+
 export function sanitizeOrderForDeliveryPartner(orderDoc) {
   const o = sanitizeOrderForExternal(orderDoc);
   const cookingNote = String(o.note || "").trim();
@@ -544,7 +593,7 @@ export async function notifyRestaurantNewOrder(orderDoc) {
     const io = getIO();
     if (io) {
       const payload = {
-        ...orderDoc,
+        ...toRestaurantPrices(orderDoc),
         orderMongoId: orderDoc._id || undefined,
         orderId: orderDoc.order_id || orderDoc._id,
       };

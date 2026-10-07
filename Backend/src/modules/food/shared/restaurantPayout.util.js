@@ -56,7 +56,9 @@ export function computeRestaurantOrderShare(money = {}, offers = [], restaurantI
     const stored = Number(money.restaurantShare);
     if (Number.isFinite(stored)) return Math.max(0, stored);
 
-    const subtotal = Number(money.subtotal) || 0;
+    // The restaurant is paid on its own prices: the admin price-rule markup
+    // in the subtotal is Minto's.
+    const subtotal = (Number(money.subtotal) || 0) - (Number(money.priceMarkupAmount) || 0);
     const packagingFee = Number(money.packagingFee) || 0;
     const commission = Number(money.restaurantCommission) || 0;
     const { restaurantDiscountShare } = resolveDiscountSplit({ money, offers, restaurantId });

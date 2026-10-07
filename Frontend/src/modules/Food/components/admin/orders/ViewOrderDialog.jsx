@@ -584,6 +584,17 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                   <span className="text-slate-600">Restaurant Commission</span>
                   <span className="font-medium text-slate-900">{formatDialogMoney(transaction.amounts.restaurantCommission)}</span>
                 </div>
+                {Number(transaction.amounts.priceMarkupAmount) !== 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600" title="Customer price minus the restaurant's price (Price Management rules)">
+                      Price Markup (Minto)
+                    </span>
+                    <span className={`font-medium ${Number(transaction.amounts.priceMarkupAmount) > 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                      {Number(transaction.amounts.priceMarkupAmount) < 0 ? "-" : ""}
+                      {formatDialogMoney(Math.abs(Number(transaction.amounts.priceMarkupAmount)))}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">Rider Earning</span>
                   <span className="font-medium text-slate-900">{formatDialogMoney(transaction.amounts.riderShare)}</span>

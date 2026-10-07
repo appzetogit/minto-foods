@@ -67,9 +67,9 @@ const FINANCE_ORDER_SELECT = {
     orderStatus: true, deliveryPhase: true,
     paymentMethod: true, paymentStatus: true,
     subtotal: true, tax: true, packagingFee: true, restaurantCommission: true,
-    discount: true, couponCode: true, total: true,
+    discount: true, couponCode: true, total: true, priceMarkupAmount: true,
     createdAt: true,
-    items: { select: { name: true, quantity: true, price: true } },
+    items: { select: { name: true, quantity: true, price: true, basePrice: true } },
 };
 
 /** Only orders that were actually paid for, in the window the caller asked for. */
@@ -100,7 +100,7 @@ async function earnedTotalsByRestaurant(restaurantIds, { from = null, to = null,
             SELECT o."restaurantId"                                AS "restaurantId",
                    COUNT(*)::int                                   AS "orderCount",
                    COALESCE(SUM(${RESTAURANT_SHARE}), 0)           AS "payout",
-                   COALESCE(SUM(COALESCE(t."total", o."total")), 0) AS "gross",
+                   COALESCE(SUM(COALESCE(t."total", o."total") - o."priceMarkupAmount"), 0) AS "gross",
                    COALESCE(SUM(COALESCE(t."tax",   o."tax")),   0) AS "tax"
             ${ORDERS_JOINED}
             ${earnedWindowSql(ids, from, to)}
@@ -237,14 +237,18 @@ async function earnedOrdersPage(restaurantId, { from = null, to = null }, pagina
     const rows = orders.map((order) => {
         const tx = txByOrderId.get(order.id) || null;
         const money = orderMoney(order, tx);
-        const items = order.items || [];
+        // The restaurant's own prices: admin price-rule markup is not theirs.
+        const markup = num(order.priceMarkupAmount);
+        const items = (order.items || []).map(({ basePrice, ...it }) =>
+            basePrice == null ? it : { ...it, price: basePrice },
+        );
 
         const split = resolveDiscountSplit({ money, offers: relevantOffers, restaurantId });
         const payout = isRestaurantEarnedOrder(order)
             ? computeRestaurantOrderShare(money, relevantOffers, restaurantId)
             : 0;
 
-        const total = num(money.total);
+        const total = num(money.total) - markup;
         const tax = num(money.tax);
 
         return {

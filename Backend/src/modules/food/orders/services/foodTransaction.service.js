@@ -115,22 +115,40 @@ export function sumItemCommissions(lines, itemRules, fallbackRule, cap = Infinit
   return Math.max(0, Math.min(total, Number.isFinite(cap) ? cap : total));
 }
 
-/** Order lines, from whichever shape the caller has. */
-function orderLines(orderDoc) {
-  const raw = Array.isArray(orderDoc?.items)
+const rawLines = (orderDoc) =>
+  Array.isArray(orderDoc?.items)
     ? orderDoc.items
     : Array.isArray(orderDoc?.pricing?.items)
       ? orderDoc.pricing.items
       : [];
-  return raw
+
+/** Order lines, from whichever shape the caller has, at the restaurant's prices. */
+function orderLines(orderDoc) {
+  return rawLines(orderDoc)
     .map((line) => ({
       itemId: String(line?.itemId ?? line?.id ?? ''),
-      // variantPrice wins where a variant was chosen, matching what the
-      // customer was actually billed for the line.
-      price: Number(line?.variantPrice ?? line?.price ?? 0) || 0,
+      // The restaurant's own price for the line: commission is charged on
+      // what the restaurant charged, not on an admin price-rule markup.
+      // variantPrice wins where a variant was chosen, matching the line.
+      price: Number(line?.baseVariantPrice ?? line?.variantPrice ?? line?.price ?? 0) || 0,
       quantity: Number(line?.quantity ?? 1) || 1,
     }))
     .filter((line) => line.itemId);
+}
+
+/**
+ * How much of the subtotal is admin price-rule markup: customer price minus
+ * the restaurant's price, over every line. Negative when prices were lowered.
+ * Lines from before price rules have no `basePrice` and count as no markup.
+ */
+export function priceMarkupOf(orderDoc) {
+  let total = 0;
+  for (const line of rawLines(orderDoc)) {
+    if (line?.basePrice === undefined || line?.basePrice === null) continue;
+    const qty = Number(line?.quantity ?? 1) || 1;
+    total += ((Number(line.price) || 0) - (Number(line.basePrice) || 0)) * qty;
+  }
+  return Math.round(total * 100) / 100;
 }
 
 /**
@@ -152,8 +170,12 @@ export async function getRestaurantCommissionSnapshot(orderDoc) {
   // off a base of 0 and stored 0 in food_orders.restaurantCommission -- and
   // platformProfit, computed from it at creation, was understated by the same
   // amount.
-  const baseAmount =
-    Number(orderDoc?.subtotal ?? orderDoc?.pricing?.subtotal ?? 0) || 0;
+  // Commission is on the restaurant's own prices, so admin price-rule markup
+  // comes off the subtotal first.
+  const baseAmount = Math.max(
+    0,
+    (Number(orderDoc?.subtotal ?? orderDoc?.pricing?.subtotal ?? 0) || 0) - priceMarkupOf(orderDoc),
+  );
   const restaurantIdRaw = orderDoc?.restaurantId ?? null;
 
   const empty = {
@@ -229,9 +251,11 @@ export async function createInitialTransaction(order) {
   const deliveryFeeGst = Number(order.deliveryFeeGst) || 0;
   const tax = Number(order.tax) || 0;
 
-  let restaurantNet = subtotal + packagingFee - restaurantCommission;
+  // Price-rule markup is Minto's: the restaurant is paid on its own prices.
+  const priceMarkupAmount = priceMarkupOf(order);
+  let restaurantNet = subtotal - priceMarkupAmount + packagingFee - restaurantCommission;
   let platformNetProfit =
-    platformFee + deliveryFee + deliveryFeeGst + restaurantCommission - riderShare;
+    platformFee + deliveryFee + deliveryFeeGst + restaurantCommission - riderShare + priceMarkupAmount;
   let adminDiscountShare = 0;
   let restaurantDiscountShare = 0;
   let discountAdminBearPercentage = 0;
@@ -288,6 +312,7 @@ export async function createInitialTransaction(order) {
       commissionAmount: restaurantCommission,
       riderShare,
       platformNetProfit,
+      priceMarkupAmount,
       taxAmount: tax,
       adminDiscountShare,
       restaurantDiscountShare,

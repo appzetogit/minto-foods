@@ -1,6 +1,12 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import {
+  loadLiveRules,
+  rulesForFoods,
+  addonRuleForRestaurant,
+  toAppPrice,
+} from '../../pricing/priceRules.service.js';
 
 const uniqueIds = (ids = []) =>
   [...new Set(ids.map((id) => String(id || '').trim()).filter(isId))];
@@ -85,6 +91,14 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
   ]);
 
   const foodById = new Map(foodDocs.map((doc) => [doc.id, doc]));
+
+  // Admin price rules turn the restaurant's price into the customer's. The
+  // restaurant's price is kept on every line as `basePrice` so payouts and
+  // commission are worked out on what the restaurant actually charged.
+  const liveRules = await loadLiveRules();
+  const ruleByFood = await rulesForFoods(foodDocs, { rules: liveRules });
+  const addonRule = await addonRuleForRestaurant(rId, { rules: liveRules });
+  const appAddonPrice = (base) => (addonRule ? toAppPrice(base, addonRule) : base);
   // `published` is Json, so the "has been published" check is a plain JS filter
   // rather than a null comparison Prisma spells three different ways.
   const addonById = new Map(
@@ -131,7 +145,8 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
       // own price when the restaurant set one, else the add-on's price.
       const { priceByVariant, ...addon } = match;
       const forVariant = variantId ? priceByVariant?.get(String(variantId)) : undefined;
-      out.push({ ...addon, price: forVariant === undefined ? addon.price : forVariant });
+      const basePrice = forVariant === undefined ? addon.price : forVariant;
+      out.push({ ...addon, price: appAddonPrice(basePrice), basePrice });
     }
     return out;
   };
@@ -152,9 +167,19 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
         throw new ValidationError(`${foodDoc.name} is currently unavailable`);
       }
 
-      const pricing = resolveFoodItemPrice(foodDoc, rawItem);
+      const base = resolveFoodItemPrice(foodDoc, rawItem);
+      const rule = ruleByFood.get(itemId) || null;
+      const appPrice = toAppPrice(base.price, rule);
+      const appOther = base.otherPrice > 0 ? toAppPrice(base.otherPrice, rule) : 0;
+      const pricing = {
+        ...base,
+        price: appPrice,
+        otherPrice: appOther > appPrice ? appOther : 0,
+        variantPrice: appPrice,
+      };
       const addons = resolveAttachedAddons(rawItem?.addons, pricing.variantId);
       const addonsTotal = addons.reduce((sum, a) => sum + a.price, 0);
+      const addonsBaseTotal = addons.reduce((sum, a) => sum + a.basePrice, 0);
 
       resolved.push({
         itemId,
@@ -163,6 +188,11 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
         // The unit price the customer pays, add-ons included, so subtotal and
         // every total derived from it match what the app displayed.
         price: pricing.price + addonsTotal,
+        // The same unit at the restaurant's own prices.
+        basePrice: base.price + addonsBaseTotal,
+        baseVariantPrice: base.price,
+        markupPercent: rule ? Number(rule.percent) || 0 : 0,
+        priceRuleId: rule ? String(rule.id) : null,
         addons,
         quantity,
         isVeg: String(foodDoc.foodType || '').toLowerCase() === 'veg',
@@ -175,11 +205,16 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
     const addonDoc = addonById.get(itemId);
     if (addonDoc?.published) {
       const published = addonDoc.published;
-      const price = Number(published.price) || 0;
+      const basePrice = Number(published.price) || 0;
+      const price = appAddonPrice(basePrice);
       resolved.push({
         itemId,
         name: String(published.name || rawItem?.name || 'Add-on').trim(),
         price,
+        basePrice,
+        baseVariantPrice: basePrice,
+        markupPercent: addonRule && price !== basePrice ? Number(addonRule.percent) || 0 : 0,
+        priceRuleId: addonRule && price !== basePrice ? String(addonRule.id) : null,
         otherPrice: 0,
         variantId: '',
         variantName: '',

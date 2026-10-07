@@ -3,6 +3,7 @@ import { runWithAdminScope } from '../../../../core/roles/adminScope.context.js'
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
 import * as adminController from '../controllers/admin.controller.js';
+import * as priceRulesController from '../../pricing/priceRules.controller.js';
 import * as foodApprovalController from '../controllers/foodApproval.controller.js';
 import * as addonsApprovalController from '../controllers/addonsApproval.controller.js';
 import * as businessSettingsController from '../controllers/businessSettings.controller.js';
@@ -103,7 +104,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
         path.startsWith('/restaurant-subscriptions') ||
         path.startsWith('/zones')
     ) return 'restaurant_management';
-    if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
+    if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods') || path.startsWith('/price-rules')) return 'food_management';
     if (path.startsWith('/offers')) return 'promotions_management';
     if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
@@ -509,6 +510,15 @@ router.delete('/delivery/commission-rules/:id', adminController.deleteDeliveryCo
 router.patch('/delivery/commission-rules/:id/status', adminController.toggleDeliveryCommissionRuleStatus);
 router.get('/delivery/reviews', adminController.getDeliverymanReviews);
 router.get('/contact-messages', adminController.getContactMessages);
+// Global price management: customer prices as a % of the restaurant's own.
+router.get('/price-rules', priceRulesController.listPriceRules);
+router.get('/price-rules/effective', priceRulesController.effectivePrices);
+router.post('/price-rules/preview', priceRulesController.previewPriceRule);
+router.get('/price-rules/:id', priceRulesController.getPriceRule);
+router.post('/price-rules', priceRulesController.createPriceRule);
+router.patch('/price-rules/:id', priceRulesController.updatePriceRule);
+router.patch('/price-rules/:id/toggle', priceRulesController.togglePriceRule);
+router.delete('/price-rules/:id', priceRulesController.deletePriceRule);
 router.get('/delivery/earning-addons', adminController.getEarningAddons);
 router.post('/delivery/earning-addons', adminController.createEarningAddon);
 router.patch('/delivery/earning-addons/:id', adminController.updateEarningAddon);

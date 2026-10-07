@@ -1512,6 +1512,8 @@ model FoodOrder {
   riderEarning   Decimal @default(0) @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
   platformProfit Decimal @default(0) @db.Decimal(14, 2)
+  /// See FoodTransaction.priceMarkupAmount.
+  priceMarkupAmount Decimal @default(0) @db.Decimal(14, 2)
 
   tripDistanceKm   Decimal? @db.Decimal(8, 2)
   tripDurationMins Int?
@@ -1576,6 +1578,13 @@ model OrderItem {
   price        Decimal @db.Decimal(14, 2)
   /// Compare-at / other-platform unit price snapshot at order time.
   otherPrice   Decimal @default(0) @db.Decimal(14, 2)
+  /// The restaurant's own unit price (add-ons included) and variant price when
+  /// an admin price rule changed what the customer paid. Null on lines from
+  /// before price rules: the restaurant's price was `price` then.
+  basePrice        Decimal? @db.Decimal(14, 2)
+  baseVariantPrice Decimal? @db.Decimal(14, 2)
+  markupPercent    Decimal  @default(0) @db.Decimal(6, 2)
+  priceRuleId      String?  @db.VarChar(24)
   quantity     Int
   isVeg        Boolean @default(true)
   image        String  @default("")
@@ -1690,6 +1699,9 @@ model FoodTransaction {
   riderShare                       Decimal @db.Decimal(14, 2)
   /// Can be negative when discounts/rider pay exceed platform income.
   platformNetProfit                Decimal @db.Decimal(14, 2)
+  /// Customer price minus the restaurant's price across the order (admin price
+  /// rules). Minto's, never the restaurant's; negative when prices were lowered.
+  priceMarkupAmount                Decimal @default(0) @db.Decimal(14, 2)
   taxAmount                        Decimal @default(0) @db.Decimal(14, 2)
   adminDiscountShare               Decimal @default(0) @db.Decimal(14, 2)
   restaurantDiscountShare          Decimal @default(0) @db.Decimal(14, 2)
@@ -3769,4 +3781,66 @@ model FoodUnregisteredRestaurant {
 
   @@index([createdAt(sort: Desc)])
   @@map("food_unregistered_restaurants")
+}
+
+/// Admin price rules: a percentage applied to the restaurant's own price to
+/// give the price customers see and pay. Dish prices are never rewritten;
+/// see src/modules/food/pricing/priceRules.service.js.
+enum PriceRuleScope {
+  all
+  zone
+  restaurant
+  category
+  item
+}
+
+enum PriceRounding {
+  none
+  nearest_1
+  end_9
+}
+
+model FoodPriceRule {
+  id            String         @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  name          String         @db.VarChar(120)
+  scope         PriceRuleScope
+  /// Narrows any scope to one zone; required for scope = zone.
+  zoneId        String?        @db.VarChar(24)
+  restaurantIds String[]       @default([])
+  categoryIds   String[]       @default([])
+  itemIds       String[]       @default([])
+  /// -50.00 … 100.00. Negative lowers the app price; Minto funds the gap.
+  percent       Decimal        @db.Decimal(6, 2)
+  rounding      PriceRounding  @default(nearest_1)
+  applyToAddons Boolean        @default(false)
+  isActive      Boolean        @default(true)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  createdById   String?        @db.VarChar(24)
+  updatedById   String?        @db.VarChar(24)
+  deletedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  logs FoodPriceRuleLog[]
+
+  @@index([isActive, deletedAt])
+  @@index([zoneId])
+  @@map("food_price_rules")
+}
+
+/// Who changed a price rule, and what it was before and after.
+model FoodPriceRuleLog {
+  id        String   @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  ruleId    String   @db.VarChar(24)
+  action    String   @db.VarChar(24)
+  adminId   String?  @db.VarChar(24)
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  rule FoodPriceRule @relation(fields: [ruleId], references: [id])
+
+  @@index([ruleId, createdAt(sort: Desc)])
+  @@map("food_price_rule_logs")
 }

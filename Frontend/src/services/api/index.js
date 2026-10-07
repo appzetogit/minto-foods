@@ -1228,6 +1228,23 @@ export const adminAPI = {
     apiClient.get("/food/admin/tips/report", { params: { days }, contextModule: "admin" }),
 
   /** Surge: a flat amount added to the delivery fee while a rule runs. */
+  /** Global price management: customer price = restaurant price ± a percentage. */
+  getPriceRules: (params = {}) =>
+    apiClient.get("/food/admin/price-rules", { params, contextModule: "admin" }),
+  getPriceRule: (id) =>
+    apiClient.get(`/food/admin/price-rules/${String(id)}`, { contextModule: "admin" }),
+  createPriceRule: (body) =>
+    apiClient.post("/food/admin/price-rules", body ?? {}, { contextModule: "admin" }),
+  updatePriceRule: (id, body) =>
+    apiClient.patch(`/food/admin/price-rules/${String(id)}`, body ?? {}, { contextModule: "admin" }),
+  togglePriceRule: (id, isActive) =>
+    apiClient.patch(`/food/admin/price-rules/${String(id)}/toggle`, { isActive }, { contextModule: "admin" }),
+  deletePriceRule: (id) =>
+    apiClient.delete(`/food/admin/price-rules/${String(id)}`, { contextModule: "admin" }),
+  previewPriceRule: (body, params = {}) =>
+    apiClient.post("/food/admin/price-rules/preview", body ?? {}, { params, contextModule: "admin" }),
+  getEffectivePrices: (restaurantId) =>
+    apiClient.get("/food/admin/price-rules/effective", { params: { restaurantId }, contextModule: "admin" }),
   getSurgeRules: () =>
     apiClient.get("/food/admin/surge-rules", { contextModule: "admin" }),
   createSurgeRule: (body) =>

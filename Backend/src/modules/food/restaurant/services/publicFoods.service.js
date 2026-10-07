@@ -8,6 +8,7 @@ import {
 } from '../../admin/services/foodVariant.service.js';
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
 import { loadRadiusSettings, withinDeliveryRadius } from '../../shared/deliveryRadius.js';
+import { applyAppPricing } from '../../pricing/priceRules.service.js';
 
 const buildCategoryKeywords = (categorySlug) => {
     const raw = String(categorySlug || '').trim().toLowerCase();
@@ -98,7 +99,11 @@ export async function listPublicFoods(query = {}) {
         take: isSwitch99Promo ? Math.max(limit, 2000) : limit,
     });
 
-    const foods = list
+    // App prices (admin price rules), before the ₹99 filter so it tests the
+    // price customers actually see.
+    const priced = await applyAppPricing(list);
+
+    const foods = priced
         .map((food) => {
             const restaurant = restaurantMap.get(food.restaurantId);
             const price = getFoodDisplayPrice(food);

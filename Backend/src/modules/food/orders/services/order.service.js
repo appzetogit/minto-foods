@@ -38,6 +38,8 @@ import * as paymentService from './order-payment.service.js';
 import {
   enqueueOrderEvent,
   sanitizeOrderForExternal,
+  sanitizeOrderForRestaurant,
+  toRestaurantPrices,
   sanitizeOrderForDeliveryPartner,
   notifyOwnersSafely,
   buildOrderIdentityFilter,
@@ -667,6 +669,8 @@ export async function createOrder(userId, dto) {
     try {
       const snapshot = await foodTransactionService.getRestaurantCommissionSnapshot({
         pricing: normalizedPricing,
+        // The lines carry the restaurant's own prices, which commission is on.
+        items: resolvedItems,
         restaurantId,
       });
       restaurantCommission = Number(snapshot?.commissionAmount) || 0;
@@ -677,7 +681,10 @@ export async function createOrder(userId, dto) {
 
     // Provisional; synced to the transaction's platformNetProfit (which also accounts
     // for the admin discount share) once the initial transaction is created.
+    // Admin price-rule markup on the lines: Minto's, not the restaurant's.
+    const priceMarkupAmount = foodTransactionService.priceMarkupOf({ items: resolvedItems });
     const platformProfit =
+      priceMarkupAmount +
       (Number.isFinite(normalizedPricing.deliveryFee) ? normalizedPricing.deliveryFee : 0) +
       (Number.isFinite(normalizedPricing.deliveryFeeGst) ? normalizedPricing.deliveryFeeGst : 0) +
       (Number.isFinite(normalizedPricing.platformFee) ? normalizedPricing.platformFee : 0) +
@@ -717,6 +724,7 @@ export async function createOrder(userId, dto) {
       riderEarning: Number(riderEarning) || 0,
       tipAmount,
       platformProfit: Number(platformProfit) || 0,
+      priceMarkupAmount,
       items: {
         create: resolvedItems.map((item) => ({
           itemId: String(item.itemId),
@@ -726,6 +734,10 @@ export async function createOrder(userId, dto) {
           variantPrice: Number(item.variantPrice) || 0,
           price: Number(item.price) || 0,
           otherPrice: Number(item.otherPrice) || 0,
+          basePrice: item.basePrice === undefined ? null : Number(item.basePrice) || 0,
+          baseVariantPrice: item.baseVariantPrice === undefined ? null : Number(item.baseVariantPrice) || 0,
+          markupPercent: Number(item.markupPercent) || 0,
+          priceRuleId: item.priceRuleId || null,
           quantity: Number(item.quantity) || 1,
           isVeg: Boolean(item.isVeg),
           image: item.image || '',
@@ -1149,7 +1161,9 @@ async function buildAdminTransactionView(orderId) {
  * (platformNetProfit, riderShare, adminDiscountShare).
  */
 export function buildRestaurantFinanceViewSync(order, tx = null) {
-  const subtotal = Number(order?.subtotal) || 0;
+  // At the restaurant's own prices: admin price-rule markup is not theirs.
+  const subtotal =
+    (Number(order?.subtotal ?? order?.pricing?.subtotal) || 0) - (Number(order?.priceMarkupAmount) || 0);
   const packagingFee = Number(order?.packagingFee) || 0;
 
   if (tx) {
@@ -1234,7 +1248,7 @@ export async function getOrderById(
   }
 
   if (restaurantId) {
-    const out = sanitizeOrderForExternal(order);
+    const out = sanitizeOrderForRestaurant(order);
     out.finance = await buildRestaurantFinanceView(order);
     return out;
   }
@@ -1872,7 +1886,7 @@ export async function listOrdersRestaurant(restaurantId, query) {
   const txByOrderId = new Map(transactions.map((tx) => [tx.orderId, tx]));
 
   const normalizedOrders = toOrders(rows).map((order) => {
-    const out = normalizeOrderForClient(order);
+    const out = toRestaurantPrices(normalizeOrderForClient(order));
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,

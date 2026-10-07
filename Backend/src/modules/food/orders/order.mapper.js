@@ -69,6 +69,9 @@ export function toOrder(row) {
             price: money(item.price),
             variantPrice: money(item.variantPrice),
             otherPrice: money(item.otherPrice),
+            basePrice: item.basePrice == null ? null : money(item.basePrice),
+            baseVariantPrice: item.baseVariantPrice == null ? null : money(item.baseVariantPrice),
+            markupPercent: money(item.markupPercent),
             addons: item.addons || []
         })),
 
@@ -187,6 +190,7 @@ export function toOrder(row) {
 
         riderEarning: money(row.riderEarning),
         platformProfit: money(row.platformProfit),
+        priceMarkupAmount: money(row.priceMarkupAmount),
         tripDistanceKm: num(row.tripDistanceKm)
     };
 }
@@ -235,6 +239,7 @@ export function toFoodTransaction(row) {
             restaurantCommission: money(row.commissionAmount),
             riderShare: money(row.riderShare),
             platformNetProfit: money(row.platformNetProfit),
+            priceMarkupAmount: money(row.priceMarkupAmount),
             taxAmount: money(row.taxAmount),
             adminDiscountShare: money(row.adminDiscountShare),
             restaurantDiscountShare: money(row.restaurantDiscountShare),

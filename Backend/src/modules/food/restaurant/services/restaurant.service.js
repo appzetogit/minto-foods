@@ -1,3 +1,4 @@
+import { applyAppPricing } from '../../pricing/priceRules.service.js';
 import { resolveServiceZone } from '../../shared/zone.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
@@ -1725,12 +1726,13 @@ const attachRecommendedItems = async (restaurants) => {
 
     const items = await prisma.foodItem.findMany({
         where: { restaurantId: { in: ids }, isRecommended: true, approvalStatus: 'approved' },
-        select: { id: true, restaurantId: true, name: true, price: true, image: true },
+        select: { id: true, restaurantId: true, categoryId: true, name: true, price: true, image: true },
         orderBy: { createdAt: 'desc' },
     });
 
     const byRestaurant = new Map();
-    for (const item of items) {
+    // Customer prices (admin price rules), same as the menu shows.
+    for (const item of await applyAppPricing(items)) {
         const list = byRestaurant.get(item.restaurantId) || [];
         if (list.length < 10) {
             // price is Decimal, so it would otherwise reach the client as a string.

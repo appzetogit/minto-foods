@@ -53,6 +53,8 @@ const ZONED = {
 const ZONED_OR_GLOBAL = new Set([
     'foodFeeSettings', 'foodUnder250Banner', 'homePromotionBanner',
     'foodSurgeRule', 'foodOfferBanner', 'topBanner',
+    // A city admin sees platform-wide price rules and manages their own city's.
+    'foodPriceRule',
 ]);
 
 const READS = new Set([
