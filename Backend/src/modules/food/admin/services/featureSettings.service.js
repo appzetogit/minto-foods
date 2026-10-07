@@ -4,7 +4,9 @@ export const FEATURE_KEYS = {
     RESTAURANT_SUBSCRIPTION: 'restaurant_subscription',
     COD_CONTROL: 'cod_control',
     ADMIN_ACCESS_SECTION: 'admin_access_section',
-    ROOT_LANDING_AND_UNREGISTERED_CONTROL: 'root_landing_and_unregistered_control'
+    ROOT_LANDING_AND_UNREGISTERED_CONTROL: 'root_landing_and_unregistered_control',
+    RESTAURANT_SELF_ONBOARDING: 'restaurant_self_onboarding',
+    DELIVERY_SELF_ONBOARDING: 'delivery_self_onboarding'
 };
 
 const DEFAULT_FEATURES = [
@@ -30,6 +32,18 @@ const DEFAULT_FEATURES = [
         key: FEATURE_KEYS.ROOT_LANDING_AND_UNREGISTERED_CONTROL,
         name: 'Root Landing & Unregistered Restaurants',
         description: 'Controls root URL behavior and Unregistered Restaurants visibility. When disabled, root redirects to /food/user and Unregistered Restaurants is hidden.',
+        isEnabled: true
+    },
+    {
+        key: FEATURE_KEYS.RESTAURANT_SELF_ONBOARDING,
+        name: 'Restaurant Self-Onboarding',
+        description: "When off, new restaurants can't sign up from the app or website: an unknown number sees \"Account not found\" and restaurants are added by the admin. Existing restaurants are not affected.",
+        isEnabled: true
+    },
+    {
+        key: FEATURE_KEYS.DELIVERY_SELF_ONBOARDING,
+        name: 'Delivery Partner Self-Onboarding',
+        description: "When off, new riders can't sign up from the app: an unknown number sees \"Account not found\" and riders are added by the admin (Add Deliveryman). Existing riders are not affected.",
         isEnabled: true
     }
 ];

@@ -2,7 +2,15 @@ import crypto from "crypto";
 import ms from "ms";
 import { createOrUpdateOtp, verifyOtp } from "../otp/otp.service.js";
 import { signAccessToken, signRefreshToken } from "./token.util.js";
-import { ValidationError, AuthError } from "./errors.js";
+import { ValidationError, AuthError, NotFoundError } from "./errors.js";
+import {
+  assertRestaurantLoginAllowed,
+  assertDeliveryLoginAllowed,
+  isRestaurantSelfOnboardingOpen,
+  isDeliverySelfOnboardingOpen,
+  RESTAURANT_NOT_FOUND,
+  DELIVERY_NOT_FOUND,
+} from "./onboardingGate.js";
 import { config } from "../../config/env.js";
 import { logger } from "../../utils/logger.js";
 import { sendAdminResetOtpEmail } from "../../utils/email.js";
@@ -332,6 +340,8 @@ export const requestRestaurantOtp = async (phone) => {
   if (!phone) {
     throw new ValidationError("Phone is required");
   }
+  // Sign-up switched off: an unknown number gets "Account not found" and no SMS.
+  await assertRestaurantLoginAllowed(phone);
   const otp = await createOrUpdateOtp(phone);
   // Only expose OTP in response when in default/dev mode — never in production with real SMS
   const shouldExposeOtp =
@@ -368,6 +378,8 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
 
 
   if (!restaurant) {
+    // An OTP sent before sign-up was switched off still can't open the form.
+    if (!(await isRestaurantSelfOnboardingOpen())) throw new NotFoundError(RESTAURANT_NOT_FOUND);
     // Phone has been successfully verified, but no restaurant exists yet.
     // Frontend will use this to redirect into registration/onboarding.
     return {
@@ -443,6 +455,8 @@ export const requestDeliveryOtp = async (phone) => {
   if (!phone) {
     throw new ValidationError("Phone is required");
   }
+  // Sign-up switched off: an unknown number gets "Account not found" and no SMS.
+  await assertDeliveryLoginAllowed(phone);
   const otp = await createOrUpdateOtp(phone);
   // Only expose OTP in response when in default/dev mode — never in production with real SMS
   const shouldExposeOtp =
@@ -462,7 +476,9 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   }
 
   const normalized = normalizePhoneForDelivery(phone);
+  const deliverySignupOpen = await isDeliverySelfOnboardingOpen();
   if (!normalized) {
+    if (!deliverySignupOpen) throw new NotFoundError(DELIVERY_NOT_FOUND);
     return { needsRegistration: true, phone };
   }
 
@@ -473,6 +489,8 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   });
 
   if (!deliveryPartner) {
+    // An OTP sent before sign-up was switched off still can't open the form.
+    if (!deliverySignupOpen) throw new NotFoundError(DELIVERY_NOT_FOUND);
     return { needsRegistration: true, phone };
   }
 

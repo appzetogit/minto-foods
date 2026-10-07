@@ -1267,6 +1267,11 @@ export const adminAPI = {
     apiClient.get("/food/admin/zones/cities", { contextModule: "admin" }),
 
   /** Cities that zones belong to and sub-admins are assigned. `q` filters by name. */
+  /** Add Deliveryman: creates an approved rider (multipart: fields + document photos). */
+  createDeliveryPartner: (formData) =>
+    apiClient.post("/food/admin/delivery/partners", formData, { contextModule: "admin" }),
+  getOnboardingStatus: () =>
+    apiClient.get("/food/restaurant/onboarding-status"),
   getCities: (params = {}) =>
     apiClient.get("/food/admin/cities", { params, contextModule: "admin" }),
   createCity: (body = {}) =>
@@ -1520,6 +1525,9 @@ export const adminAPI = {
 
 /** Restaurant API - OTP login via new backend; no email/password. */
 export const restaurantAPI = {
+  /** Public: can restaurants / riders sign themselves up right now? */
+  getOnboardingStatus: () =>
+    apiClient.get("/food/restaurant/onboarding-status"),
   createUnregisteredRestaurant: (data) =>
     apiClient.post("/food/restaurant/unregistered", data),
   deleteAccount: () => apiClient.delete('/food/restaurant/account', { contextModule: 'restaurant' }),

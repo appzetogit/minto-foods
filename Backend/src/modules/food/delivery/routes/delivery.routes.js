@@ -1,4 +1,5 @@
 import express from 'express';
+import { assertDeliverySignupOpen } from '../../../../core/auth/onboardingGate.js';
 import { deleteOwnAccountController } from '../../../../core/auth/accountDeletion.service.js';
 import { upload } from '../../../../middleware/upload.js';
 import { authMiddleware } from '../../../../core/auth/auth.middleware.js';
@@ -24,7 +25,10 @@ router.get('/registration-fields', getPublicFormSchemaController);
 // upload.any() accepts the fixed docs above AND any admin-defined document field.
 // Public signup, so the upload limiter is the only thing bounding how often
 // an unauthenticated caller can send 25MB documents.
-router.post('/register', uploadRateLimiter, upload.any(), registerDeliveryPartnerController);
+// Refused before any file is read while rider self-sign-up is switched off.
+const deliverySignupOpen = (req, res, next) =>
+    assertDeliverySignupOpen().then(() => next(), next);
+router.post('/register', deliverySignupOpen, uploadRateLimiter, upload.any(), registerDeliveryPartnerController);
 router.get('/check-vehicle/:number', async (req, res) => {
     try {
         const { prisma } = await import('../../../../config/prisma.js');

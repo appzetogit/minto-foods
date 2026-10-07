@@ -1,4 +1,9 @@
 import express from 'express';
+import {
+    assertRestaurantSignupOpen,
+    isRestaurantSelfOnboardingOpen,
+    isDeliverySelfOnboardingOpen,
+} from '../../../../core/auth/onboardingGate.js';
 import { deleteOwnAccountController } from '../../../../core/auth/accountDeletion.service.js';
 import { upload } from '../../../../middleware/upload.js';
 import { imageUpload, uploadRateLimiter } from '../../../uploads/middleware/upload.middleware.js';
@@ -114,9 +119,25 @@ const uploadFields = upload.fields([
     { name: 'galleryImages', maxCount: 10 }
 ]);
 
-router.post('/register', uploadRateLimiter, uploadFields, registerRestaurantController);
-router.post('/onboarding-fee/order', createOnboardingFeeOrderController);
+// Refused before any file is read while restaurant self-sign-up is switched off.
+const restaurantSignupOpen = (req, res, next) =>
+    assertRestaurantSignupOpen().then(() => next(), next);
+router.post('/register', restaurantSignupOpen, uploadRateLimiter, uploadFields, registerRestaurantController);
+router.post('/onboarding-fee/order', restaurantSignupOpen, createOnboardingFeeOrderController);
 router.post('/unregistered', registerUnregisteredRestaurantController);
+// Public: whether restaurants / riders can sign themselves up right now, so the
+// website and apps can hide their register links when the admin has closed it.
+router.get('/onboarding-status', async (req, res, next) => {
+    try {
+        const [restaurant, delivery] = await Promise.all([
+            isRestaurantSelfOnboardingOpen(),
+            isDeliverySelfOnboardingOpen(),
+        ]);
+        res.json({ success: true, data: { restaurant, delivery } });
+    } catch (err) {
+        next(err);
+    }
+});
 /**
  * Onboarding attachments, uploaded before the restaurant has an account — so
  * this stays public, with the same protections /v1/uploads/image already has.

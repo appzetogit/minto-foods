@@ -1,412 +1,305 @@
-import { useState } from "react"
-import { Upload, Calendar, Eye, EyeOff, Settings } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
+import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
+import { Loader2, Upload, CheckCircle2, AlertTriangle } from "lucide-react"
+import { adminAPI } from "@food/api"
+
+/**
+ * Add Deliveryman.
+ *
+ * Creates a real, approved rider -- the same details the rider app's sign-up
+ * collects. The rider then logs in to the delivery app with OTP on this phone.
+ * When rider self sign-up is switched off (Feature Settings), this page is the
+ * only way to add riders.
+ *
+ * (This page used to be a mock: its submit waited a second and saved nothing.)
+ */
+
+const VEHICLES = [
+  { value: "bike", label: "Bike" },
+  { value: "scooter", label: "Scooter" },
+  { value: "electric", label: "Electric bike / scooter" },
+  { value: "bicycle", label: "Bicycle" },
+]
+
+const PHOTOS = [
+  { key: "profilePhoto", label: "Profile photo" },
+  { key: "aadharPhoto", label: "Aadhaar card" },
+  { key: "panPhoto", label: "PAN card" },
+  { key: "drivingLicensePhoto", label: "Driving licence" },
+]
+
+const empty = {
+  name: "",
+  phone: "",
+  email: "",
+  city: "",
+  state: "",
+  address: "",
+  vehicleType: "bike",
+  vehicleName: "",
+  vehicleNumber: "",
+  drivingLicenseNumber: "",
+  panNumber: "",
+  aadharNumber: "",
+  bankAccountHolderName: "",
+  bankAccountNumber: "",
+  bankIfscCode: "",
+  bankName: "",
+  upiId: "",
+}
+
+const input =
+  "w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+
+function Field({ label, error, hint, children, required }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1">
+        {label}
+        {required ? <span className="text-red-500"> *</span> : null}
+      </label>
+      {children}
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : hint ? <p className="mt-1 text-xs text-slate-400">{hint}</p> : null}
+    </div>
+  )
+}
 
 export default function AddDeliveryman() {
-  const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    deliverymanType: "",
-    zone: "",
-    vehicle: "",
-    identityType: "Passport",
-    identityNumber: "",
-    age: "",
-    birthdate: "",
-    phone: "+1",
-    password: "",
-    confirmPassword: "",
-  })
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [showSuccessDialog, setShowSuccessDialog] = useState(false)
-  const [formErrors, setFormErrors] = useState({})
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [form, setForm] = useState(empty)
+  const [files, setFiles] = useState({})
+  const [errors, setErrors] = useState({})
+  const [serverError, setServerError] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [added, setAdded] = useState(null)
+  const [cities, setCities] = useState([])
+  const [signupOpen, setSignupOpen] = useState(true)
 
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    if (formErrors[field]) {
-      setFormErrors(prev => ({ ...prev, [field]: "" }))
+  useEffect(() => {
+    adminAPI
+      .getCities({ limit: 500 })
+      .then((res) => {
+        const data = res?.data?.data ?? res?.data ?? {}
+        setCities(Array.isArray(data.cities) ? data.cities : Array.isArray(data) ? data : [])
+      })
+      .catch(() => setCities([]))
+    adminAPI
+      .getOnboardingStatus()
+      .then((res) => setSignupOpen(res?.data?.data?.delivery !== false))
+      .catch(() => {})
+  }, [])
+
+  const set = (key, value) => {
+    setForm((f) => ({ ...f, [key]: value }))
+    if (errors[key]) setErrors((e) => ({ ...e, [key]: "" }))
+  }
+
+  const validate = () => {
+    const e = {}
+    const phone = form.phone.replace(/\D/g, "").slice(-10)
+    if (!form.name.trim()) e.name = "Name is required"
+    if (!/^[6-9]\d{9}$/.test(phone)) e.phone = "Enter a valid 10-digit mobile number"
+    if (!form.city.trim()) e.city = "City is required"
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Invalid email"
+    if (form.panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.panNumber.toUpperCase())) e.panNumber = "Invalid PAN (e.g. ABCDE1234F)"
+    if (form.aadharNumber && !/^\d{12}$/.test(form.aadharNumber)) e.aadharNumber = "Aadhaar must be 12 digits"
+    if (form.drivingLicenseNumber && !/^[A-Z]{2}[0-9A-Z]{8,16}$/.test(form.drivingLicenseNumber.replace(/[\s-]/g, "").toUpperCase()))
+      e.drivingLicenseNumber = "Invalid licence number (e.g. MH0420190012345)"
+    if (form.bankAccountNumber && !/^\d{9,18}$/.test(form.bankAccountNumber)) e.bankAccountNumber = "9 to 18 digits"
+    if (form.bankIfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(form.bankIfscCode.toUpperCase())) e.bankIfscCode = "Invalid IFSC (e.g. SBIN0001234)"
+    setErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  const submit = async (ev) => {
+    ev.preventDefault()
+    setServerError("")
+    if (!validate()) return
+    const fd = new FormData()
+    for (const [k, v] of Object.entries(form)) {
+      const value = String(v ?? "").trim()
+      if (value) fd.append(k, k === "phone" ? value.replace(/\D/g, "").slice(-10) : value)
     }
-  }
-
-  const validateForm = () => {
-    const errors = {}
-    if (!formData.firstName.trim()) errors.firstName = "First name is required"
-    if (!formData.lastName.trim()) errors.lastName = "Last name is required"
-    if (!formData.email.trim()) {
-      errors.email = "Email is required"
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      errors.email = "Invalid email format"
+    for (const [k, file] of Object.entries(files)) if (file) fd.append(k, file)
+    try {
+      setSaving(true)
+      const res = await adminAPI.createDeliveryPartner(fd)
+      setAdded(res?.data?.data || { name: form.name, phone: form.phone })
+      setForm(empty)
+      setFiles({})
+    } catch (e) {
+      setServerError(e?.response?.data?.message || e?.message || "Could not add the rider.")
+    } finally {
+      setSaving(false)
     }
-    if (!formData.deliverymanType) errors.deliverymanType = "Deliveryman type is required"
-    if (!formData.zone) errors.zone = "Zone is required"
-    if (!formData.vehicle) errors.vehicle = "Vehicle is required"
-    if (!formData.identityNumber.trim()) errors.identityNumber = "Identity number is required"
-    if (!formData.age || parseInt(formData.age) < 18) errors.age = "Age must be at least 18"
-    if (!formData.birthdate) errors.birthdate = "Birthdate is required"
-    if (!formData.phone || formData.phone.length < 10) errors.phone = "Valid phone number is required"
-    if (!formData.password || formData.password.length < 8) errors.password = "Password must be at least 8 characters"
-    if (formData.password !== formData.confirmPassword) errors.confirmPassword = "Passwords do not match"
-    setFormErrors(errors)
-    return Object.keys(errors).length === 0
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!validateForm()) return
-    
-    setIsSubmitting(true)
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    setIsSubmitting(false)
-    setShowSuccessDialog(true)
-    handleReset()
-  }
-
-  const handleReset = () => {
-    setFormData({
-      firstName: "",
-      lastName: "",
-      email: "",
-      deliverymanType: "",
-      zone: "",
-      vehicle: "",
-      identityType: "Passport",
-      identityNumber: "",
-      age: "",
-      birthdate: "",
-      phone: "+1",
-      password: "",
-      confirmPassword: "",
-    })
   }
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
-      <div className="max-w-5xl mx-auto">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 relative">
-          {/* Settings Icon */}
-          <button className="absolute top-6 right-6 p-2 rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors">
-            <Settings className="w-5 h-5 text-slate-600" />
-          </button>
-
-          <h1 className="text-2xl font-bold text-slate-900 mb-6">Add New Deliveryman</h1>
-
-          <form onSubmit={handleSubmit}>
-            {/* 1. General info */}
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">1. General info</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    First Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.firstName}
-                    onChange={(e) => handleInputChange("firstName", e.target.value)}
-                    placeholder="Ex: Jhone"
-                    className={`w-full px-4 py-2.5 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
-                      formErrors.firstName ? "border-red-500" : "border-slate-300"
-                    }`}
-                  />
-                  {formErrors.firstName && <p className="text-xs text-red-500 mt-1">{formErrors.firstName}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Last Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.lastName}
-                    onChange={(e) => handleInputChange("lastName", e.target.value)}
-                    placeholder="Ex: Joe"
-                    className={`w-full px-4 py-2.5 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
-                      formErrors.lastName ? "border-red-500" : "border-slate-300"
-                    }`}
-                  />
-                  {formErrors.lastName && <p className="text-xs text-red-500 mt-1">{formErrors.lastName}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Email <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => handleInputChange("email", e.target.value)}
-                    placeholder="Ex: ex@example.com"
-                    className={`w-full px-4 py-2.5 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
-                      formErrors.email ? "border-red-500" : "border-slate-300"
-                    }`}
-                  />
-                  {formErrors.email && <p className="text-xs text-red-500 mt-1">{formErrors.email}</p>}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Deliveryman Type <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.deliverymanType}
-                    onChange={(e) => handleInputChange("deliverymanType", e.target.value)}
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  >
-                    <option value="">Delivery man type</option>
-                    <option value="full-time">Full Time</option>
-                    <option value="part-time">Part Time</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Zone <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.zone}
-                    onChange={(e) => handleInputChange("zone", e.target.value)}
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  >
-                    <option value="">Select Zone</option>
-                    <option value="asia">Asia</option>
-                    <option value="europe">Europe</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Image <span className="text-red-500">*</span>
-                  </label>
-                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer">
-                    <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                    <p className="text-sm font-medium text-blue-600 mb-1">Click to upload Or drag and drop</p>
-                    <p className="text-xs text-slate-500">JPG, JPEG, PNG, Gif Image size: Max 2 MB (1:1)</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Identification Information */}
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">2. Identification Information</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Vehicle <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.vehicle}
-                    onChange={(e) => handleInputChange("vehicle", e.target.value)}
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  >
-                    <option value="">Select Vehicle</option>
-                    <option value="car">Car</option>
-                    <option value="motorcycle">Motorcycle</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Identity Type <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.identityType}
-                    onChange={(e) => handleInputChange("identityType", e.target.value)}
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  >
-                    <option value="Passport">Passport</option>
-                    <option value="Driving License">Driving License</option>
-                    <option value="National ID">National ID</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Identity Number <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.identityNumber}
-                    onChange={(e) => handleInputChange("identityNumber", e.target.value)}
-                    placeholder="Ex: DH-23434-LS"
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Identity Image
-                  </label>
-                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors cursor-pointer">
-                    <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                    <p className="text-sm font-medium text-blue-600 mb-1">Select a file or Drag & Drop here</p>
-                    <p className="text-xs text-slate-500">Pdf, doc, jpg. File size: max 2 MB</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Additional Data */}
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">3. Additional Data</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Enter your age <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.age}
-                    onChange={(e) => handleInputChange("age", e.target.value)}
-                    placeholder="Enter Age"
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Enter your birthdate <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="date"
-                      value={formData.birthdate}
-                      onChange={(e) => handleInputChange("birthdate", e.target.value)}
-                      className="w-full px-4 py-2.5 pr-10 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                    <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Driving license
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type="file"
-                        className="w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Account info */}
-            <div className="mb-8">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">4. Account info</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Phone <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <div className="px-3 py-2.5 border border-slate-300 rounded-l-lg bg-slate-50 text-sm">
-                      +1
-                    </div>
-                    <input
-                      type="tel"
-                      value={formData.phone.replace("+1", "")}
-                      onChange={(e) => handleInputChange("phone", "+1" + e.target.value)}
-                      placeholder="Enter phone number"
-                      className="flex-1 px-4 py-2.5 border border-slate-300 border-l-0 rounded-r-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Password <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={formData.password}
-                      onChange={(e) => handleInputChange("password", e.target.value)}
-                      placeholder="Ex: 8+ Character"
-                      className="w-full px-4 py-2.5 pr-10 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-2">
-                    Confirm Password <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmPassword ? "text" : "password"}
-                      value={formData.confirmPassword}
-                      onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
-                      placeholder="Ex: 8+ Character"
-                      className="w-full px-4 py-2.5 pr-10 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                    >
-                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-4">
-              <button
-                type="button"
-                onClick={handleReset}
-                className="px-6 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
-              >
-                Reset
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-6 py-2.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSubmitting ? "Submitting..." : "Submit"}
-              </button>
-            </div>
-          </form>
+      <div className="max-w-4xl mx-auto space-y-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-5">
+          <h1 className="text-2xl font-bold text-slate-900">Add Deliveryman</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            The rider is approved immediately and logs in to the delivery app with an OTP on this phone number.
+          </p>
         </div>
-      </div>
 
-      {/* Success Dialog */}
-      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
-        <DialogContent className="max-w-md bg-white p-0 opacity-0 data-[state=open]:opacity-100 data-[state=closed]:opacity-0 transition-opacity duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:scale-100 data-[state=closed]:scale-100">
-          <DialogHeader className="px-6 pt-6 pb-4">
-            <DialogTitle className="text-green-600">Success!</DialogTitle>
-          </DialogHeader>
-          <div className="px-6 pb-6">
-            <p className="text-sm text-slate-700">
-              Deliveryman added successfully!
-            </p>
+        {!signupOpen ? (
+          <div className="flex gap-2 items-start bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 text-sm">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            Rider self sign-up is switched off, so this page is the only way to add new riders.
           </div>
-          <DialogFooter className="px-6 pb-6">
+        ) : null}
+
+        {added ? (
+          <div className="flex gap-2 items-start bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-3 text-sm">
+            <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+            <div>
+              <b>{added.name}</b> added. They can log in with OTP on {added.phone}.{" "}
+              <Link to="/admin/food/delivery-partners" className="underline">View riders</Link>
+            </div>
+          </div>
+        ) : null}
+
+        {serverError ? (
+          <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-3 text-sm">{serverError}</div>
+        ) : null}
+
+        <form onSubmit={submit} className="space-y-4">
+          <section className="bg-white rounded-xl border border-slate-200 p-5">
+            <h2 className="text-base font-semibold text-slate-900 mb-3">Personal details</h2>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Full name" required error={errors.name}>
+                <input className={input} value={form.name} onChange={(e) => set("name", e.target.value)} />
+              </Field>
+              <Field label="Mobile number" required error={errors.phone} hint="Used for OTP login">
+                <div className="flex">
+                  <span className="px-3 py-2 text-sm rounded-l-lg border border-r-0 border-slate-300 bg-slate-50 text-slate-500">+91</span>
+                  <input
+                    className={`${input} rounded-l-none`}
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={form.phone}
+                    onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  />
+                </div>
+              </Field>
+              <Field label="Email" error={errors.email}>
+                <input className={input} type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
+              </Field>
+              <Field label="City" required error={errors.city} hint="Decides which city admins can see this rider">
+                {cities.length ? (
+                  <select className={input} value={form.city} onChange={(e) => set("city", e.target.value)}>
+                    <option value="">Choose a city…</option>
+                    {cities.map((c) => (
+                      <option key={c.id || c._id || c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input className={input} value={form.city} onChange={(e) => set("city", e.target.value)} />
+                )}
+              </Field>
+              <Field label="State">
+                <input className={input} value={form.state} onChange={(e) => set("state", e.target.value)} />
+              </Field>
+              <Field label="Address">
+                <input className={input} value={form.address} onChange={(e) => set("address", e.target.value)} />
+              </Field>
+            </div>
+          </section>
+
+          <section className="bg-white rounded-xl border border-slate-200 p-5">
+            <h2 className="text-base font-semibold text-slate-900 mb-3">Vehicle</h2>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Type">
+                <select className={input} value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)}>
+                  {VEHICLES.map((v) => (
+                    <option key={v.value} value={v.value}>{v.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Model">
+                <input className={input} placeholder="Honda Activa" value={form.vehicleName} onChange={(e) => set("vehicleName", e.target.value)} />
+              </Field>
+              <Field label="Registration number" hint="Must not belong to another rider">
+                <input className={input} placeholder="MH04AB1234" value={form.vehicleNumber} onChange={(e) => set("vehicleNumber", e.target.value.toUpperCase())} />
+              </Field>
+            </div>
+          </section>
+
+          <section className="bg-white rounded-xl border border-slate-200 p-5">
+            <h2 className="text-base font-semibold text-slate-900 mb-3">Documents</h2>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Driving licence no." error={errors.drivingLicenseNumber}>
+                <input className={input} value={form.drivingLicenseNumber} onChange={(e) => set("drivingLicenseNumber", e.target.value.toUpperCase())} />
+              </Field>
+              <Field label="PAN" error={errors.panNumber}>
+                <input className={input} maxLength={10} value={form.panNumber} onChange={(e) => set("panNumber", e.target.value.toUpperCase())} />
+              </Field>
+              <Field label="Aadhaar" error={errors.aadharNumber}>
+                <input className={input} inputMode="numeric" maxLength={12} value={form.aadharNumber} onChange={(e) => set("aadharNumber", e.target.value.replace(/\D/g, ""))} />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-4 mt-4">
+              {PHOTOS.map((p) => (
+                <label key={p.key} className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => setFiles((f) => ({ ...f, [p.key]: e.target.files?.[0] || null }))}
+                  />
+                  {files[p.key] ? (
+                    <img src={URL.createObjectURL(files[p.key])} alt={p.label} className="h-20 mx-auto object-contain rounded" />
+                  ) : (
+                    <Upload className="w-6 h-6 mx-auto text-slate-400" />
+                  )}
+                  <span className="block text-xs text-slate-600 mt-1">{p.label}</span>
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-white rounded-xl border border-slate-200 p-5">
+            <h2 className="text-base font-semibold text-slate-900 mb-1">Bank details</h2>
+            <p className="text-xs text-slate-500 mb-3">Optional — the rider can also add these in the app.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Account holder name">
+                <input className={input} value={form.bankAccountHolderName} onChange={(e) => set("bankAccountHolderName", e.target.value)} />
+              </Field>
+              <Field label="Account number" error={errors.bankAccountNumber}>
+                <input className={input} inputMode="numeric" value={form.bankAccountNumber} onChange={(e) => set("bankAccountNumber", e.target.value.replace(/\D/g, ""))} />
+              </Field>
+              <Field label="IFSC" error={errors.bankIfscCode}>
+                <input className={input} maxLength={11} value={form.bankIfscCode} onChange={(e) => set("bankIfscCode", e.target.value.toUpperCase())} />
+              </Field>
+              <Field label="Bank name">
+                <input className={input} value={form.bankName} onChange={(e) => set("bankName", e.target.value)} />
+              </Field>
+              <Field label="UPI id">
+                <input className={input} placeholder="name@upi" value={form.upiId} onChange={(e) => set("upiId", e.target.value)} />
+              </Field>
+            </div>
+          </section>
+
+          <div className="flex justify-end gap-2">
             <button
-              onClick={() => setShowSuccessDialog(false)}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 transition-all shadow-md"
+              type="button"
+              onClick={() => { setForm(empty); setFiles({}); setErrors({}); setServerError("") }}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm"
             >
-              OK
+              Reset
             </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium inline-flex items-center gap-2 disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Add rider
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

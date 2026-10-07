@@ -511,7 +511,51 @@ function TimeSelector({ label, value, onChange }) {
   )
 }
 
+/**
+ * Restaurant self sign-up can be switched off by the admin. Then the form is
+ * not shown at all -- the API would refuse it anyway -- and the visitor is
+ * told to contact Minto instead.
+ */
 export default function RestaurantOnboarding() {
+  const [signupOpen, setSignupOpen] = useState(null)
+  useEffect(() => {
+    let alive = true
+    restaurantAPI
+      .getOnboardingStatus()
+      .then((res) => alive && setSignupOpen(res?.data?.data?.restaurant !== false))
+      .catch(() => alive && setSignupOpen(true))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (signupOpen === null) return null
+  if (!signupOpen) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <div className="max-w-md w-full bg-white rounded-2xl border border-gray-200 p-6 text-center">
+          <h1 className="text-xl font-bold text-gray-900">Account not found</h1>
+          <p className="text-sm text-gray-600 mt-2">
+            Please contact Minto to register your restaurant. Once we add it, you can log in here with your phone number.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              clearModuleAuth("restaurant")
+              window.location.href = "/food/restaurant/login"
+            }}
+            className="mt-5 px-4 py-2 rounded-lg bg-black text-white text-sm font-medium"
+          >
+            Back to login
+          </button>
+        </div>
+      </div>
+    )
+  }
+  return <RestaurantOnboardingForm />
+}
+
+function RestaurantOnboardingForm() {
   const companyName = useCompanyName()
   const [logoUrl, setLogoUrl] = useState(() => getModuleLogoUrl("restaurant"))
   const navigate = useNavigate()

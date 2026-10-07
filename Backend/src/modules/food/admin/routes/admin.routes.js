@@ -3,6 +3,7 @@ import { runWithAdminScope } from '../../../../core/roles/adminScope.context.js'
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
 import * as adminController from '../controllers/admin.controller.js';
+import { createDeliveryPartnerByAdmin } from '../controllers/adminDeliveryPartnerCreate.controller.js';
 import * as priceRulesController from '../../pricing/priceRules.controller.js';
 import * as foodApprovalController from '../controllers/foodApproval.controller.js';
 import * as addonsApprovalController from '../controllers/addonsApproval.controller.js';
@@ -540,6 +541,8 @@ router.patch(
     adminController.deassignAndResendOrderEmergencyRequest
 );
 router.get('/delivery/partners', adminController.getDeliveryPartners);
+// Add Deliveryman: an admin-created rider, approved at once.
+router.post('/delivery/partners', upload.any(), createDeliveryPartnerByAdmin);
 router.get('/delivery/:id/sessions', adminController.getDeliveryPartnerSessions);
 router.get('/delivery/:id', adminController.getDeliveryPartnerById);
 router.patch('/delivery/:id/approve', adminController.approveDeliveryPartner);

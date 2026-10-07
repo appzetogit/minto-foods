@@ -29,7 +29,14 @@ const requirePartner = async (userId) => {
     return partner;
 };
 
-export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
+/**
+ * Creates a delivery partner -- from the rider app's sign-up (pending, for an
+ * admin to approve) or from the admin panel's Add Deliveryman (`createdByAdmin`:
+ * approved straight away, with optional bank details). One function, so both
+ * paths get the same duplicate checks, vehicle rules and document uploads.
+ */
+export const registerDeliveryPartner = async (payload, files, rawBody = {}, opts = {}) => {
+    const createdByAdmin = Boolean(opts.createdByAdmin);
     const {
         name, phone, email, countryCode, address, city, state,
         vehicleType, vehicleName, vehicleNumber, drivingLicenseNumber, panNumber, aadharNumber,
@@ -134,7 +141,9 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
             drivingLicenseNumber,
             panNumber,
             aadharNumber,
-            status: 'pending',
+            status: createdByAdmin ? 'approved' : 'pending',
+            ...(createdByAdmin ? { approvedAt: new Date() } : {}),
+            ...(createdByAdmin ? bankFieldsOf(payload) : {}),
             referredById,
             ...images,
             ...(Object.keys(customFields).length ? { customFields } : {}),
@@ -154,6 +163,9 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
     // Save FCM through the shared upsert, so this token cannot live on another account.
     if (fcmToken) await savePartnerFcmToken(partner.id, fcmToken, platform);
 
+    // An admin adding a rider doesn't need telling about it.
+    if (createdByAdmin) return partner;
+
     try {
         const { notifyAdminsSafely } = await import('../../../../core/notifications/firebase.service.js');
         void notifyAdminsSafely({
@@ -167,6 +179,21 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}) => {
 
     return partner;
 };
+
+/** Bank / UPI details an admin may fill in when adding a rider. */
+function bankFieldsOf(payload = {}) {
+    const out = {};
+    const put = (key, value) => {
+        const v = String(value ?? '').trim();
+        if (v) out[key] = v;
+    };
+    put('bankAccountHolderName', payload.bankAccountHolderName);
+    put('bankAccountNumber', payload.bankAccountNumber);
+    put('bankIfscCode', String(payload.bankIfscCode ?? '').toUpperCase());
+    put('bankName', payload.bankName);
+    put('upiId', payload.upiId);
+    return out;
+}
 
 /** Shared vehicle-number guard for the profile-update paths. */
 async function claimVehicleNumber(vNum, selfId) {
