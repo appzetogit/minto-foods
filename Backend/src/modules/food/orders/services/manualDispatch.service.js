@@ -422,12 +422,17 @@ async function notifyRiderOfAssignment(row, partnerId, windowMs) {
   }
 }
 
+/**
+ * Tell a rider their pending assignment was taken back. 'order_deassigned' is
+ * the event the shipped rider app already listens for: it closes the accept
+ * popup for that order, so no app update is needed.
+ */
 function tellRiderWithdrawn(partnerId, row) {
   try {
-    getIO()?.to(rooms.delivery(partnerId)).emit('order_unassigned', {
+    getIO()?.to(rooms.delivery(partnerId)).emit('order_deassigned', {
       orderId: row.id,
       orderMongoId: row.id,
-      message: `Order #${row.order_id || row.id} was assigned to another rider.`,
+      message: `Order #${row.order_id || row.id} is no longer assigned to you.`,
     });
   } catch {
     /* best effort */
