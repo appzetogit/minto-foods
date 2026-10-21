@@ -139,7 +139,9 @@ export async function getTaxReport(query = {}) {
     const search = query.search && String(query.search).trim() ? String(query.search).trim() : null;
     const createdAt = buildTaxReportDateMatch(fromDate, toDate);
 
-    const scope = { createdAt, search };
+    // One restaurant, to check its GST on its own.
+    const restaurantId = isId(query.restaurantId) ? String(query.restaurantId) : null;
+    const scope = { createdAt, search, restaurantId };
 
     // Grouped by the database. This used to read every order on the platform
     // for the window into Node and bucket them there.
@@ -161,7 +163,7 @@ export async function getTaxReport(query = {}) {
     const [restaurants, overCount] = await Promise.all([
         prisma.foodRestaurant.findMany({
             where: { id: { in: restaurantIds } },
-            select: { id: true, restaurantName: true },
+            select: { id: true, restaurantName: true, gstNumber: true, gstLegalName: true },
         }),
         shareOverCountByRestaurant(
             taxScopeWhere(scope),
@@ -169,6 +171,7 @@ export async function getTaxReport(query = {}) {
         ),
     ]);
     const nameById = new Map(restaurants.map((row) => [row.id, row.restaurantName]));
+    const gstById = new Map(restaurants.map((row) => [row.id, row]));
 
     let totalEarnings = 0;
     let totalTax = 0;
@@ -189,6 +192,8 @@ export async function getTaxReport(query = {}) {
                 totalIncome: earnings,
                 totalTax: tax,
                 orderCount: row.orderCount,
+                gstNumber: gstById.get(row.restaurantId)?.gstNumber || '',
+                gstLegalName: gstById.get(row.restaurantId)?.gstLegalName || '',
             };
         })
         // Biggest tax bill first — that is the row an accountant looks at.
@@ -200,6 +205,8 @@ export async function getTaxReport(query = {}) {
             totalIncome: rupees(item.totalIncome),
             totalTax: rupees(item.totalTax),
             orderCount: item.orderCount,
+            gstNumber: item.gstNumber,
+            gstLegalName: item.gstLegalName,
         }));
 
     return {
@@ -230,7 +237,10 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
         }),
         prisma.foodOrder.count({ where }),
         loadOffersByRestaurantIds([rid]),
-        prisma.foodRestaurant.findUnique({ where: { id: rid }, select: { restaurantName: true } }),
+        prisma.foodRestaurant.findUnique({
+            where: { id: rid },
+            select: { restaurantName: true, gstNumber: true, gstLegalName: true },
+        }),
     ]);
 
     const txByOrderId = await loadTransactions(orders.map((order) => order.id));
@@ -238,6 +248,8 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
 
     return {
         restaurantName: restaurant?.restaurantName || 'Unknown Restaurant',
+        gstNumber: restaurant?.gstNumber || '',
+        gstLegalName: restaurant?.gstLegalName || '',
         orders: orders.map((order) => {
             const money = orderMoney(order, txByOrderId.get(order.id));
             return {
@@ -245,7 +257,54 @@ export async function getTaxReportDetail(restaurantId, query = {}) {
                 orderId: order.orderId,
                 totalAmount: rupees(computeRestaurantOrderShare(money, offers, rid)),
                 taxAmount: rupees(computeOrderTaxAmount(money, taxRate, calculateTax)),
+                // What the GST was charged on: food value after discount.
+                taxableAmount: rupees(Math.max(0, num(money.subtotal) - num(money.discount))),
                 date: order.createdAt,
+            };
+        }),
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+    };
+}
+
+/**
+ * Every taxed order in the window, one row each, with its restaurant and GSTIN:
+ * the order-wise list an accountant files from. Same scope as the summary.
+ */
+export async function getTaxReportOrders(query = {}) {
+    const { fromDate, toDate, taxRate, calculateTax } = query;
+    const createdAt = buildTaxReportDateMatch(fromDate, toDate);
+    const search = query.search && String(query.search).trim() ? String(query.search).trim() : null;
+    const restaurantId = isId(query.restaurantId) ? String(query.restaurantId) : null;
+    const where = taxScopeWhere({ restaurantId, createdAt, search });
+
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 5000);
+    const page = Math.max(parseInt(query.page, 10) || 1, 1);
+
+    const [orders, total] = await Promise.all([
+        prisma.foodOrder.findMany({
+            where,
+            select: { ...TAX_ORDER_SELECT, restaurant: { select: { restaurantName: true, gstNumber: true } } },
+            orderBy: { createdAt: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma.foodOrder.count({ where }),
+    ]);
+
+    const txByOrderId = await loadTransactions(orders.map((order) => order.id));
+
+    return {
+        orders: orders.map((order) => {
+            const money = orderMoney(order, txByOrderId.get(order.id));
+            return {
+                id: order.id,
+                orderId: order.orderId,
+                date: order.createdAt,
+                restaurantId: order.restaurantId,
+                restaurantName: order.restaurant?.restaurantName || 'Unknown Restaurant',
+                gstNumber: order.restaurant?.gstNumber || '',
+                taxableAmount: rupees(Math.max(0, num(money.subtotal) - num(money.discount))),
+                taxAmount: rupees(computeOrderTaxAmount(money, taxRate, calculateTax)),
             };
         }),
         pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },

@@ -10,6 +10,105 @@ const debugError = (...args) => {}
 
 
 // Fee Settings Component - Range-based delivery fee configuration
+/**
+ * The distance ladder must start at 0 km and have no gaps: a distance no range
+ * covered was quietly priced as the longest range. The server checks the same.
+ */
+const ladderProblem = (ranges = []) => {
+  const sorted = [...ranges].sort((a, b) => Number(a.min) - Number(b.min))
+  if (!sorted.length) return null
+  if (Number(sorted[0].min) > 0.001) return `The first range must start at 0 km (it starts at ${sorted[0].min} km)`
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (Math.abs(Number(sorted[i].min) - Number(sorted[i - 1].max)) > 0.001) {
+      return `Ranges must not have gaps: nothing covers ${sorted[i - 1].max} km to ${sorted[i].min} km`
+    }
+  }
+  return null
+}
+
+// The same arithmetic as the server (order-pricing.service.js): each range
+// charges its fee plus the per-km rate past the range start, and pays the
+// rider base pay plus per-km past the range start. A distance past the last
+// range uses the last range.
+const rangeFor = (ranges, km) => {
+  const sorted = [...ranges].sort((a, b) => Number(a.min) - Number(b.min))
+  const hit = sorted.find((r, i) =>
+    km >= Number(r.min) && (i === sorted.length - 1 ? km <= Number(r.max) : km < Number(r.max)))
+  return hit || sorted[sorted.length - 1]
+}
+const customerFeeAt = (ranges, km) => {
+  const r = rangeFor(ranges, km)
+  return Number(r.fee || 0) + Number(r.feePerKm || 0) * Math.max(0, km - Number(r.min || 0))
+}
+const riderPayAt = (ranges, km, floor) => {
+  const r = rangeFor(ranges, km)
+  const pay = Number(r.deliveryBoyBasePay || 0) + Number(r.deliveryBoyPerKm || 0) * Math.max(0, km - Number(r.min || 0))
+  return Math.max(Number(floor) || 0, Math.round(pay))
+}
+
+/** What each distance costs the customer, pays the rider, and leaves the platform. */
+function FeePreview({ ranges, riderFloor }) {
+  if (!ranges.length) return null
+  const last = Math.max(...ranges.map((r) => Number(r.max) || 0))
+  const points = [...new Set([
+    ...Array.from({ length: Math.min(Math.ceil(last), 20) }, (_, i) => i + 1),
+    ...ranges.map((r) => Number(r.max)),
+    ...ranges.map((r) => Math.max(0, Number(r.max) - 0.1)),
+  ])].filter((km) => km > 0 && km <= last).sort((a, b) => a - b)
+
+  let previousFee = -Infinity
+  const rows = points.map((km) => {
+    const fee = Math.round(customerFeeAt(ranges, km) * 100) / 100
+    const pay = riderPayAt(ranges, km, riderFloor)
+    const drop = fee < previousFee - 0.009
+    previousFee = fee
+    return { km, fee, pay, margin: Math.round((fee - pay) * 100) / 100, drop }
+  })
+  const losses = rows.filter((r) => r.margin < 0).length
+  const drops = rows.filter((r) => r.drop).length
+
+  return (
+    <div className="mb-4 rounded-lg border border-slate-200 overflow-hidden">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <h4 className="text-sm font-semibold text-slate-800">Preview: what each distance costs</h4>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Delivery fee only (before GST, surge and Quick delivery). Rider pay includes the minimum pay per trip.
+        </p>
+        {(losses > 0 || drops > 0) && (
+          <p className="mt-2 text-xs font-semibold text-red-600">
+            {losses > 0 ? `Rider is paid more than the customer pays at ${losses} distance${losses > 1 ? "s" : ""}. ` : ""}
+            {drops > 0 ? "The customer fee goes down as the distance goes up somewhere below: start the next range at the price the previous one ends on." : ""}
+          </p>
+        )}
+      </div>
+      <div className="max-h-72 overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-white sticky top-0">
+            <tr className="text-left text-xs text-slate-500">
+              <th className="px-4 py-2 font-medium">Distance</th>
+              <th className="px-4 py-2 font-medium text-right">Customer pays</th>
+              <th className="px-4 py-2 font-medium text-right">Rider gets</th>
+              <th className="px-4 py-2 font-medium text-right">Platform keeps</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.km} className={r.margin < 0 || r.drop ? "bg-red-50" : ""}>
+                <td className="px-4 py-1.5 text-slate-700">{Number(r.km.toFixed(2))} km</td>
+                <td className={`px-4 py-1.5 text-right ${r.drop ? "text-red-600 font-semibold" : "text-slate-800"}`}>₹{r.fee.toFixed(2)}</td>
+                <td className="px-4 py-1.5 text-right text-slate-800">₹{r.pay}</td>
+                <td className={`px-4 py-1.5 text-right font-semibold ${r.margin < 0 ? "text-red-600" : "text-green-700"}`}>
+                  {r.margin < 0 ? "−" : ""}₹{Math.abs(r.margin).toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function FeeSettings() {
   const [feeSettings, setFeeSettings] = useState({
     deliveryFee: "",
@@ -141,13 +240,10 @@ export default function FeeSettings() {
           settingsToSave.riderMinPayPerTrip === "" ? null : Number(settingsToSave.riderMinPayPerTrip),
         gstRate: settingsToSave.gstRate === "" ? undefined : Number(settingsToSave.gstRate),
         deliveryFeeGstRate: settingsToSave.deliveryFeeGstRate === "" ? undefined : Number(settingsToSave.deliveryFeeGstRate),
-        // Blank inherits: a zone follows the global choice, the global row
-        // falls back to "road, capped".
-        deliveryDistanceMode: settingsToSave.deliveryDistanceMode || null,
-        roadDistanceCapFactor:
-          settingsToSave.roadDistanceCapFactor === "" || settingsToSave.roadDistanceCapFactor === null
-            ? null
-            : Number(settingsToSave.roadDistanceCapFactor),
+        // The distance choice was removed from this page; saving clears any
+        // old value. The fee is always on road distance capped at 1.5x.
+        deliveryDistanceMode: null,
+        roadDistanceCapFactor: null,
         isActive: true,
         // Without this a zone edit would land on the global row and change
         // the fees for every zone that inherits it.
@@ -248,12 +344,6 @@ export default function FeeSettings() {
       return
     }
 
-    // Mutual exclusivity within range
-    if (dbPerKm > 0 && dbBasePay > 0) {
-      toast.error('Please set either Per KM Amount or Base Pay, not both')
-      return
-    }
-
     if (min >= max) {
       toast.error('Min distance must be less than Max distance')
       return
@@ -290,6 +380,12 @@ export default function FeeSettings() {
       deliveryFeeRanges: updatedRanges
     }
 
+    const ladderError = ladderProblem(updatedRanges)
+    if (ladderError) {
+      toast.error(ladderError)
+      return
+    }
+
     setFeeSettings(updatedSettings)
     
     // Save to DB immediately
@@ -302,6 +398,11 @@ export default function FeeSettings() {
   // Delete delivery fee range
   const handleDeleteRange = async (index) => {
     const newRanges = feeSettings.deliveryFeeRanges.filter((_, i) => i !== index)
+    const ladderError = ladderProblem(newRanges)
+    if (ladderError) {
+      toast.error(`Can't delete this range: ${ladderError}. Edit the next range to start where this one starts instead.`)
+      return
+    }
     const updatedSettings = {
       ...feeSettings,
       deliveryFeeRanges: newRanges
@@ -343,12 +444,6 @@ export default function FeeSettings() {
       return
     }
 
-    // Mutual exclusivity within range
-    if (dbPerKm > 0 && dbBasePay > 0) {
-      toast.error('Please set either Per KM Amount or Base Pay, not both')
-      return
-    }
-
     if (min >= max) {
       toast.error('Min value must be less than Max value')
       return
@@ -380,6 +475,12 @@ export default function FeeSettings() {
     const updatedSettings = {
       ...feeSettings,
       deliveryFeeRanges: ranges
+    }
+
+    const ladderError = ladderProblem(ranges)
+    if (ladderError) {
+      toast.error(ladderError)
+      return
     }
 
     setFeeSettings(updatedSettings)
@@ -505,8 +606,8 @@ export default function FeeSettings() {
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Max Distance (km)</th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">User Delivery Fee (₹)</th>
                           <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">User ₹/km</th>
-                          <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">DB Per KM (₹)</th>
-                          <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">DB Base Pay (₹)</th>
+                          <th title="Added to the rider base pay for every km past this range's start, the same way the customer per-km works. Not charged to the customer." className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Rider ₹/km after range start</th>
+                          <th title="What the rider earns for a trip at the start of this range. Per-km pay is added on top. Not charged to the customer." className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200">Rider Base Pay (₹)</th>
                           <th className="px-4 py-3 text-center text-sm font-semibold text-slate-700 border-b border-slate-200">Actions</th>
                         </tr>
                       </thead>
@@ -661,6 +762,8 @@ export default function FeeSettings() {
                   </div>
                 )}
 
+                <FeePreview ranges={feeSettings.deliveryFeeRanges} riderFloor={feeSettings.riderMinPayPerTrip} />
+
                 {/* Add/Edit Range Form */}
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                     <div className="flex items-center gap-2 mb-3">
@@ -724,7 +827,7 @@ export default function FeeSettings() {
                       <p className="mt-1 text-xs text-slate-500">Charged on the distance past this band start. 0 means a flat fee.</p>
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">DB Per KM (₹)</label>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Rider ₹/km after range start</label>
                       <input
                         type="number"
                         value={newRange.deliveryBoyPerKm}
@@ -737,7 +840,7 @@ export default function FeeSettings() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">DB Base Pay (₹)</label>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Rider Base Pay (₹)</label>
                       <input
                         type="number"
                         value={newRange.deliveryBoyBasePay}
@@ -815,7 +918,7 @@ export default function FeeSettings() {
                     placeholder="15"
                   />
                   <p className="text-xs text-slate-500">
-                    Extra amount added on top of delivery fee when user selects Quick Mode
+                    Extra amount charged when the customer picks Quick delivery at checkout. It is added to the order total and shown in the bill as "Quick Mode"; the rider pay does not change.
                   </p>
                   {feeErrors.quickDeliveryFee ? (
                     <p className="text-xs font-medium text-red-600">{feeErrors.quickDeliveryFee}</p>
@@ -845,53 +948,6 @@ export default function FeeSettings() {
                     <p className="text-xs font-medium text-red-600">{feeErrors.riderMinPayPerTrip}</p>
                   ) : null}
                 </div>
-
-                {/* Which distance the fee is charged on */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    Distance used for delivery fee
-                  </label>
-                  <select
-                    value={feeSettings.deliveryDistanceMode || ""}
-                    onChange={(e) => setFee("deliveryDistanceMode", e.target.value)}
-                    className={feeInputClass("deliveryDistanceMode")}
-                  >
-                    <option value="">
-                      {selectedZoneId ? "Same as global setting" : "Road distance, capped (recommended)"}
-                    </option>
-                    <option value="road_capped">Road distance, capped</option>
-                    <option value="road">Road distance (Google Maps route)</option>
-                    <option value="straight">Straight-line distance</option>
-                  </select>
-                  <p className="text-xs text-slate-500">
-                    The fee, the rider&rsquo;s pay and the distance shown to the customer all use this.
-                    Road routes can be much longer than the real trip (one-way streets, detours);
-                    &ldquo;capped&rdquo; charges the road distance but never more than the cap below times the
-                    straight line.
-                  </p>
-                </div>
-
-                {(feeSettings.deliveryDistanceMode || "road_capped") === "road_capped" ? (
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-slate-700">
-                      Road distance cap (× straight line)
-                    </label>
-                    <input
-                      type="number"
-                      value={feeSettings.roadDistanceCapFactor}
-                      onChange={(e) => setFee("roadDistanceCapFactor", e.target.value)}
-                      onKeyDown={blockExponent}
-                      min="1"
-                      max="5"
-                      step="0.1"
-                      className={feeInputClass("roadDistanceCapFactor")}
-                      placeholder="1.5"
-                    />
-                    <p className="text-xs text-slate-500">
-                      1.5 means a trip 1 km away in a straight line is charged at most 1.5 km. Blank = 1.5.
-                    </p>
-                  </div>
-                ) : null}
 
                 {/* GST Rate */}
                 <div className="space-y-2">

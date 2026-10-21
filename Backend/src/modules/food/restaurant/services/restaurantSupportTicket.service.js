@@ -14,6 +14,19 @@ const PRIORITIES = ['low', 'medium', 'high'];
 // The API speaks 'in-progress'; Prisma's enum name for it is in_progress.
 const STATUS_BY_WIRE = { open: 'open', 'in-progress': 'in_progress', resolved: 'resolved' };
 
+/**
+ * A ticket as the restaurant app reads it. The list used to return raw rows,
+ * so status came back as "in_progress" while the app compares against
+ * "in-progress", and the app had no stable field for the admin's reply.
+ */
+const toWire = (t) => ({
+    ...t,
+    _id: t.id,
+    status: String(t.status) === 'in_progress' ? 'in-progress' : String(t.status),
+    adminResponse: t.adminResponse || '',
+    hasReply: Boolean(String(t.adminResponse || '').trim()),
+});
+
 export async function createRestaurantSupportTicket(restaurantId, body = {}) {
     const category = String(body.category || '').trim().toLowerCase();
     const priority = String(body.priority || 'medium').trim().toLowerCase();
@@ -67,5 +80,15 @@ export async function listRestaurantSupportTickets(restaurantId, query = {}) {
         prisma.foodRestaurantSupportTicket.count({ where }),
     ]);
 
-    return { tickets, total, page, limit };
+    return { tickets: tickets.map(toWire), total, page, limit };
+}
+
+/** One of the restaurant's own tickets, with the admin's reply. */
+export async function getRestaurantSupportTicket(restaurantId, ticketId) {
+    const id = String(ticketId || '').trim();
+    if (!id) throw new ValidationError('Ticket id required');
+    const ticket = await prisma.foodRestaurantSupportTicket.findFirst({
+        where: { id, restaurantId },
+    });
+    return ticket ? toWire(ticket) : null;
 }

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Search, Download, ChevronDown, ChevronLeft, ChevronRight, Eye, Settings, ArrowUpDown, Loader2, X, MapPin, Phone, Mail, Clock, Star, Building2, User, FileText, FileSpreadsheet, CreditCard, Calendar, Image as ImageIcon, ExternalLink, ShieldX, AlertTriangle, Trash2, Plus, Pencil } from "lucide-react"
 import { adminAPI, restaurantAPI, uploadAPI } from "@food/api"
+import { toast } from "sonner"
 import { clearModuleAuth } from "@food/utils/auth"
 import { resolveMediaUrl } from "../../../../../shared/utils/mediaUrl.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
@@ -61,6 +62,8 @@ const mapRawRestaurant = (restaurant, index, zones) => ({
   city: restaurant.cityName || "—",
   approvalStatus: normalizeApprovalStatus(restaurant),
   isActive: restaurant.isActive !== false && restaurant.status === "approved",
+  // The outlet's own online/offline switch (taking orders right now).
+  isAcceptingOrders: restaurant.isAcceptingOrders !== false,
   rating: restaurant.rating || restaurant.ratings?.average || 0,
   logo: getPrimaryRestaurantImage(restaurant, PLACEHOLDER_40),
   originalData: restaurant,
@@ -1085,6 +1088,29 @@ export default function RestaurantsList() {
     setRestaurantOutletTimings(null)
   }
 
+  // Take an outlet offline (or back online) for it, e.g. when its app has
+  // stopped working and orders would otherwise go unanswered.
+  const [togglingOnlineId, setTogglingOnlineId] = useState(null)
+  const handleToggleOnline = async (restaurant) => {
+    const restaurantId = restaurant._id || restaurant.id
+    const next = !restaurant.isAcceptingOrders
+    if (!next && !window.confirm(`Take ${restaurant.name} offline? Customers won't be able to order from it until it's turned back on.`)) {
+      return
+    }
+    setTogglingOnlineId(restaurantId)
+    try {
+      await adminAPI.updateRestaurant(restaurantId, { isAcceptingOrders: next })
+      setRestaurants((prev) =>
+        prev.map((r) => ((r._id || r.id) === restaurantId ? { ...r, isAcceptingOrders: next } : r)),
+      )
+      toast.success(`${restaurant.name} is now ${next ? "online" : "offline"}`)
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Couldn't change the restaurant's online status")
+    } finally {
+      setTogglingOnlineId(null)
+    }
+  }
+
   // Handle ban/unban restaurant
   const handleBanRestaurant = (restaurant) => {
     const isBanned = !restaurant.isActive
@@ -1486,6 +1512,24 @@ export default function RestaurantsList() {
                             <span className="text-[11px] text-slate-500">
                               Outlet: {restaurant.isActive ? "Active" : "Inactive"}
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleOnline(restaurant)}
+                              disabled={togglingOnlineId === (restaurant._id || restaurant.id)}
+                              title={restaurant.isAcceptingOrders ? "Take offline" : "Bring online"}
+                              className="inline-flex w-fit items-center gap-1.5 text-[11px] font-semibold disabled:opacity-50"
+                            >
+                              <span
+                                className={`relative inline-block h-4 w-7 rounded-full transition-colors ${restaurant.isAcceptingOrders ? "bg-green-500" : "bg-slate-300"}`}
+                              >
+                                <span
+                                  className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${restaurant.isAcceptingOrders ? "left-3.5" : "left-0.5"}`}
+                                />
+                              </span>
+                              <span className={restaurant.isAcceptingOrders ? "text-green-700" : "text-slate-500"}>
+                                {restaurant.isAcceptingOrders ? "Online" : "Offline"}
+                              </span>
+                            </button>
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">

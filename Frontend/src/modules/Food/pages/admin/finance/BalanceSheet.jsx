@@ -19,7 +19,26 @@ const money = (value) => {
   return `${n < 0 ? "-" : ""}₹${Math.abs(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
-const iso = (date) => date.toISOString().slice(0, 10)
+// The calendar date as the admin sees it. toISOString() is UTC, and in India
+// local midnight on Monday is still Sunday in UTC, so every week came out
+// starting on the Sunday before.
+const iso = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+
+// Day boundaries in India time. Orders are placed in IST, so a "Z" range was
+// moving 5½ hours of Monday morning into the previous week.
+const IST = "+05:30"
+const rangeParams = (period) => ({
+  from: `${period.from}T00:00:00.000${IST}`,
+  to: `${period.to}T23:59:59.999${IST}`,
+})
+
+/** Orders Monday to Sunday are paid on the following Monday. */
+const payoutDateFor = (period) => {
+  const day = new Date(`${period.to}T00:00:00`)
+  day.setDate(day.getDate() + 1)
+  return day.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })
+}
 
 /** Monday-to-Sunday containing `ref`, since payouts are described as weekly. */
 const weekOf = (ref = new Date()) => {
@@ -54,7 +73,7 @@ export default function BalanceSheet() {
     try {
       // The API takes a datetime range; the pickers are dates, so the end is
       // pushed to the last moment of that day or the final day pays nothing.
-      const params = { from: `${period.from}T00:00:00.000Z`, to: `${period.to}T23:59:59.999Z` }
+      const params = rangeParams(period)
       const res =
         tab === "restaurants"
           ? await adminAPI.getBalanceSheetRestaurants(params)
@@ -115,8 +134,7 @@ export default function BalanceSheet() {
     setPayingId(row.entityId)
     try {
       const res = await adminAPI.payoutBalance(row.entityType, row.entityId, {
-        from: `${period.from}T00:00:00.000Z`,
-        to: `${period.to}T23:59:59.999Z`,
+        ...rangeParams(period),
         amount,
         reference,
       })
@@ -207,6 +225,10 @@ export default function BalanceSheet() {
                 Next week →
               </button>
             </div>
+
+            <p className="text-xs text-slate-500 self-center">
+              Payout date: <span className="font-semibold text-slate-700">{payoutDateFor(period)}</span>
+            </p>
 
             <button type="button" onClick={loadHistory} className="ml-auto px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-100 flex items-center gap-1.5">
               <History className="w-4 h-4" /> Past payouts

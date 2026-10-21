@@ -4,7 +4,8 @@ import { Button } from "@food/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@food/components/ui/card"
 import { Input } from "@food/components/ui/input"
 import { Label } from "@food/components/ui/label"
-import { Clock, Loader2, Save } from "lucide-react"
+import { Clock, Loader2, Save, Tag } from "lucide-react"
+import { HighlightBadgeManager } from "@food/components/admin/restaurant/HighlightBadges"
 import { toast } from "sonner"
 
 const MIN_MINUTES = 1
@@ -75,7 +76,7 @@ export default function RestaurantSettings() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Restaurant Settings</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Set the order acceptance timer for all restaurants.
+          Order acceptance timer and restaurant tags.
         </p>
       </div>
 
@@ -123,6 +124,21 @@ export default function RestaurantSettings() {
               Save
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6 border-slate-200 shadow-sm">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Tag className="h-5 w-5 text-slate-600" />
+            <CardTitle className="text-lg">Restaurant Tags</CardTitle>
+          </div>
+          <CardDescription>
+            Tags such as Bestseller or Popular, shown on restaurant cards in the app. Pick one per restaurant on its edit page.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <HighlightBadgeManager />
         </CardContent>
       </Card>
     </div>

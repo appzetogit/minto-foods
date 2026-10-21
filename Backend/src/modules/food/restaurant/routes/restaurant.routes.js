@@ -37,7 +37,8 @@ import {
 } from '../controllers/restaurantOffer.controller.js';
 import {
     createRestaurantSupportTicketController,
-    listRestaurantSupportTicketsController
+    listRestaurantSupportTicketsController,
+    getRestaurantSupportTicketController,
 } from '../controllers/supportTicket.controller.js';
 import {
     createWithdrawalRequestController,
@@ -326,6 +327,7 @@ router.post('/orders/:orderId/resend-notification', authMiddleware, requireResta
 router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);
 router.post('/support/tickets', authMiddleware, requireRestaurant, createRestaurantSupportTicketController);
 router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurantSupportTicketsController);
+router.get('/support/tickets/:id', authMiddleware, requireRestaurant, getRestaurantSupportTicketController);
 
 // Offers (restaurant dashboard)
 router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);

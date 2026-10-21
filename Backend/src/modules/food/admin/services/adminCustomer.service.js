@@ -47,6 +47,35 @@ const deliveredStatsFor = async (userIds) => {
     );
 };
 
+const formatAddress = (a) => ({
+    id: a.id,
+    label: a.label,
+    street: a.street,
+    additionalDetails: a.additionalDetails || '',
+    city: a.city,
+    state: a.state,
+    zipCode: a.zipCode || '',
+    phone: a.phone || '',
+    latitude: a.latitude,
+    longitude: a.longitude,
+    isDefault: a.isDefault,
+    fullAddress: [a.additionalDetails, a.street, a.city, a.state, a.zipCode].filter(Boolean).join(', '),
+});
+
+/** Each customer's default address (or newest, if none is marked default). */
+const defaultAddressesFor = async (userIds) => {
+    if (!userIds.length) return new Map();
+    const rows = await prisma.userAddress.findMany({
+        where: { userId: { in: userIds } },
+        orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
+    });
+    const byUser = new Map();
+    for (const row of rows) {
+        if (!byUser.has(row.userId)) byUser.set(row.userId, formatAddress(row));
+    }
+    return byUser;
+};
+
 const serializeCustomer = (user, stats) => ({
     id: user.id,
     _id: user.id,
@@ -113,29 +142,56 @@ export async function getCustomers(query = {}) {
     const sortBy = String(query.sortBy || '').trim();
     const byOrderCount = sortBy === 'orders-asc' || sortBy === 'orders-desc';
 
+    // Filter by how many delivered orders a customer has (e.g. 0 = never
+    // ordered, 1, 2-5, 5+).
+    const toCount = (value) => {
+        if (value === undefined || value === null || String(value).trim() === '') return null;
+        const n = parseInt(value, 10);
+        return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    const minOrders = toCount(query.minOrders);
+    const maxOrders = toCount(query.maxOrders);
+    const byOrderFilter = minOrders !== null || maxOrders !== null;
+
     let users;
     let total;
 
-    if (byOrderCount) {
-        // Ordering by a *filtered* relation count is beyond Prisma's
-        // orderBy — its relation counts cannot be filtered to delivered
-        // orders — so the page of ids is resolved in SQL. Was a $lookup
-        // pipeline that loaded every matching order into the sort.
+    if (byOrderCount || byOrderFilter) {
+        // Ordering or filtering by a *filtered* relation count is beyond
+        // Prisma's orderBy — its relation counts cannot be filtered to
+        // delivered orders — so the page of ids is resolved in SQL. Was a
+        // $lookup pipeline that loaded every matching order into the sort.
         const direction = sortBy === 'orders-asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`;
+        const orderBySql = byOrderCount
+            ? Prisma.sql`ORDER BY COUNT(o."id") ${direction}, u."createdAt" DESC`
+            : Prisma.sql`ORDER BY u."createdAt" DESC`;
+        const having = [
+            ...(minOrders !== null ? [Prisma.sql`COUNT(o."id") >= ${minOrders}`] : []),
+            ...(maxOrders !== null ? [Prisma.sql`COUNT(o."id") <= ${maxOrders}`] : []),
+        ];
+        const havingSql = having.length ? Prisma.sql`HAVING ${Prisma.join(having, ' AND ')}` : Prisma.empty;
 
         const scoped = await prisma.foodUser.findMany({ where, select: { id: true } });
-        total = scoped.length;
+        if (!scoped.length) return { customers: [], total: 0, page, limit };
 
-        if (!total) return { customers: [], total: 0, page, limit };
-
-        const ordered = await prisma.$queryRaw`
-            SELECT u."id"
+        const grouped = Prisma.sql`
+            SELECT u."id", u."createdAt", COUNT(o."id") AS cnt
             FROM "food_users" u
             LEFT JOIN "food_orders" o
               ON o."userId" = u."id" AND o."orderStatus" = 'delivered'
             WHERE u."id" = ANY(${scoped.map((u) => u.id)})
             GROUP BY u."id", u."createdAt"
-            ORDER BY COUNT(o."id") ${direction}, u."createdAt" DESC
+            ${havingSql}
+        `;
+
+        total = byOrderFilter
+            ? Number((await prisma.$queryRaw`SELECT COUNT(*)::int AS n FROM (${grouped}) g`)[0]?.n || 0)
+            : scoped.length;
+        if (!total) return { customers: [], total: 0, page, limit };
+
+        const ordered = await prisma.$queryRaw`
+            ${grouped}
+            ${orderBySql}
             LIMIT ${limit} OFFSET ${skip}
         `;
 
@@ -159,8 +215,14 @@ export async function getCustomers(query = {}) {
         ]);
     }
 
-    const stats = await deliveredStatsFor(users.map((u) => u.id));
-    let customers = users.map((user) => serializeCustomer(user, stats.get(user.id)));
+    const [stats, addresses] = await Promise.all([
+        deliveredStatsFor(users.map((u) => u.id)),
+        defaultAddressesFor(users.map((u) => u.id)),
+    ]);
+    let customers = users.map((user) => ({
+        ...serializeCustomer(user, stats.get(user.id)),
+        address: addresses.get(user.id) || null,
+    }));
 
     const chooseFirst = parseInt(query.chooseFirst, 10);
     if (Number.isFinite(chooseFirst) && chooseFirst > 0) {
@@ -179,13 +241,46 @@ export async function getCustomerById(id) {
     });
     if (!user) return null;
 
-    const stats = (await deliveredStatsFor([user.id])).get(user.id);
+    // The detail screen has always had Addresses and Recent Orders sections;
+    // the select never loaded either, so both stayed hidden.
+    const [statsMap, addressRows, orderRows, placedCount] = await Promise.all([
+        deliveredStatsFor([user.id]),
+        prisma.userAddress.findMany({
+            where: { userId: user.id },
+            orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
+        }),
+        prisma.foodOrder.findMany({
+            where: { userId: user.id, orderStatus: { not: 'pending_payment' } },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+            select: {
+                id: true, order_id: true, orderId: true, orderStatus: true, paymentMethod: true,
+                paymentStatus: true, total: true, createdAt: true,
+                restaurant: { select: { restaurantName: true } },
+            },
+        }),
+        prisma.foodOrder.count({ where: { userId: user.id, orderStatus: { not: 'pending_payment' } } }),
+    ]);
+    const stats = statsMap.get(user.id);
 
     return {
         ...serializeCustomer(user, stats),
         // The detail screen reads totalOrders; the list reads totalOrder.
         totalOrders: stats?.totalOrder || 0,
+        // Every order placed, delivered or not.
+        totalOrdersPlaced: placedCount,
         updatedAt: user.updatedAt,
+        addresses: addressRows.map(formatAddress),
+        orders: orderRows.map((o) => ({
+            id: o.id,
+            orderId: o.order_id || o.orderId || o.id,
+            restaurantName: o.restaurant?.restaurantName || '',
+            total: Number(o.total) || 0,
+            status: String(o.orderStatus || '').replace(/_/g, ' '),
+            paymentMethod: o.paymentMethod,
+            paymentStatus: o.paymentStatus,
+            createdAt: o.createdAt,
+        })),
     };
 }
 

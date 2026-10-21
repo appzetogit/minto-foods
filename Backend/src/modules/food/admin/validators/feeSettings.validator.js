@@ -148,6 +148,18 @@ export const validateFeeSettingsUpsertDto = (body) => {
             if (cur.min < prev.max) {
                 throw new ValidationError('Delivery fee ranges must not overlap');
             }
+            // A gap had no price of its own and was quietly charged as the
+            // longest band.
+            if (Math.abs(cur.min - prev.max) > 0.001) {
+                throw new ValidationError(
+                    `Delivery fee ranges must not have gaps: nothing covers ${prev.max} km to ${cur.min} km`,
+                );
+            }
+        }
+        if (sorted.length && sorted[0].min > 0.001) {
+            throw new ValidationError(
+                `The first delivery fee range must start at 0 km (it starts at ${sorted[0].min} km)`,
+            );
         }
         result.data.deliveryFeeRanges = sorted;
     }

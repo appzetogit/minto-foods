@@ -41,9 +41,19 @@ const formatShortDateTime = (value) => {
 }
 
 const ROW_GRID =
-  "grid grid-cols-[28px_minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1.2fr)_36px_72px_minmax(0,0.95fr)_76px] gap-2 items-center"
+  "grid grid-cols-[28px_minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1.2fr)_36px_72px_92px_minmax(0,0.95fr)_76px] gap-2 items-center"
 
 const formatMoney = (value) => `${RUPEE}${Number(value || 0).toFixed(2)}`
+
+const SORT_OPTIONS = [
+  { value: "recent", label: "Recently updated" },
+  { value: "orders-desc", label: "Total orders: high to low" },
+  { value: "orders-asc", label: "Total orders: low to high" },
+  { value: "value-desc", label: "Order value: high to low" },
+  { value: "value-asc", label: "Order value: low to high" },
+  { value: "cart-desc", label: "Cart value: high to low" },
+  { value: "cart-asc", label: "Cart value: low to high" },
+]
 
 const getDeliveryBreakdownText = (pricing) => {
   const breakdown = pricing?.deliveryFeeBreakdown
@@ -166,6 +176,7 @@ export default function UserCarts() {
   const [expandedCartId, setExpandedCartId] = useState(null)
   const [pricingByCartId, setPricingByCartId] = useState({})
   const [pricingLoadingId, setPricingLoadingId] = useState(null)
+  const [sortBy, setSortBy] = useState("recent")
 
   const fetchCarts = useCallback(async () => {
     try {
@@ -175,6 +186,7 @@ export default function UserCarts() {
         limit: PAGE_SIZE,
         ...(searchQuery ? { search: searchQuery } : {}),
         from: dateRange.from || undefined, to: dateRange.to || undefined,
+        sortBy,
       })
       const data = response?.data?.data || response?.data || {}
       setCarts(Array.isArray(data.carts) ? data.carts : [])
@@ -188,7 +200,7 @@ export default function UserCarts() {
     } finally {
       setLoading(false)
     }
-  }, [page, searchQuery, dateRange])
+  }, [page, searchQuery, dateRange, sortBy])
 
   useEffect(() => {
     fetchCarts()
@@ -261,6 +273,16 @@ export default function UserCarts() {
             />
           </div>
           <DateRangeFilter from={dateRange.from} to={dateRange.to} onChange={setDateRange} />
+          <select
+            value={sortBy}
+            onChange={(e) => { setPage(1); setSortBy(e.target.value) }}
+            className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-700"
+            aria-label="Sort carts"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
           <Button
             onClick={handleSearch}
             size="sm"
@@ -315,6 +337,7 @@ export default function UserCarts() {
               <span>Items</span>
               <span className="text-center">Qty</span>
               <span className="text-right">To Pay</span>
+              <span className="text-center" title="Delivered orders this customer has placed with us">Orders so far</span>
               <span>Updated</span>
               <span className="text-center"> </span>
             </div>
@@ -351,6 +374,14 @@ export default function UserCarts() {
                       <span className="text-right text-sm font-bold text-slate-900">
                         {formatMoney(getDisplayTotal(cart))}
                       </span>
+                      <div className="text-center min-w-0">
+                        <p className={`text-sm font-bold ${cart.totalOrders ? "text-slate-900" : "text-amber-600"}`}>
+                          {cart.totalOrders || 0}
+                        </p>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {cart.totalOrders ? formatMoney(cart.totalOrderValue) : "New customer"}
+                        </p>
+                      </div>
                       <span className="text-xs text-slate-500 truncate min-w-0">
                         {formatShortDateTime(cart.updatedAt)}
                       </span>

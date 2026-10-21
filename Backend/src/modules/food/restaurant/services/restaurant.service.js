@@ -23,6 +23,7 @@ import {
 } from '../../shared/geo.utils.js';
 import { getRestaurantSubscriptionSettings } from '../../admin/services/admin.service.js';
 import { GST_RATE } from './subscriptionPlan.service.js';
+import { badgeInfo, loadHighlightBadges } from '../../admin/services/highlightBadge.service.js';
 import {
     createRazorpayOrder,
     getRazorpayKeyId,
@@ -1787,10 +1788,14 @@ const toPublicCard = (r) => ({
     // Decimal, so it would otherwise reach the client as a string and the
     // card's `> 0` check would compare against "149".
     freeDeliveryAbove: r.freeDeliveryAbove == null ? null : Number(r.freeDeliveryAbove),
-    highlightBadge: r.highlightBadge || null,
+    highlightBadge: badgeInfo(r.highlightBadge) ? r.highlightBadge : null,
+    // Label and colour travel with the key, so a tag added in the admin panel
+    // shows in the app without an app update.
+    highlightBadgeInfo: badgeInfo(r.highlightBadge),
 });
 
 export const listApprovedRestaurants = async (query = {}) => {
+    await loadHighlightBadges();
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;

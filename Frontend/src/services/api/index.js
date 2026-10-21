@@ -726,6 +726,16 @@ export const adminAPI = {
       contextModule: "admin",
     }),
   /** Update restaurant status (admin). Body: { status: boolean } */
+  // Restaurant card tags (Bestseller, Popular, ...)
+  getHighlightBadges: () =>
+    apiClient.get("/food/admin/highlight-badges", { contextModule: "admin" }),
+  createHighlightBadge: (body) =>
+    apiClient.post("/food/admin/highlight-badges", body ?? {}, { contextModule: "admin" }),
+  updateHighlightBadge: (id, body) =>
+    apiClient.patch(`/food/admin/highlight-badges/${String(id)}`, body ?? {}, { contextModule: "admin" }),
+  deleteHighlightBadge: (id) =>
+    apiClient.delete(`/food/admin/highlight-badges/${String(id)}`, { contextModule: "admin" }),
+
   updateRestaurantStatus: (id, status) =>
     apiClient.patch(
       `/food/admin/restaurants/${String(id)}/status`,
@@ -948,6 +958,12 @@ export const adminAPI = {
   getTaxReport: (params = {}) =>
     apiClient.get("/food/admin/reports/tax", {
       params: { page: 1, limit: 1000, ...params },
+      contextModule: "admin",
+    }),
+  // Order-wise GST rows: restaurant, GSTIN, order id, taxable value, tax.
+  getTaxReportOrders: (params = {}) =>
+    apiClient.get("/food/admin/reports/tax/orders", {
+      params: { page: 1, limit: 100, ...params },
       contextModule: "admin",
     }),
   getTaxReportDetail: (id, params = {}) =>

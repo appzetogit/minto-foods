@@ -3879,3 +3879,18 @@ model FoodOrderNotification {
   @@unique([orderId, key])
   @@map("food_order_notifications")
 }
+
+/// A tag an admin can put on a restaurant card (Bestseller, Popular, New, ...).
+/// FoodRestaurant.highlightBadge holds the key.
+model FoodHighlightBadge {
+  id        String   @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+  key       String   @unique @db.VarChar(20)
+  label     String   @db.VarChar(40)
+  color     String   @default("#E23744") @db.VarChar(16)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("food_highlight_badges")
+}

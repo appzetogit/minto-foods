@@ -11,9 +11,9 @@ import {
     toFiniteNumber,
     toDeliveryRadiusKm,
     toFreeDeliveryAbove,
-    toHighlightBadge,
     validateOpeningClosingTimes,
 } from './adminRestaurantWrite.helpers.js';
+import { resolveHighlightBadge } from './highlightBadge.service.js';
 
 /**
  * Creating and editing a restaurant from the admin panel, extracted from
@@ -26,6 +26,25 @@ import {
  */
 
 const toStr = (v) => (v != null ? String(v).trim() : '');
+
+/**
+ * An Indian mobile number, or a clear error. The add form already limits the
+ * box to ten digits, but the API took anything, so a value like
+ * "79728344422222222222sfsadasdads" could still be saved through it or through
+ * the edit form. A +91 / 0 prefix and spaces or dashes are allowed; what is
+ * stored is unchanged, only checked.
+ */
+const assertIndianMobile = (value, label) => {
+    const raw = toStr(value);
+    if (!raw) return raw;
+    if (!/^[+\d\s()-]+$/.test(raw)) throw new ValidationError(`${label} can contain digits only`);
+    const digits = raw.replace(/\D/g, '').replace(/^(91|0)(?=\d{10}$)/, '');
+    if (!/^[6-9]\d{9}$/.test(digits)) {
+        throw new ValidationError(`${label} must be a valid 10-digit mobile number`);
+    }
+    return raw;
+};
+
 const getUrl = (v) => (v && typeof v === 'object' ? v.url : v);
 
 // Through the normalizer, not raw. An admin edit posts back the urls the GET
@@ -114,9 +133,17 @@ export async function updateRestaurantById(id, body = {}) {
 
     if (body.ownerName !== undefined) data.ownerName = toStr(body.ownerName);
     if (body.ownerEmail !== undefined) data.ownerEmail = toStr(body.ownerEmail).toLowerCase();
-    if (body.ownerPhone !== undefined) data.ownerPhone = toStr(body.ownerPhone);
-    if (body.primaryContactNumber !== undefined) {
-        data.primaryContactNumber = toStr(body.primaryContactNumber);
+    // Checked only when changed: an edit form posts every field back, and an
+    // old record saved before this check must still be editable.
+    if (body.ownerPhone !== undefined && toStr(body.ownerPhone) !== toStr(existing.ownerPhone)) {
+        data.ownerPhone = assertIndianMobile(body.ownerPhone, 'Owner phone');
+        if (!data.ownerPhone) throw new ValidationError('Owner phone cannot be empty');
+    }
+    if (
+        body.primaryContactNumber !== undefined &&
+        toStr(body.primaryContactNumber) !== toStr(existing.primaryContactNumber)
+    ) {
+        data.primaryContactNumber = assertIndianMobile(body.primaryContactNumber, 'Primary contact number');
     }
 
     if (body.pureVegRestaurant !== undefined) {
@@ -197,7 +224,7 @@ export async function updateRestaurantById(id, body = {}) {
     }
 
     // Discovery-card merchandising.
-    if (body.highlightBadge !== undefined) data.highlightBadge = toHighlightBadge(body.highlightBadge);
+    if (body.highlightBadge !== undefined) data.highlightBadge = await resolveHighlightBadge(body.highlightBadge);
     if (body.freeDeliveryAbove !== undefined) {
         data.freeDeliveryAbove = toFreeDeliveryAbove(body.freeDeliveryAbove);
     }
@@ -249,8 +276,9 @@ export async function createRestaurantByAdmin(body = {}) {
 
     const restaurantName = toStr(body.restaurantName) || toStr(body.name);
     const ownerName = toStr(body.ownerName);
-    const ownerPhone = toStr(body.ownerPhone);
-    const primaryContactNumber = toStr(body.primaryContactNumber) || ownerPhone;
+    const ownerPhone = assertIndianMobile(body.ownerPhone, 'Owner phone');
+    const primaryContactNumber =
+        assertIndianMobile(body.primaryContactNumber, 'Primary contact number') || ownerPhone;
 
     if (!restaurantName || !ownerName) {
         throw new ValidationError('Restaurant name and owner name are required');
@@ -317,6 +345,9 @@ export async function createRestaurantByAdmin(body = {}) {
         }
         : {};
 
+    // Checked before the transaction: it reads the tag list.
+    const highlightBadge = await resolveHighlightBadge(body.highlightBadge);
+
     const created = await prisma.$transaction(async (tx) => {
         const row = await tx.foodRestaurant.create({
             data: {
@@ -372,7 +403,7 @@ export async function createRestaurantByAdmin(body = {}) {
                 featuredPrice: toFiniteNumber(body.featuredPrice),
                 offer: toStr(body.offer),
                 deliveryRadiusKm: toDeliveryRadiusKm(body.deliveryRadiusKm),
-                highlightBadge: toHighlightBadge(body.highlightBadge),
+                highlightBadge,
                 freeDeliveryAbove: toFreeDeliveryAbove(body.freeDeliveryAbove),
                 ...dining,
                 // An admin creating it is the approval.

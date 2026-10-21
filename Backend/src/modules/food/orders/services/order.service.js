@@ -2377,13 +2377,16 @@ export async function listOrdersAdmin(query) {
 
     switch (rawStatus) {
       case "pending":
-        // Placed by customer; restaurant has not accepted yet.
-        where.orderStatus = "created";
+        // Not yet being prepared: placed and waiting for the restaurant, or
+        // accepted and not started. The list labels both "Pending", and the
+        // tab asked for "created" alone, so it sat empty while the All tab
+        // showed pending orders.
+        where.orderStatus = { in: ["created", "confirmed"] };
         break;
       case "processing":
-        // Active orders not delivered/cancelled, delivery partner not accepted yet.
+        // Being prepared or ready, delivery partner not accepted yet.
         where.orderStatus = {
-          notIn: ["created", "delivered", "pending_payment", ...terminalCancelledStatuses],
+          notIn: ["created", "confirmed", "delivered", "pending_payment", ...terminalCancelledStatuses],
         };
         AND.push({ dispatchStatus: { not: "accepted" } });
         break;

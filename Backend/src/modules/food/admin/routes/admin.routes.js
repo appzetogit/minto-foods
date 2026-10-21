@@ -34,6 +34,7 @@ import * as cashbackSettings from '../controllers/cashbackSettings.controller.js
 import * as restaurantAppBanner from '../controllers/restaurantAppBanner.controller.js';
 import * as offerBanner from '../controllers/offerBanner.controller.js';
 import * as tipSurge from '../controllers/tipSurge.controller.js';
+import * as highlightBadges from '../controllers/highlightBadge.controller.js';
 
 const router = express.Router();
 
@@ -43,6 +44,7 @@ router.get('/power-scanning/public', businessSettingsController.getPowerScanning
 router.get('/fee-settings/public', adminController.getFeeSettings);
 router.get('/restaurant-subscription-settings/public', adminController.getRestaurantSubscriptionSettings);
 router.get('/feature-settings/public', adminController.getFeatureSettings);
+router.get('/highlight-badges/public', highlightBadges.listPublicBadges);
 
 
 const requireAdmin = (req, _res, next) => {
@@ -77,6 +79,32 @@ router.use(async (req, _res, next) => {
     }
 });
 
+const clearPublicMenus = () => Promise.all([
+    invalidateCache('restaurant_menu:*'),
+    invalidateCache('restaurant_addons:*'),
+    invalidateCache('public_foods:*'),
+    invalidateCache('restaurants:*'),
+    invalidateCache('restaurant_detail:*'),
+]).catch(() => {
+    // A cache that will not clear must not fail the write itself; the entry
+    // expires on its own within the TTL.
+});
+
+const invalidatePublicMenus = async (_req, res, next) => {
+    await clearPublicMenus();
+    // And again once the write has finished: a customer request arriving while
+    // the save was still running would otherwise re-cache the old menu.
+    res.on('finish', () => { if (res.statusCode < 400) void clearPublicMenus(); });
+    next();
+};
+
+// Every admin write that changes what the user app shows or charges: menus,
+// dishes, categories, add-ons, price rules and fees.
+router.use(
+    ['/restaurants/:id/menu', '/foods', '/categories', '/addons', '/price-rules', '/fee-settings', '/highlight-badges'],
+    (req, res, next) => (req.method === 'GET' || req.path.endsWith('/preview') ? next() : invalidatePublicMenus(req, res, next)),
+);
+
 const resolveSectionFromRequest = (path = '', method = '') => {
     // Settings that change what customers pay, what riders and restaurants
     // earn, and what the apps show. These had no section at all, so a
@@ -101,6 +129,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path === '/orders/user-carts' && String(method).toUpperCase() === 'GET') return null;
     if (
         path.startsWith('/restaurants') ||
+        path.startsWith('/highlight-badges') ||
         path.startsWith('/restaurant-settings') ||
         path.startsWith('/restaurant-subscription-settings') ||
         path.startsWith('/restaurant-subscriptions') ||
@@ -239,6 +268,7 @@ router.get('/dashboard-stats', adminController.getDashboardStats);
 router.get('/reports/restaurants', adminController.getRestaurantReport);
 router.get('/reports/transactions', adminController.getTransactionReport);
 router.get('/reports/tax', adminController.getTaxReport);
+router.get('/reports/tax/orders', adminController.getTaxReportOrders);
 router.get('/reports/tax/:id', adminController.getTaxReportDetail);
 router.get('/restaurants/pending', adminController.getPendingRestaurants);
 router.get('/restaurants/unregistered', adminController.getUnregisteredRestaurants);
@@ -283,6 +313,11 @@ router.get(
 router.get('/restaurants/:id/menu', adminController.getRestaurantMenuById);
 router.post('/restaurants', adminController.createRestaurant);
 router.patch('/restaurants/:id', adminController.updateRestaurantById);
+// Restaurant card tags (Bestseller, Popular, ...).
+router.get('/highlight-badges', highlightBadges.listBadges);
+router.post('/highlight-badges', highlightBadges.createBadge);
+router.patch('/highlight-badges/:id', highlightBadges.updateBadge);
+router.delete('/highlight-badges/:id', highlightBadges.deleteBadge);
 router.patch('/restaurants/:id/status', adminController.updateRestaurantStatus);
 router.patch('/restaurants/:id/location', adminController.updateRestaurantLocation);
 router.patch('/restaurants/:id/menu', adminController.updateRestaurantMenuById);
@@ -388,20 +423,11 @@ router.post('/foods/bulk-delete', adminController.bulkDeleteFoodItems);
  * customer was simply being served a stale copy. The restaurant-side menu routes
  * already do this; the admin ones were missed.
  */
-const invalidatePublicMenus = async (_req, _res, next) => {
-    try {
-        await invalidateCache('restaurant_menu:*');
-        await invalidateCache('public_foods:*');
-    } catch (_) {
-        // A cache that will not clear must not fail the write itself; the entry
-        // expires on its own within the TTL.
-    }
-    next();
-};
 
-router.post('/foods', invalidatePublicMenus, adminController.createFood);
-router.patch('/foods/:id', invalidatePublicMenus, adminController.updateFood);
-router.delete('/foods/:id', invalidatePublicMenus, adminController.deleteFood);
+
+router.post('/foods', adminController.createFood);
+router.patch('/foods/:id', adminController.updateFood);
+router.delete('/foods/:id', adminController.deleteFood);
 // Food approval queue (pending items created by restaurants)
 router.get('/foods/pending-approvals', foodApprovalController.getPendingFoodApprovals);
 router.patch('/foods/:id/approve', foodApprovalController.approveFoodItemController);

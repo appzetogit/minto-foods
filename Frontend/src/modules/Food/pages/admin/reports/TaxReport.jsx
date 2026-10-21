@@ -16,6 +16,7 @@ const DEFAULT_FILTERS = {
   toDate: "",
   calculateTax: "Percentage",
   taxRate: "Select Tax Rate",
+  restaurantId: "",
 }
 
 function buildTaxReportDateRange(filters) {
@@ -37,7 +38,8 @@ function buildTaxReportDateRange(filters) {
     fromDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     toDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
   } else if (filters.dateRangeType === "This Week") {
-    const dayOfWeek = now.getDay()
+    // Monday to Sunday, the same week the balance sheet pays on.
+    const dayOfWeek = (now.getDay() + 6) % 7
     const diff = now.getDate() - dayOfWeek
     fromDate = new Date(now.getFullYear(), now.getMonth(), diff)
     toDate = new Date(now.getFullYear(), now.getMonth(), diff + 6, 23, 59, 59)
@@ -69,6 +71,10 @@ function buildTaxReportParams(filters) {
     params.calculateTax = filters.calculateTax
   }
 
+  if (filters.restaurantId) {
+    params.restaurantId = filters.restaurantId
+  }
+
   return params
 }
 
@@ -85,6 +91,48 @@ export default function TaxReport() {
   const [selectedReport, setSelectedReport] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [reportDetail, setReportDetail] = useState(null)
+  // "restaurants": one row per restaurant. "orders": one row per taxed order.
+  const [view, setView] = useState("restaurants")
+  const [orderRows, setOrderRows] = useState([])
+  const [orderPage, setOrderPage] = useState({ page: 1, pages: 1, total: 0 })
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [restaurantOptions, setRestaurantOptions] = useState([])
+
+  useEffect(() => {
+    adminAPI
+      .getRestaurants({ limit: 1000 })
+      .then((res) => {
+        const data = res?.data?.data
+        const list = Array.isArray(data) ? data : data?.restaurants || []
+        setRestaurantOptions(
+          list
+            .map((r) => ({ id: r._id || r.id, name: r.restaurantName || r.name || "" }))
+            .filter((r) => r.id && r.name)
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        )
+      })
+      .catch(() => setRestaurantOptions([]))
+  }, [])
+
+  const fetchOrderRows = async (activeFilters = filters, page = 1) => {
+    try {
+      setOrdersLoading(true)
+      const params = buildTaxReportParams(activeFilters)
+      const response = await adminAPI.getTaxReportOrders({ ...params, page, limit: 100 })
+      const data = response?.data?.data || {}
+      setOrderRows(data.orders || [])
+      setOrderPage({
+        page: data.pagination?.page || page,
+        pages: data.pagination?.pages || 1,
+        total: data.pagination?.total || 0,
+      })
+    } catch (error) {
+      toast.error("Failed to fetch order-wise tax")
+      setOrderRows([])
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
 
   const fetchTaxReport = async (activeFilters = filters) => {
     try {
@@ -132,10 +180,17 @@ export default function TaxReport() {
   const handleReset = () => {
     setFilters(DEFAULT_FILTERS)
     fetchTaxReport(DEFAULT_FILTERS)
+    if (view === "orders") fetchOrderRows(DEFAULT_FILTERS, 1)
   }
 
   const handleSubmit = () => {
     fetchTaxReport(filters)
+    if (view === "orders") fetchOrderRows(filters, 1)
+  }
+
+  const switchView = (next) => {
+    setView(next)
+    if (next === "orders") fetchOrderRows(filters, 1)
   }
 
   const handleViewDetails = async (report) => {
@@ -160,22 +215,55 @@ export default function TaxReport() {
     }
   }
 
-  const handleExport = (format) => {
-    if (reports.length === 0) {
-      alert("No data to export")
-      return
-    }
-    const headers = [
+  const handleExport = async (format) => {
+    let rows
+    let headers = [
       { key: "sl", label: "SI" },
-      { key: "incomeSource", label: "Income Source" },
+      { key: "incomeSource", label: "Restaurant" },
+      { key: "gstNumber", label: "GSTIN" },
+      { key: "orderCount", label: "Orders" },
       { key: "totalIncome", label: "Total Earnings" },
       { key: "totalTax", label: "Total Tax" },
     ]
+    let name = "tax_report"
+
+    if (view === "orders") {
+      // Every taxed order in the filter, not only the page on screen.
+      try {
+        const response = await adminAPI.getTaxReportOrders({ ...buildTaxReportParams(filters), page: 1, limit: 5000 })
+        rows = (response?.data?.data?.orders || []).map((o, i) => ({
+          ...o,
+          sl: i + 1,
+          gstNumber: o.gstNumber || "Not registered",
+          date: new Date(o.date).toLocaleDateString("en-IN"),
+        }))
+      } catch {
+        toast.error("Failed to load orders for export")
+        return
+      }
+      headers = [
+        { key: "sl", label: "SI" },
+        { key: "orderId", label: "Order ID" },
+        { key: "date", label: "Date" },
+        { key: "restaurantName", label: "Restaurant" },
+        { key: "gstNumber", label: "GSTIN" },
+        { key: "taxableAmount", label: "Taxable Value" },
+        { key: "taxAmount", label: "GST" },
+      ]
+      name = "tax_report_orders"
+    } else {
+      rows = reports.map((r) => ({ ...r, gstNumber: r.gstNumber || "Not registered" }))
+    }
+
+    if (rows.length === 0) {
+      alert("No data to export")
+      return
+    }
     switch (format) {
-      case "csv": exportReportsToCSV(reports, headers, "tax_report"); break
-      case "excel": exportReportsToExcel(reports, headers, "tax_report"); break
-      case "pdf": exportReportsToPDF(reports, headers, "tax_report", "Tax Report"); break
-      case "json": exportReportsToJSON(reports, "tax_report"); break
+      case "csv": exportReportsToCSV(rows, headers, name); break
+      case "excel": exportReportsToExcel(rows, headers, name); break
+      case "pdf": exportReportsToPDF(rows, headers, name, view === "orders" ? "Tax Report – Order-wise" : "Tax Report"); break
+      case "json": exportReportsToJSON(rows, name); break
     }
   }
 
@@ -205,7 +293,24 @@ export default function TaxReport() {
             To generate you tax report please select & input following field and submit for the result.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+            <div className="relative">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Restaurant
+              </label>
+              <select
+                value={filters.restaurantId}
+                onChange={(e) => setFilters(prev => ({ ...prev, restaurantId: e.target.value }))}
+                className="w-full px-4 py-2.5 pr-8 text-sm rounded-lg border border-slate-300 bg-white text-slate-700 appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All restaurants</option>
+                {restaurantOptions.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 bottom-2.5 w-4 h-4 text-slate-500 pointer-events-none" />
+            </div>
+
             <div className="relative">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Date Range Type
@@ -347,9 +452,23 @@ export default function TaxReport() {
         {/* Tax Report List Section */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-            <h2 className="text-xl font-bold text-slate-900">Tax Report List ({reports.length})</h2>
+            <h2 className="text-xl font-bold text-slate-900">
+              Tax Report List ({view === "orders" ? orderPage.total : reports.length})
+            </h2>
 
             <div className="flex items-center gap-3">
+              <div className="flex rounded-lg border border-slate-300 overflow-hidden text-sm">
+                {[["restaurants", "Restaurant-wise"], ["orders", "Order-wise"]].map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => switchView(key)}
+                    className={`px-3 py-2 font-medium ${view === key ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="px-4 py-2.5 text-sm font-medium rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 flex items-center gap-2 transition-all">
@@ -389,7 +508,44 @@ export default function TaxReport() {
           </div>
 
           {/* Table */}
-          {reports.length === 0 ? (
+          {view === "orders" ? (
+            ordersLoading ? (
+              <div className="py-16 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-blue-600" /></div>
+            ) : orderRows.length === 0 ? (
+              <p className="py-16 text-center text-sm text-slate-500">No taxed orders for these filters.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      {["Order ID", "Date", "Restaurant", "GSTIN", "Taxable Value", "GST"].map((h, i) => (
+                        <th key={h} className={`px-4 py-3 text-[10px] font-bold text-slate-700 uppercase tracking-wider ${i >= 4 ? "text-right" : "text-left"}`}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-100">
+                    {orderRows.map((o) => (
+                      <tr key={o.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-900 whitespace-nowrap">{o.orderId}</td>
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">{new Date(o.date).toLocaleDateString("en-IN")}</td>
+                        <td className="px-4 py-3 text-sm text-slate-700">{o.restaurantName}</td>
+                        <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">{o.gstNumber || <span className="text-slate-400">Not registered</span>}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700 whitespace-nowrap">{o.taxableAmount}</td>
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-red-600 whitespace-nowrap">{o.taxAmount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {orderPage.pages > 1 && (
+                  <div className="flex items-center justify-end gap-2 pt-4 text-sm">
+                    <button disabled={orderPage.page <= 1} onClick={() => fetchOrderRows(filters, orderPage.page - 1)} className="px-3 py-1.5 rounded border border-slate-300 disabled:opacity-40">Previous</button>
+                    <span>Page {orderPage.page} of {orderPage.pages}</span>
+                    <button disabled={orderPage.page >= orderPage.pages} onClick={() => fetchOrderRows(filters, orderPage.page + 1)} className="px-3 py-1.5 rounded border border-slate-300 disabled:opacity-40">Next</button>
+                  </div>
+                )}
+              </div>
+            )
+          ) : reports.length === 0 ? (
             <div className="py-20 text-center">
               <div className="flex flex-col items-center justify-center">
                 <div className="w-20 h-20 rounded-lg bg-purple-100 flex items-center justify-center mb-4">
@@ -413,6 +569,12 @@ export default function TaxReport() {
                       Income Source
                     </th>
                     <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                      GSTIN
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                      Orders
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                       Total Earnings
                     </th>
                     <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
@@ -431,6 +593,12 @@ export default function TaxReport() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-sm text-slate-700">{report.incomeSource}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{report.gstNumber || <span className="text-slate-400">Not registered</span>}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-slate-700">{report.orderCount ?? "-"}</span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="text-sm font-medium text-slate-900">{report.totalIncome}</span>
@@ -489,6 +657,9 @@ export default function TaxReport() {
                 <FileText className="w-5 h-5 text-blue-600" />
                 Tax Details: {selectedReport?.incomeSource}
               </span>
+              <span className="text-xs font-medium text-slate-500 pr-6">
+                GSTIN: {reportDetail?.gstNumber || selectedReport?.gstNumber || "Not registered"}
+              </span>
             </DialogTitle>
           </DialogHeader>
           
@@ -505,6 +676,7 @@ export default function TaxReport() {
                     <tr>
                       <th className="px-4 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Order ID</th>
                       <th className="px-4 py-2 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Date</th>
+                      <th className="px-4 py-2 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">Taxable</th>
                       <th className="px-4 py-2 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">Earnings</th>
                       <th className="px-4 py-2 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">Tax</th>
                     </tr>
@@ -514,6 +686,7 @@ export default function TaxReport() {
                       <tr key={order.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-4 py-3 text-sm font-medium text-slate-900">{order.orderId}</td>
                         <td className="px-4 py-3 text-sm text-slate-600">{new Date(order.date).toLocaleDateString('en-IN')}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-700">{order.taxableAmount}</td>
                         <td className="px-4 py-3 text-sm text-right text-slate-700">{order.totalAmount}</td>
                         <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">{order.taxAmount}</td>
                       </tr>

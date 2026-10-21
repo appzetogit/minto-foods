@@ -409,6 +409,16 @@ export async function getTaxReport(req, res, next) {
     }
 }
 
+/** Order-wise GST list: restaurant, GSTIN, order id, taxable value, tax. */
+export async function getTaxReportOrders(req, res, next) {
+    try {
+        const data = await adminService.getTaxReportOrders(req.query || {});
+        res.status(200).json({ success: true, message: 'Tax report orders fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getTaxReportDetail(req, res, next) {
     try {
         const { id } = req.params;

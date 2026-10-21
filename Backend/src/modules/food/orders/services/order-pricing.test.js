@@ -74,19 +74,32 @@ test('a trip past the last band is charged as the widest band', () => {
     assert.equal(quote.source, 'distance_over_range');
 });
 
-test('rider pay: flat base pay wins over per-km inside a band', () => {
+test('rider pay: a base-pay band pays its base pay', () => {
     assert.equal(calculateRiderEarning(settings, 2), 15);
 });
 
-test('rider pay: per-km bands multiply by the real distance', () => {
-    assert.equal(calculateRiderEarning(settings, 5), 40); // 5 × 8
-    assert.equal(calculateRiderEarning(settings, 9), 90); // 9 × 10
+test('rider pay: base pay plus per-km for the km past the band start', () => {
+    const both = { deliveryFeeRanges: [
+        { min: 0, max: 3, fee: 20, deliveryBoyBasePay: 20, deliveryBoyPerKm: 5 },
+        { min: 3, max: 10, fee: 40, deliveryBoyBasePay: 35, deliveryBoyPerKm: 6 },
+    ] };
+    assert.equal(calculateRiderEarning(both, 2), 30); // 20 + 5 × 2
+    assert.equal(calculateRiderEarning(both, 5), 47); // 35 + 6 × 2
+    // The screenshot case: ₹30/km used to multiply the whole trip, paying ₹147
+    // for 4.9 km on a 1.5–5 km band.
+    const old = { deliveryFeeRanges: [{ min: 1.5, max: 5, fee: 35, deliveryBoyPerKm: 30 }] };
+    assert.equal(calculateRiderEarning(old, 4.9), 102); // 30 × 3.4
+});
+
+test('rider pay: per-km counts from the band start, like the customer fee', () => {
+    assert.equal(calculateRiderEarning(settings, 5), 16); // 8 × (5 − 3)
+    assert.equal(calculateRiderEarning(settings, 9), 20); // 10 × (9 − 7)
 });
 
 test('rider pay past the last band falls back rather than paying zero', () => {
     // The customer is still charged, so a 0 here would mean unpaid work on a real
     // delivery whenever the bands do not span the dispatch radius.
-    assert.equal(calculateRiderEarning(settings, 20), 200); // 20 × 10, widest band
+    assert.equal(calculateRiderEarning(settings, 20), 130); // 10 × (20 − 7), widest band
 });
 
 test('rider pay is zero only when nothing is configured', () => {

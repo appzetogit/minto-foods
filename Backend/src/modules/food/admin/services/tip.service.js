@@ -66,6 +66,15 @@ export const updateTipSettings = async (body = {}) => {
     }
 
     const row = await loadRow();
+
+    // The app hides the tip section when there are no amounts to offer, so
+    // "on" with an empty list looked like the switch was broken.
+    const willBeEnabled = data.tipsEnabled ?? row.tipsEnabled !== false;
+    const willHavePresets = data.tipPresets ?? (Array.isArray(row.tipPresets) ? row.tipPresets : []);
+    if (willBeEnabled && willHavePresets.length === 0) {
+        throw new ValidationError('Add at least one tip amount before turning tips on');
+    }
+
     const saved = await prisma.foodBusinessSettings.update({ where: { id: row.id }, data });
 
     const settings = serializeSettings(saved);

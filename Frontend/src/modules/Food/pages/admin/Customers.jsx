@@ -19,6 +19,18 @@ const EMPTY_FILTERS = {
   status: "",
   sortBy: "",
   chooseFirst: "",
+  orderCount: "",
+}
+
+// Delivered-order buckets for the "Orders placed" filter.
+const ORDER_COUNT_FILTERS = {
+  "0": { minOrders: 0, maxOrders: 0 },
+  "1": { minOrders: 1, maxOrders: 1 },
+  "2": { minOrders: 2, maxOrders: 2 },
+  "3": { minOrders: 3, maxOrders: 3 },
+  "4-5": { minOrders: 4, maxOrders: 5 },
+  "6-10": { minOrders: 6, maxOrders: 10 },
+  "10+": { minOrders: 11 },
 }
 
 export default function Customers() {
@@ -114,6 +126,7 @@ export default function Customers() {
           ...(filters.joiningDate && { joiningDate: filters.joiningDate }),
           ...(filters.orderDate && { orderDate: filters.orderDate }),
           ...(filters.sortBy && { sortBy: filters.sortBy }),
+          ...(ORDER_COUNT_FILTERS[filters.orderCount] || {}),
           ...(useChooseFirst && { chooseFirst }),
         }
 
@@ -256,7 +269,7 @@ export default function Customers() {
           {/* Widths step up one break at a time. Going straight from one column
               to five squeezed five controls -- two of them date pickers, which
               have a fixed minimum width -- into a tablet, and the row spilled. */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Order Date
@@ -316,6 +329,26 @@ export default function Customers() {
                 <option value="name-desc">Name (Z-A)</option>
                 <option value="orders-asc">Orders (Low to High)</option>
                 <option value="orders-desc">Orders (High to Low)</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Orders placed
+              </label>
+              <select
+                value={draft.orderCount}
+                onChange={(e) => handleFilterChange("orderCount", e.target.value)}
+                className="mt-auto w-full px-4 py-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+              >
+                <option value="">Any number</option>
+                <option value="0">0 (never ordered)</option>
+                <option value="1">1 order</option>
+                <option value="2">2 orders</option>
+                <option value="3">3 orders</option>
+                <option value="4-5">4–5 orders</option>
+                <option value="6-10">6–10 orders</option>
+                <option value="10+">More than 10</option>
               </select>
             </div>
 
@@ -443,6 +476,7 @@ export default function Customers() {
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Sl</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Name</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Contact Information</th>
+                  <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Address</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Total Order</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Total Order Amount</th>
                   <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">Joining Date</th>
@@ -453,13 +487,13 @@ export default function Customers() {
               <tbody className="bg-white divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-8 text-center">
+                    <td colSpan={9} className="px-6 py-8 text-center">
                       <div className="text-sm text-slate-500">Loading customers...</div>
                     </td>
                   </tr>
                 ) : customers.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-8 text-center">
+                    <td colSpan={9} className="px-6 py-8 text-center">
                       <div className="text-sm text-slate-500">No customers found</div>
                     </td>
                   </tr>
@@ -503,6 +537,22 @@ export default function Customers() {
                           <span className="text-sm text-slate-700">{customer.email}</span>
                           <span className="text-xs text-slate-500">{customer.phone}</span>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 max-w-[220px]">
+                        {customer.address ? (
+                          <button
+                            type="button"
+                            onClick={() => handleViewDetails(customer._id || customer.id || customer.sl)}
+                            className="text-left"
+                            title={customer.address.fullAddress}
+                          >
+                            <span className="block text-xs font-semibold text-slate-700">{customer.address.label}</span>
+                            <span className="block text-xs text-slate-500 line-clamp-2">{customer.address.fullAddress}</span>
+                            <span className="text-[11px] font-semibold text-blue-600">View full</span>
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">No address saved</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="text-sm text-slate-700">{customer.totalOrder || 0}</span>
@@ -687,19 +737,29 @@ export default function Customers() {
                 </div>
               )}
 
-              {/* Recent Orders Section */}
+              {/* Order history */}
               {userDetails.orders && userDetails.orders.length > 0 && (
                 <div>
                   <h4 className="text-base font-bold text-slate-900 mb-2 flex items-center gap-2">
                     <Package className="w-4 h-4" />
-                    Recent Orders
+                    Order History
+                    <span className="text-xs font-medium text-slate-500">
+                      ({userDetails.totalOrdersPlaced ?? userDetails.orders.length} placed
+                      {userDetails.totalOrdersPlaced > userDetails.orders.length ? `, latest ${userDetails.orders.length} shown` : ""})
+                    </span>
                   </h4>
-                  <div className="space-y-2">
-                    {userDetails.orders.slice(0, 5).map((order, index) => (
-                      <div key={index} className="bg-slate-50 rounded-lg p-3 border border-slate-200 flex items-center justify-between">
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                    {userDetails.orders.map((order, index) => (
+                      <div key={order.id || index} className="bg-slate-50 rounded-lg p-3 border border-slate-200 flex items-center justify-between">
                         <div>
                           <p className="text-sm font-semibold text-slate-900">{order.orderId}</p>
                           <p className="text-xs text-slate-600">{order.restaurantName}</p>
+                          {order.createdAt && (
+                            <p className="text-[11px] text-slate-400">
+                              {formatDateTime(order.createdAt)}
+                              {order.paymentMethod ? ` · ${String(order.paymentMethod).toUpperCase()}` : ""}
+                            </p>
+                          )}
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-semibold text-slate-900">Rs. {(order.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>

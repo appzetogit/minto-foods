@@ -10,6 +10,7 @@ import RestaurantVideos from "@food/components/admin/restaurant/RestaurantVideos
 import RestaurantOpeningHours from "@food/components/admin/restaurant/RestaurantOpeningHours"
 import RestaurantBusinessEditor from "@food/components/admin/restaurant/RestaurantBusinessEditor"
 import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
+import { HighlightBadgeSelect } from "@food/components/admin/restaurant/HighlightBadges"
 
 const debugError = (..._args) => {}
 
@@ -612,11 +613,11 @@ export default function EditRestaurant() {
                 </div>
                 <div>
                   <Label>Owner Phone</Label>
-                  <Input value={detailsForm.ownerPhone} onChange={(e) => setDetailsForm((p) => ({ ...p, ownerPhone: e.target.value }))} />
+                  <Input inputMode="numeric" maxLength={10} value={detailsForm.ownerPhone} onChange={(e) => setDetailsForm((p) => ({ ...p, ownerPhone: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
                 </div>
                 <div>
                   <Label>Primary Contact Number</Label>
-                  <Input value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((p) => ({ ...p, primaryContactNumber: e.target.value }))} />
+                  <Input inputMode="numeric" maxLength={10} value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((p) => ({ ...p, primaryContactNumber: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
                 </div>
                 <div className="md:col-span-2">
                   <Label>Cuisines (up to 3)</Label>
@@ -642,16 +643,13 @@ export default function EditRestaurant() {
                 </div>
                 <div>
                   <Label>Highlight Badge</Label>
-                  <select
-                    className="w-full h-10 px-3 rounded-md border border-slate-200 bg-white text-sm"
+                  <HighlightBadgeSelect
                     value={detailsForm.highlightBadge}
-                    onChange={(e) => setDetailsForm((p) => ({ ...p, highlightBadge: e.target.value }))}
-                  >
-                    <option value="">None</option>
-                    <option value="bestseller">Bestseller</option>
-                    <option value="popular">Popular</option>
-                  </select>
-                  <p className="mt-1 text-xs text-slate-500">Pill shown on the app's Top Restaurants card.</p>
+                    onChange={(key) => setDetailsForm((p) => ({ ...p, highlightBadge: key }))}
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Shown on the restaurant's card in the app. Manage all tags in Restaurant Settings.
+                  </p>
                 </div>
                 <p className="md:col-span-2 text-xs text-slate-500">
                   Aadhaar, PAN, GST, FSSAI, bank details and delivery radius are in

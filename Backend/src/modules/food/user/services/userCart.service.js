@@ -172,9 +172,20 @@ export async function syncUserCart(userId, rawItems = [], rawPricing = null) {
     }
 
     const rawFirst = Array.isArray(rawItems) ? rawItems[0] : null;
+    const restaurantId = String(rawFirst?.restaurantId || '');
+    let restaurantName = String(rawFirst?.restaurant || rawFirst?.restaurantName || '').trim();
+    // The user app sends only the restaurant id, so the name was saved blank
+    // and the admin User Carts list showed an empty restaurant column.
+    if (!restaurantName && isId(restaurantId)) {
+        const restaurant = await prisma.foodRestaurant.findUnique({
+            where: { id: restaurantId },
+            select: { restaurantName: true },
+        });
+        restaurantName = restaurant?.restaurantName || '';
+    }
     const data = {
-        restaurantId: String(rawFirst?.restaurantId || ''),
-        restaurantName: String(rawFirst?.restaurant || rawFirst?.restaurantName || ''),
+        restaurantId,
+        restaurantName,
         // The cart is replaced wholesale on every sync and never queried across
         // users, so items and pricing stay snapshots rather than tables.
         items,
@@ -188,6 +199,24 @@ export async function syncUserCart(userId, rawItems = [], rawPricing = null) {
         create: { userId: id, ...data },
         update: data,
     });
+}
+
+const CART_SORTS_BY_ORDER_HISTORY = new Set(['orders-desc', 'orders-asc', 'value-desc', 'value-asc']);
+
+/** Delivered orders per customer: how many, and what they came to. */
+async function orderStatsByUser(userIds = []) {
+    const ids = [...new Set(userIds.filter(Boolean))];
+    if (!ids.length) return new Map();
+    const rows = await prisma.foodOrder.groupBy({
+        by: ['userId'],
+        where: { userId: { in: ids }, orderStatus: 'delivered' },
+        _count: { _all: true },
+        _sum: { total: true },
+    });
+    return new Map(rows.map((row) => [row.userId, {
+        totalOrders: row._count._all,
+        totalOrderValue: Math.round((Number(row._sum.total) || 0) * 100) / 100,
+    }]));
 }
 
 export async function listUserCartsForAdmin(query = {}) {
@@ -215,16 +244,56 @@ export async function listUserCartsForAdmin(query = {}) {
         ];
     }
 
-    const [carts, total] = await Promise.all([
-        prisma.foodUserCart.findMany({
+    if (isId(query.restaurantId)) where.restaurantId = String(query.restaurantId);
+
+    const sortBy = String(query.sortBy || 'recent');
+    const userInclude = { user: { select: { id: true, name: true, phone: true, email: true, profileImage: true } } };
+
+    let carts;
+    let total;
+    let statsByUser;
+
+    if (CART_SORTS_BY_ORDER_HISTORY.has(sortBy)) {
+        // Sorting by what each customer has ordered needs every matching cart's
+        // order history before the page can be cut. Open carts number in the
+        // hundreds, not millions, so this is two small queries.
+        const all = await prisma.foodUserCart.findMany({
             where,
-            include: { user: { select: { id: true, name: true, phone: true, email: true, profileImage: true } } },
+            select: { id: true, userId: true, updatedAt: true },
             orderBy: { updatedAt: 'desc' },
-            skip,
-            take: limit,
-        }),
-        prisma.foodUserCart.count({ where }),
-    ]);
+            take: 5000,
+        });
+        total = all.length;
+        statsByUser = await orderStatsByUser(all.map((c) => c.userId));
+        const key = sortBy.startsWith('orders') ? 'totalOrders' : 'totalOrderValue';
+        const dir = sortBy.endsWith('asc') ? 1 : -1;
+        all.sort((a, b) =>
+            dir * ((statsByUser.get(a.userId)?.[key] || 0) - (statsByUser.get(b.userId)?.[key] || 0))
+            || b.updatedAt - a.updatedAt);
+        const pageIds = all.slice(skip, skip + limit).map((c) => c.id);
+        const rows = await prisma.foodUserCart.findMany({ where: { id: { in: pageIds } }, include: userInclude });
+        const byId = new Map(rows.map((row) => [row.id, row]));
+        carts = pageIds.map((id) => byId.get(id)).filter(Boolean);
+    } else {
+        const orderBy = {
+            'cart-desc': { subtotal: 'desc' },
+            'cart-asc': { subtotal: 'asc' },
+        }[sortBy] || { updatedAt: 'desc' };
+        [carts, total] = await Promise.all([
+            prisma.foodUserCart.findMany({ where, include: userInclude, orderBy, skip, take: limit }),
+            prisma.foodUserCart.count({ where }),
+        ]);
+        statsByUser = await orderStatsByUser(carts.map((c) => c.userId));
+    }
+
+    // Carts saved before the name was filled in on sync.
+    const missingNameIds = [...new Set(carts.filter((c) => !c.restaurantName && isId(c.restaurantId)).map((c) => c.restaurantId))];
+    const namesById = missingNameIds.length
+        ? new Map((await prisma.foodRestaurant.findMany({
+            where: { id: { in: missingNameIds } },
+            select: { id: true, restaurantName: true },
+        })).map((r) => [r.id, r.restaurantName]))
+        : new Map();
 
     const normalized = await Promise.all(
         carts.map(async (cart) => {
@@ -245,7 +314,10 @@ export async function listUserCartsForAdmin(query = {}) {
                 userEmail: user?.email || '',
                 userImage: user?.profileImage || '',
                 restaurantId: cart.restaurantId || '',
-                restaurantName: cart.restaurantName || '',
+                restaurantName: cart.restaurantName || namesById.get(cart.restaurantId) || '',
+                // How much this customer has ordered from us so far.
+                totalOrders: statsByUser.get(cart.userId)?.totalOrders || 0,
+                totalOrderValue: statsByUser.get(cart.userId)?.totalOrderValue || 0,
                 items: Array.isArray(cart.items) ? cart.items : [],
                 itemCount: Number(cart.itemCount) || 0,
                 subtotal: Number(cart.subtotal) || 0,

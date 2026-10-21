@@ -23,6 +23,9 @@ const RESTAURANT_ROW = {
     // commission rows -- a restaurant on a subscription plan has no commission
     // row at all and would otherwise show as being on the default mode.
     billingMode: true,
+    // The restaurant's own online/offline switch, so the admin list can show
+    // it and turn it off for an outlet whose app has stopped working.
+    isAcceptingOrders: true,
 };
 
 const ZONE_SUMMARY = {

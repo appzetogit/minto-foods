@@ -119,31 +119,26 @@ export function assertRestaurantOpenForOrdering(restaurant, at = new Date()) {
   throw new ValidationError('Restaurant is currently closed. Please try again later.');
 }
 
-export const DISTANCE_MODES = ['road_capped', 'road', 'straight'];
-export const DEFAULT_ROAD_CAP_FACTOR = 1.5;
+export const ROAD_CAP_FACTOR = 1.5;
 
 /**
- * Which distance to charge on.
+ * Which distance to charge on: the driving distance, but never more than 1.5x
+ * the straight line.
  *
  * Google's driving route can be far longer than the trip really is -- one-way
  * streets, a detour to a bridge, a pin dropped on the wrong side of a road. A
- * Bhiwandi order 0.48 km away was charged for 2.06 km. The default,
- * "road_capped", uses the driving distance but never more than 1.5x the
- * straight line: real detours are still paid for, 4x surprises are not.
- * Falls back to whichever distance is known.
+ * Bhiwandi order 0.48 km away was charged for 2.06 km. Real detours are still
+ * paid for, 4x surprises are not. This used to be a Fee Settings choice (road /
+ * capped / straight, and the cap); it was removed, and any value still saved
+ * there is ignored. Falls back to whichever distance is known.
  */
-export function chooseChargedDistanceKm({ roadKm, straightKm, mode, capFactor } = {}) {
+export function chooseChargedDistanceKm({ roadKm, straightKm } = {}) {
   const road = Number.isFinite(Number(roadKm)) && roadKm !== null ? Number(roadKm) : null;
   const straight = Number.isFinite(Number(straightKm)) && straightKm !== null ? Number(straightKm) : null;
-  const chosen = DISTANCE_MODES.includes(mode) ? mode : 'road_capped';
 
   if (road === null) return straight;
   if (straight === null) return road;
-  if (chosen === 'straight') return straight;
-  if (chosen === 'road') return road;
-
-  const factor = Number(capFactor) >= 1 ? Number(capFactor) : DEFAULT_ROAD_CAP_FACTOR;
-  return Math.round(Math.min(road, straight * factor) * 100) / 100;
+  return Math.round(Math.min(road, straight * ROAD_CAP_FACTOR) * 100) / 100;
 }
 
 /**
@@ -542,15 +537,15 @@ export function calculateRiderEarning(feeSettings = {}, distanceKm) {
     : [];
   if (ranges.length === 0) return atLeastFloor(0);
 
-  // basePay and perKm are mutually exclusive (the admin UI enforces this too):
-  // a flat basePay wins, otherwise pay per km of the actual trip.
+  // The same shape as the customer's fee (bandFee): base pay at the band's
+  // start, plus the per-km rate for every km past that start. It used to be
+  // base pay OR per-km times the whole trip, so ₹30/km on a 1.5–5 km band paid
+  // ₹147 for 4.9 km while the next band's flat ₹35 paid less for 15 km.
   const payFor = (range) => {
     const basePay = Number(range?.deliveryBoyBasePay || 0);
     const perKm = Number(range?.deliveryBoyPerKm || 0);
-
-    if (basePay > 0) return basePay;
-    if (perKm > 0) return distance * perKm;
-    return 0;
+    const past = Math.max(0, distance - Number(range?.min ?? 0));
+    return basePay + perKm * past;
   };
 
   const matched = matchFeeRange(ranges, distance, payFor);
@@ -649,8 +644,6 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   let distanceKm = chooseChargedDistanceKm({
     roadKm: drivingKm,
     straightKm: straightLineKm,
-    mode: feeSettings.deliveryDistanceMode,
-    capFactor: feeSettings.roadDistanceCapFactor,
   });
 
   // Nothing stopped a customer ordering from a restaurant on the other side of

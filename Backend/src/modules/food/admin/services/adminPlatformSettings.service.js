@@ -116,9 +116,6 @@ const asBandError = (error) => {
     if (/no_overlap/.test(message)) {
         return new ValidationError('Distance bands must not overlap');
     }
-    if (/band_pay_exclusive/.test(message)) {
-        return new ValidationError('A band sets either a base pay or a per-km rate, not both');
-    }
     if (/band_range_valid|band_fee_non_negative/.test(message)) {
         return new ValidationError('Each band needs a valid distance range and a non-negative fee');
     }

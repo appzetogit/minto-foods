@@ -43,7 +43,14 @@ const ZONED = {
     foodRestaurantBankChange: (s) => ({
         restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
     }),
+    // A rider's money requests follow the rider's city. Without these, picking
+    // a zone on Delivery Withdrawal still listed every rider in every zone.
+    foodDeliveryWithdrawal: (s) => ({ deliveryPartner: { city: { in: s.cityNames, mode: 'insensitive' } } }),
+    foodDeliveryCashDeposit: (s) => ({ deliveryPartner: { city: { in: s.cityNames, mode: 'insensitive' } } }),
 };
+
+/** Scoped on reads only: these rows are raised by the rider, never by an admin. */
+const RIDER_OWNED = new Set(['foodDeliveryWithdrawal', 'foodDeliveryCashDeposit']);
 
 /**
  * Models where no zone means "everywhere". A sub-admin can see those rows but
@@ -94,6 +101,7 @@ export const createAllowed = (model, data, scope) => {
         const city = String(data?.city || '').trim().toLowerCase();
         return scope.cityNames.some((n) => n.toLowerCase() === city);
     }
+    if (RIDER_OWNED.has(name)) return true;
     if (ZONED[name] || ZONED_OR_GLOBAL.has(name)) {
         return zones.has(data?.zoneId ?? connectedId(data, 'zone'));
     }

@@ -29,13 +29,13 @@ const statusConfig = {
   "all": { title: "All Orders", color: "emerald", icon: FileText },
   "pending": {
     title: "Pending Orders",
-    subtitle: "Cash orders awaiting restaurant acceptance",
+    subtitle: "Waiting for the restaurant to accept or start preparing",
     color: "amber",
     icon: Package,
   },
   "processing": {
     title: "Processing Orders",
-    subtitle: "Active orders awaiting delivery partner (includes payment-pending online orders)",
+    subtitle: "Being prepared or ready, waiting for a delivery partner",
     color: "orange",
     icon: Package,
   },

@@ -58,17 +58,6 @@ test('an overlapping band is rejected by the database', async () => {
     );
 });
 
-test('basePay and perKm cannot both be set', async () => {
-    // calculateRiderEarning treats a non-zero basePay as the winner, so a row
-    // carrying both has one value that silently does nothing.
-    await assert.rejects(
-        () => prisma.deliveryFeeBand.create({
-            data: band({ minDistanceKm: 7, maxDistanceKm: 12, deliveryBoyBasePay: 15, deliveryBoyPerKm: 10 }),
-        }),
-        /delivery_fee_band_pay_exclusive/,
-    );
-});
-
 test('an inverted range is rejected', async () => {
     await assert.rejects(
         () => prisma.deliveryFeeBand.create({ data: band({ minDistanceKm: 12, maxDistanceKm: 8 }) }),
@@ -183,14 +172,3 @@ test('a rejected band save leaves the previous ladder intact', async () => {
     assert.ok(!after.some((r) => r.min === 3 && r.max === 9), 'no half-applied band');
 });
 
-test('a band setting both pay types is refused with a usable message', async () => {
-    await assert.rejects(
-        () => upsertFeeSettings({
-            deliveryFeeRanges: [
-                { min: 0, max: 5, fee: 20, deliveryBoyBasePay: 30, deliveryBoyPerKm: 6 },
-            ],
-        }),
-        /base pay or a per-km rate, not both/,
-        'the CHECK says so; the admin needs a sentence, not a constraint name',
-    );
-});

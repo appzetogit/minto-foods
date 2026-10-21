@@ -161,7 +161,7 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma } = {
     const subscriptionEnabled = await isFeatureEnabled(FEATURE_KEYS.RESTAURANT_SUBSCRIPTION, true);
     const scoped = { restaurantId: { in: ids } };
 
-    const [earned, withdrawn, deducted, locked] = await Promise.all([
+    const [earned, withdrawn, deducted, locked, paidOut] = await Promise.all([
         earnedTotalsByRestaurant(ids, { db }),
         // A pending request is money already spoken for, so it is subtracted
         // before it is approved — otherwise it could be withdrawn twice.
@@ -182,11 +182,22 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma } = {
                 'outstandingAmount',
             )
             : new Map(),
+        // Balance-sheet "Mark paid" is money that has left the platform just
+        // as a withdrawal has. Leaving it out kept the wallet at its old
+        // figure, and the restaurant could then withdraw what it was paid.
+        db.settlement
+            .groupBy({
+                by: ['entityId'],
+                where: { entityType: 'restaurant', entityId: { in: ids }, status: 'processed' },
+                _sum: { amount: true },
+            })
+            .then((rows) => new Map(rows.map((row) => [row.entityId, num(row._sum.amount)]))),
     ]);
 
     return new Map(ids.map((id) => {
         const totals = earned.get(id) || ZERO_TOTALS;
-        const totalWithdrawn = num(withdrawn.get(id));
+        const totalPaidOut = num(paidOut.get(id));
+        const totalWithdrawn = num(withdrawn.get(id)) + totalPaidOut;
         const lockedAmount = Math.max(0, num(locked.get(id)));
 
         // The full balance stays visible; only withdrawal is limited by the lock.
@@ -196,6 +207,7 @@ export async function getWalletSummaries(restaurantIds = [], { db = prisma } = {
             totals,
             totalEarnings: totals.payout,
             totalWithdrawn,
+            totalPaidOut,
             walletBalance,
             netAvailable: Math.max(0, walletBalance - lockedAmount),
             lockedAmount,
@@ -327,18 +339,45 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
             .filter(Boolean)
             .join(', ');
 
+    const startDate = parseISODateParam(query.startDate);
+    const endDate = parseISODateParamEnd(query.endDate);
+    const range = { from: startDate || null, to: endDate || null };
+    const createdInRange = range.from || range.to
+        ? { createdAt: { ...(range.from ? { gte: range.from } : {}), ...(range.to ? { lte: range.to } : {}) } }
+        : {};
+
     // The open invoices and their month labels are only needed for this one
     // restaurant; the summary above already has the amount they lock.
-    const [currentPage, outstandingSummary] = await Promise.all([
-        earnedOrdersPage(rid, {}, ordersPagination, relevantOffers),
+    const [currentPage, outstandingSummary, payoutRows] = await Promise.all([
+        // A date range narrows the earning history the app shows.
+        earnedOrdersPage(rid, range, ordersPagination, relevantOffers),
         isRestaurantSubscriptionEnabled
             ? getOutstandingSummary(rid)
             : Promise.resolve({ lockedAmount: 0, openInvoices: [], monthsLabel: '' }),
+        prisma.settlement.findMany({
+            where: { entityType: 'restaurant', entityId: rid, status: 'processed', ...createdInRange },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+        }),
     ]);
+
+    // Payouts the admin made from the balance sheet, so the restaurant can see
+    // what was paid, when, and for which week.
+    const payouts = payoutRows.map((row) => ({
+        id: row.id,
+        amount: num(row.amount),
+        reference: row.payoutRef || '',
+        periodStart: row.periodStart,
+        periodEnd: row.periodEnd,
+        paidAt: row.processedAt || row.createdAt,
+        notes: row.notes || '',
+    }));
 
     const wallet = {
         totalEarnings: summary.totalEarnings,
         totalWithdrawn: summary.totalWithdrawn,
+        totalPaidOut: summary.totalPaidOut,
+        payouts,
         estimatedPayout: summary.totalEarnings,
         withdrawableBalance: summary.walletBalance,
         netAvailable: summary.netAvailable, // what can ACTUALLY be withdrawn
@@ -354,9 +393,6 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         taxes: lifetime.tax,
         gross: lifetime.gross,
     };
-
-    const startDate = parseISODateParam(query.startDate);
-    const endDate = parseISODateParamEnd(query.endDate);
 
     const pastCyclesResult = startDate && endDate
         ? await earnedOrdersPage(rid, { from: startDate, to: endDate }, ordersPagination, relevantOffers)
@@ -388,5 +424,6 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         currentCycle: wallet,
         invoiceSummary,
         pastCycles: pastCyclesResult,
+        payoutHistory: payouts,
     };
 }
