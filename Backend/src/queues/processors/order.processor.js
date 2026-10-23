@@ -1,9 +1,13 @@
 import { logger } from '../../utils/logger.js';
 
 /**
- * BullMQ processor for order lifecycle jobs.
+ * BullMQ processor for order lifecycle jobs: the rider offer window closing
+ * (DISPATCH_TIMEOUT_CHECK, re-offers the order) and the restaurant's acceptance
+ * window closing (ORDER_ACCEPTANCE_TIMEOUT_CHECK, cancels it if still unaccepted).
  *
- * Current implementation is intentionally logging-only to avoid changing API behavior.
+ * Both imports pointed one directory too high (../../../modules), outside src/,
+ * so every job failed with "Cannot find module" and neither ever ran: an
+ * order nobody took was only re-offered when something else nudged it.
  * @param {import('bullmq').Job} job
  */
 export const processOrderJob = async (job) => {
@@ -19,7 +23,7 @@ export const processOrderJob = async (job) => {
     // Handle Smart Dispatch Timeout
     if (action === 'DISPATCH_TIMEOUT_CHECK') {
         try {
-            const { processDispatchTimeout } = await import('../../../modules/food/orders/services/order.service.js');
+            const { processDispatchTimeout } = await import('../../modules/food/orders/services/order.service.js');
             // Pass full data object to allow attempt count and other options
             await processDispatchTimeout(orderMongoId, data.partnerId, data);
         } catch (err) {
@@ -29,7 +33,7 @@ export const processOrderJob = async (job) => {
 
     if (action === 'ORDER_ACCEPTANCE_TIMEOUT_CHECK') {
         try {
-            const { expireUnacceptedOrderById } = await import('../../../modules/food/orders/services/order.service.js');
+            const { expireUnacceptedOrderById } = await import('../../modules/food/orders/services/order.service.js');
             await expireUnacceptedOrderById(orderMongoId);
         } catch (err) {
             logger.error(`[BullMQ:order] ORDER_ACCEPTANCE_TIMEOUT_CHECK failed: ${err.message}`);
