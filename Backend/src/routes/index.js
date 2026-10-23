@@ -64,7 +64,8 @@ router.get('/v1/food/admin/business-settings/public', businessSettingsController
 router.get('/v1/food/admin/power-scanning/public', businessSettingsController.getPowerScanningSettings);
 router.get('/v1/food/admin/restaurant-subscription-settings/public', adminController.getRestaurantSubscriptionSettings);
 router.get('/v1/food/admin/feature-settings/public', adminController.getFeatureSettings);
-router.get('/v1/food/admin/fee-settings/public', adminController.getFeeSettings);
+// The zone's fees plus the order limits in force (COD limit, max per dish).
+router.get('/v1/food/admin/fee-settings/public', adminController.getPublicFeeSettings);
 router.get('/v1/food/admin/cashback-settings/public', getCashbackSettingsPublicController);
 
 router.use('/v1/food/admin', authMiddleware, requireRoles('ADMIN'), restaurantAdminRoutes);
