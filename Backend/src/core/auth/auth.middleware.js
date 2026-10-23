@@ -11,11 +11,13 @@ export const requireAdmin = (req, res, next) => {
 };
 
 /**
- * Accounts whose sessions are single-device.
+ * Accounts whose session version (and deletion) is checked on every request.
  *
- * Admins are intentionally absent: the panel is routinely used across several
- * browser tabs and machines, so evicting the others on each sign-in would be a
- * regression rather than a safeguard.
+ * Customers and riders are single-device: each login bumps the version, so the
+ * previous phone is signed out. Restaurants stay here although they are
+ * multi-device -- their login does not bump the version -- because this is
+ * what makes "Log out all devices" and a deleted restaurant take effect.
+ * Admins are absent: the panel is used across several tabs and machines.
  */
 const SESSION_SCOPED_MODELS = {
     USER: () => prisma.foodUser,

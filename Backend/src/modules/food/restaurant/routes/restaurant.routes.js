@@ -5,6 +5,7 @@ import {
     isDeliverySelfOnboardingOpen,
 } from '../../../../core/auth/onboardingGate.js';
 import { deleteOwnAccountController } from '../../../../core/auth/accountDeletion.service.js';
+import { logoutAllRestaurantDevices } from '../../../../core/auth/auth.service.js';
 import { upload } from '../../../../middleware/upload.js';
 import { imageUpload, uploadRateLimiter } from '../../../uploads/middleware/upload.middleware.js';
 import {
@@ -170,6 +171,15 @@ router.get('/categories/public', cacheResponse(600, 'categories'), listCategorie
 
 // Restaurant dashboard/profile (Bearer token + RESTAURANT role)
 router.get('/current', authMiddleware, requireRestaurant, getCurrentRestaurantController);
+// Signs this restaurant out on every phone, this one included.
+router.post('/logout-all-devices', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        const data = await logoutAllRestaurantDevices(req.user?.userId);
+        return sendResponse(res, 200, 'Logged out on all devices', data);
+    } catch (error) {
+        next(error);
+    }
+});
 router.delete(['/account', '/profile/account'], authMiddleware, requireRestaurant, async (req, res, next) => {
     await invalidateCache('restaurants:*');
     await invalidateCache('restaurant_detail:*');

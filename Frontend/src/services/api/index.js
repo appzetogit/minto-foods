@@ -743,6 +743,9 @@ export const adminAPI = {
       { contextModule: "admin" },
     ),
   /** Update restaurant location (admin). Body includes lat/lng + address fields. */
+  /** Signs the restaurant out on every phone (a lost or shared device). */
+  logoutRestaurantAllDevices: (id) =>
+    apiClient.post(`/food/admin/restaurants/${String(id)}/logout-all-devices`, {}, { contextModule: "admin" }),
   updateRestaurantLocation: (id, body) =>
     apiClient.patch(
       `/food/admin/restaurants/${String(id)}/location`,

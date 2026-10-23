@@ -36,15 +36,20 @@ const ROLES = {
 
 /**
  * Roles whose sessions are single-device, and whose push tokens must therefore be
- * single-device too. Mirrors SESSION_SCOPED_MODELS in auth.middleware — admins are
- * excluded there because the panel is used across several tabs and machines, and
- * evicting those would be a regression rather than a safeguard.
+ * single-device too: a new login signs the other phone out.
+ *
+ * Restaurants are not on it. A restaurant runs on several phones at once -- the
+ * counter, the kitchen, the owner -- and every one must stay signed in and ring
+ * for a new order. Admins are not either: the panel is used across tabs and
+ * machines.
  */
 const SINGLE_DEVICE_ROLES = new Set([
   ROLES.USER,
-  ROLES.RESTAURANT,
   ROLES.DELIVERY_PARTNER,
 ]);
+
+/** How many phones a restaurant may be signed in on; the oldest drops off. */
+export const MAX_RESTAURANT_DEVICES = 5;
 
 const saveLoginFcmToken = async ({ ownerType, ownerId, fcmToken, platform, ownerDoc }) => {
   if (!fcmToken || !ownerId) return;
@@ -425,10 +430,13 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   // Postpaid subscription model: no onboarding payment or subscription purchase
   // is required to use the platform — dues are billed at each month end.
 
+  // No bump: signing in on another phone must not sign this restaurant out
+  // of the ones it is already using. The version only moves on "Log out all
+  // devices".
   const payload = {
     userId: restaurant.id,
     role: ROLES.RESTAURANT,
-    tokenVersion: await bumpTokenVersion(prisma.foodRestaurant, restaurant.id),
+    tokenVersion: Number(restaurant.tokenVersion) || 0,
   };
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
@@ -442,6 +450,7 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
     expiresAt,
     },
   });
+  await keepNewestRestaurantSessions(restaurant.id);
 
   return {
     accessToken,
@@ -547,6 +556,40 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
   };
 };
 
+/**
+ * A restaurant keeps at most MAX_RESTAURANT_DEVICES sessions (one refresh
+ * token per signed-in phone). The oldest beyond that is dropped: that phone
+ * can no longer refresh and signs out when its short-lived access token ends.
+ */
+const keepNewestRestaurantSessions = async (restaurantId) => {
+  const sessions = await prisma.foodRefreshToken.findMany({
+    where: { userId: String(restaurantId) },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  const extra = sessions.slice(MAX_RESTAURANT_DEVICES).map((s) => s.id);
+  if (extra.length) await prisma.foodRefreshToken.deleteMany({ where: { id: { in: extra } } });
+};
+
+/**
+ * "Log out all devices" for a restaurant: every phone's session and push token
+ * goes, and the version moves so no access token already out there still works.
+ */
+export const logoutAllRestaurantDevices = async (restaurantId) => {
+  const id = String(restaurantId || "");
+  if (!id) throw new ValidationError("Restaurant id is required");
+  const restaurant = await prisma.foodRestaurant.findUnique({ where: { id }, select: { id: true } });
+  if (!restaurant) throw new NotFoundError("Restaurant not found");
+
+  await bumpTokenVersion(prisma.foodRestaurant, id);
+  const { count } = await prisma.foodRefreshToken.deleteMany({ where: { userId: id } });
+  await prisma.$executeRawUnsafe(
+    `UPDATE "food_restaurants" SET "fcmTokens" = '{}', "fcmTokenMobile" = '{}', "updatedAt" = now() WHERE "id" = $1`,
+    id,
+  );
+  return { loggedOutSessions: count };
+};
+
 export const logout = async (refreshToken, fcmToken, platform) => {
   if (!refreshToken) {
     throw new ValidationError("Refresh token is required");
@@ -563,7 +606,7 @@ export const logout = async (refreshToken, fcmToken, platform) => {
 
   // 2. Invalidate the refresh token (standard logout procedure)
   const deleted = await prisma.foodRefreshToken.deleteMany({ where: { token: refreshToken } });
-  return { invalidated: deleted.deletedCount > 0 };
+  return { invalidated: deleted.count > 0 };
 };
 
 export const getProfile = async (userId, role) => {

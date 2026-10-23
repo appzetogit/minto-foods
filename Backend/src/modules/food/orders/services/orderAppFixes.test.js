@@ -191,3 +191,42 @@ test('toRestaurantContact strips every phone, not only on gift orders', () => {
     assert.ok(!JSON.stringify(out).includes('a@b.c'));
     assert.deepEqual(out.recipient, { name: '', phone: '' });
 });
+
+// ---- two phones answering the same new order ---------------------------------------
+
+test('two phones accept together: one wins, the other gets 409', async () => {
+    const id = await placeOrder();
+    await prisma.foodOrder.update({ where: { id }, data: { acceptanceDeadlineAt: null } });
+
+    const [a, b] = await Promise.allSettled([
+        updateOrderStatusRestaurant(id, restaurantId, 'confirmed'),
+        updateOrderStatusRestaurant(id, restaurantId, 'confirmed'),
+    ]);
+    const won = [a, b].filter((r) => r.status === 'fulfilled');
+    const lost = [a, b].filter((r) => r.status === 'rejected');
+    assert.equal(won.length, 1, 'exactly one phone accepts');
+    assert.equal(lost.length, 1);
+    assert.equal(lost[0].reason.statusCode, 409);
+    assert.equal(lost[0].reason.message, 'This order was already accepted on another device');
+
+    // A third phone, later, gets the same answer.
+    await assert.rejects(
+        () => updateOrderStatusRestaurant(id, restaurantId, 'confirmed'),
+        (err) => err.statusCode === 409 && /already accepted on another device/.test(err.message),
+    );
+});
+
+test('a reject after another phone rejected gets 409, and an accept after it too', async () => {
+    const id = await placeOrder();
+    await prisma.foodOrder.update({ where: { id }, data: { acceptanceDeadlineAt: null } });
+
+    await updateOrderStatusRestaurant(id, restaurantId, 'cancelled_by_restaurant', 'Out of stock');
+    await assert.rejects(
+        () => updateOrderStatusRestaurant(id, restaurantId, 'cancelled_by_restaurant'),
+        (err) => err.statusCode === 409 && err.message === 'This order was already rejected on another device',
+    );
+    await assert.rejects(
+        () => updateOrderStatusRestaurant(id, restaurantId, 'confirmed'),
+        (err) => err.statusCode === 409 && /already rejected on another device/.test(err.message),
+    );
+});

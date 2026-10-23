@@ -31,6 +31,15 @@ export class NotFoundError extends Error {
     }
 }
 
+/** Someone else got there first (e.g. another phone already accepted the order). */
+export class ConflictError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'ConflictError';
+        this.statusCode = 409;
+    }
+}
+
 /**
  * Business-layer rate limit (e.g. per-phone OTP quota), as opposed to the
  * HTTP/IP limiter in middleware/rateLimit.js.

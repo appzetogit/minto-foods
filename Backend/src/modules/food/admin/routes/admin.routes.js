@@ -315,6 +315,16 @@ router.get(
 router.get('/restaurants/:id/menu', adminController.getRestaurantMenuById);
 router.post('/restaurants', adminController.createRestaurant);
 router.patch('/restaurants/:id', adminController.updateRestaurantById);
+// Signs the restaurant out on every phone (a lost or shared device).
+router.post('/restaurants/:id/logout-all-devices', async (req, res, next) => {
+    try {
+        const { logoutAllRestaurantDevices } = await import('../../../../core/auth/auth.service.js');
+        const data = await logoutAllRestaurantDevices(req.params.id);
+        return res.status(200).json({ success: true, message: 'Restaurant logged out on all devices', data });
+    } catch (error) {
+        next(error);
+    }
+});
 // Restaurant card tags (Bestseller, Popular, ...).
 router.get('/highlight-badges', highlightBadges.listBadges);
 router.post('/highlight-badges', highlightBadges.createBadge);

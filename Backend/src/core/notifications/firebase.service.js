@@ -30,6 +30,16 @@ const OWNER_TOKEN_FIELDS = {
 };
 /** Keep a few recent devices, not long stale histories that cause duplicate pushes. */
 const MAX_TOKENS_PER_PLATFORM = 3;
+/**
+ * A restaurant is signed in on several phones at once (the counter, the
+ * kitchen, the owner), and every one of them must ring for a new order. Matches
+ * MAX_RESTAURANT_DEVICES in auth.service.js.
+ */
+const MAX_RESTAURANT_TOKENS = 5;
+
+/** How many device tokens an owner keeps per platform. */
+const tokenCapFor = (ownerType) =>
+    String(ownerType || '').toUpperCase() === 'RESTAURANT' ? MAX_RESTAURANT_TOKENS : MAX_TOKENS_PER_PLATFORM;
 
 /**
  * Android notification channels. These MUST match channels the receiving app
@@ -374,21 +384,21 @@ const getOwnerTable = (ownerType) => OWNER_TABLES[String(ownerType || '').toUppe
 
 const getTokenFieldForPlatform = (platform) => OWNER_TOKEN_FIELDS[isMobilePlatform(platform) ? 'mobile' : 'web'];
 
-const normalizeTokenList = (tokens = []) => {
+const normalizeTokenList = (tokens = [], cap = MAX_TOKENS_PER_PLATFORM) => {
     const normalized = [...new Set((Array.isArray(tokens) ? tokens : [tokens]).map(sanitizeString).filter(Boolean))];
-    return normalized.slice(-MAX_TOKENS_PER_PLATFORM);
+    return normalized.slice(-cap);
 };
 
-const readTokensFromDoc = (doc, platform) => {
+const readTokensFromDoc = (doc, platform, cap = MAX_TOKENS_PER_PLATFORM) => {
     if (!doc) return [];
     if (platform) {
-        return normalizeTokenList(doc[getTokenFieldForPlatform(platform)] || []);
+        return normalizeTokenList(doc[getTokenFieldForPlatform(platform)] || [], cap);
     }
     // Keep per-platform caps, then unique across both buckets.
     return [
         ...new Set([
-            ...normalizeTokenList(doc.fcmTokens || []),
-            ...normalizeTokenList(doc.fcmTokenMobile || [])
+            ...normalizeTokenList(doc.fcmTokens || [], cap),
+            ...normalizeTokenList(doc.fcmTokenMobile || [], cap)
         ])
     ];
 };
@@ -431,7 +441,7 @@ export const listOwnerTokens = async ({ ownerType, ownerId, platform }) => {
         `SELECT "fcmTokens", "fcmTokenMobile" FROM "${table}" WHERE "id" = $1`,
         String(ownerId),
     );
-    return readTokensFromDoc(doc, platform);
+    return readTokensFromDoc(doc, platform, tokenCapFor(ownerType));
 };
 
 export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, platform = 'web' }) => {
@@ -471,7 +481,7 @@ export const upsertFirebaseDeviceToken = async ({ ownerType, ownerId, token, pla
     // is evicted rather than the list growing without bound.
     const result = await prisma.$executeRawUnsafe(
         `UPDATE "${table}"
-            SET "${field}"      = array_append_capped("${field}", $1, ${MAX_TOKENS_PER_PLATFORM}),
+            SET "${field}"      = array_append_capped("${field}", $1, ${tokenCapFor(ownerType)}),
                 -- Never keep the same token in both buckets on this row.
                 "${otherField}" = array_remove(COALESCE("${otherField}", '{}'), $1),
                 "updatedAt"     = now()
@@ -615,7 +625,9 @@ const sendMessageWithRetry = async (message, { projectId, accessToken }) => {
 export const sendPushNotification = async (tokens, payload = {}) => {
     const projectId = getFirebaseProjectId();
     const accessToken = await getFirebaseAccessToken();
-    const uniqueTokens = normalizeTokenList(tokens);
+    // De-duplicated only: the owner's own cap was applied when its tokens were
+    // read, and capping again here would silence a restaurant's 4th and 5th phone.
+    const uniqueTokens = normalizeTokenList(tokens, Number.MAX_SAFE_INTEGER);
 
     if (uniqueTokens.length === 0) {
         return { successCount: 0, failureCount: 0, results: [] };

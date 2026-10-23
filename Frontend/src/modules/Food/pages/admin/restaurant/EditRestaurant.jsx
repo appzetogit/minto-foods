@@ -329,6 +329,21 @@ export default function EditRestaurant() {
     return z?.name || z?.zoneName || ""
   }, [locationForm.zoneId, zones])
 
+  const [loggingOut, setLoggingOut] = useState(false)
+  const handleLogoutAllDevices = async () => {
+    if (!window.confirm("Sign this restaurant out on every phone? They will need to log in again.")) return
+    try {
+      setLoggingOut(true)
+      const res = await adminAPI.logoutRestaurantAllDevices(restaurantId)
+      const n = res?.data?.data?.loggedOutSessions ?? 0
+      alert(`Logged out on all devices (${n} session${n === 1 ? "" : "s"}).`)
+    } catch (e) {
+      alert(e?.response?.data?.message || "Could not log the restaurant out")
+    } finally {
+      setLoggingOut(false)
+    }
+  }
+
   const handleSaveDetails = async () => {
     if (!restaurantId) return
     try {
@@ -539,6 +554,18 @@ export default function EditRestaurant() {
               </p>
             </div>
           </div>
+          {restaurantId && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loggingOut}
+              onClick={handleLogoutAllDevices}
+              title="The restaurant can be signed in on up to 5 phones. This signs every one of them out."
+            >
+              {loggingOut ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Log out all devices
+            </Button>
+          )}
         </div>
 
         {loading ? (

@@ -5,7 +5,7 @@ import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
 import { reconcileOrderPayment } from './payment-reconcile.service.js';
 import { logger } from '../../../../utils/logger.js';
-import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
+import { ValidationError, ForbiddenError, NotFoundError, ConflictError } from '../../../../core/auth/errors.js';
 import { buildPaginationOptions, buildPaginatedResult, isId } from '../../../../utils/helpers.js';
 import {
     createRazorpayOrder,
@@ -2019,6 +2019,28 @@ export function restaurantStatusRefusal(from, to) {
   return `This order is already ${now}, so it can't be marked ${wanted}.`;
 }
 
+/** What the second phone is told when the order was answered on another one. */
+export function answeredElsewhereMessage(status) {
+  const now = String(status || "");
+  if (now.startsWith("cancelled")) return "This order was already rejected on another device";
+  return "This order was already accepted on another device";
+}
+
+/**
+ * Accepting (confirmed) needs a new order, and rejecting one that is already
+ * cancelled is a second phone too. Anything else is an ordinary step.
+ */
+function assertNotAnsweredElsewhere(from, to) {
+  const target = String(to || "");
+  const current = String(from || "");
+  if (target === "confirmed" && current !== "created") {
+    throw new ConflictError(answeredElsewhereMessage(current));
+  }
+  if (target === "cancelled_by_restaurant" && current.startsWith("cancelled")) {
+    throw new ConflictError(answeredElsewhereMessage(current));
+  }
+}
+
 export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "") {
   await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
 
@@ -2049,6 +2071,10 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
   }
 
   const from = order.orderStatus;
+  // Accept / reject from a second phone after the first one already answered:
+  // the restaurant is signed in on several, and both ring. Refused with a 409
+  // so the app can close its popup and say why.
+  assertNotAnsweredElsewhere(from, orderStatus);
   // The same status again is a repeated tap or a retried request whose first
   // try already worked -- most "Mark ready" failures in the logs were exactly
   // this. Answer with the order as it is instead of an error, and do nothing
@@ -2067,8 +2093,11 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     normalizedPaymentMethod === "cash" &&
     prevPaymentStatus === "cod_pending";
 
-  let updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
+  // One atomic update that only lands if the order is still in the status this
+  // request read. Two phones answering together both read "created"; the
+  // database lets exactly one of them through, and the other gets a 409.
+  const { count: moved } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
     data: {
       orderStatus,
       // The acceptance window exists only to auto-cancel orders the restaurant
@@ -2077,8 +2106,26 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       acceptanceDeadlineAt: null,
       ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
     },
-    include: orderInclude,
-  }));
+  });
+  if (!moved) {
+    const now = await prisma.foodOrder.findUnique({ where: { id: order.id }, select: { orderStatus: true } });
+    throw new ConflictError(answeredElsewhereMessage(now?.orderStatus));
+  }
+  let updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude }));
+
+  // Every phone the restaurant is signed in on hears the answer, so the ones
+  // that are still ringing stop. Silent: the phone that answered knows.
+  if (String(from) === "created") {
+    void notifyOwnersSafely([{ ownerType: "RESTAURANT", ownerId: restaurantId }], {
+      dataOnly: true,
+      data: {
+        type: "order_status_update",
+        orderId: updated.id,
+        orderMongoId: updated.id,
+        orderStatus: String(orderStatus),
+      },
+    });
+  }
 
   await pushStatusHistory(order.id, {
     byRole: "RESTAURANT",
