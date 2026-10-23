@@ -11,7 +11,30 @@ import { buildPublicUrl } from '../../../../services/storage.service.js';
 const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
 
 /** The order columns that decide who may talk to whom. */
-const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true };
+const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true, dispatchAcceptedAt: true };
+
+export const RESTAURANT_CUSTOMER_CHAT_MESSAGE = 'Restaurants can chat only with the delivery partner';
+export const RIDER_NOT_ACCEPTED_CHAT_MESSAGE = 'You can chat with the rider once they have accepted the order';
+
+/**
+ * Who may talk to whom.
+ *
+ * A restaurant never chats with the customer, in either direction: the
+ * customer's contact stays with the platform and the rider. A restaurant and a
+ * rider may chat only on an order that rider has accepted -- an order merely
+ * offered to them is not theirs yet. Support (ADMIN) talks to anyone.
+ *
+ * @param {object|null} order the order's parties, when the chat is about one
+ */
+export function assertChatPairAllowed(roleA, roleB, order = null) {
+    const pair = [roleA, roleB].sort().join('|');
+    if (pair === 'RESTAURANT|USER') throw new ForbiddenError(RESTAURANT_CUSTOMER_CHAT_MESSAGE);
+    if (pair === 'DELIVERY_PARTNER|RESTAURANT') {
+        if (!order?.dispatchAcceptedAt || !order?.dispatchDeliveryPartnerId) {
+            throw new ForbiddenError(RIDER_NOT_ACCEPTED_CHAT_MESSAGE);
+        }
+    }
+}
 
 /** Stable identifier for a participant. ADMIN carries no id (shared inbox). */
 export const partyToken = (role, id) => (role === 'ADMIN' ? 'ADMIN' : `${role}:${String(id)}`);
@@ -60,6 +83,7 @@ async function assertOrderParticipants(orderId, tokens) {
             throw new ForbiddenError('You are not a participant of this order');
         }
     }
+    return order;
 }
 
 /**
@@ -191,6 +215,7 @@ export async function sendMessage(sender, dto) {
         const peer = resolveOrderRecipient(sender, order, requestedPeerRole);
         peerRole = peer.role;
         peerId = peer.id;
+        assertChatPairAllowed(sender.role, peerRole, order);
     } else {
         // Admin support thread: no order, so the peer must be stated.
         peerRole = requestedPeerRole || 'ADMIN';
@@ -724,7 +749,8 @@ export async function createConversation(me, dto = {}) {
         const [peerRole] = peerToken.split(':');
         if (!ROLES.includes(peerRole)) throw new ValidationError('Invalid peer');
         // Chatting about an order means both sides must belong to it.
-        if (orderId) await assertOrderParticipants(orderId, [myToken, peerToken]);
+        const order = orderId ? await assertOrderParticipants(orderId, [myToken, peerToken]) : null;
+        assertChatPairAllowed(me.role, peerRole, order);
     }
 
     const conversationId = buildConversationId(myToken, peerToken, orderId || null);

@@ -38,3 +38,17 @@ test('an id containing a colon does not corrupt the role', () => {
     const [role] = partyToken('USER', 'a:b').split(':');
     assert.equal(role, 'USER');
 });
+
+test('restaurants chat with riders on accepted orders only, never with customers', async () => {
+    const { assertChatPairAllowed } = await import('./chat.service.js');
+    const accepted = { dispatchDeliveryPartnerId: 'd1', dispatchAcceptedAt: new Date() };
+    const offered = { dispatchDeliveryPartnerId: 'd1', dispatchAcceptedAt: null };
+
+    assert.throws(() => assertChatPairAllowed('RESTAURANT', 'USER', accepted), /Restaurants can chat only with the delivery partner/);
+    assert.throws(() => assertChatPairAllowed('USER', 'RESTAURANT', accepted), /Restaurants can chat only with the delivery partner/);
+    assert.throws(() => assertChatPairAllowed('RESTAURANT', 'DELIVERY_PARTNER', offered), /once they have accepted/);
+    assert.throws(() => assertChatPairAllowed('DELIVERY_PARTNER', 'RESTAURANT', null), /once they have accepted/);
+    assert.doesNotThrow(() => assertChatPairAllowed('RESTAURANT', 'DELIVERY_PARTNER', accepted));
+    assert.doesNotThrow(() => assertChatPairAllowed('RESTAURANT', 'ADMIN', null));
+    assert.doesNotThrow(() => assertChatPairAllowed('USER', 'DELIVERY_PARTNER', offered));
+});

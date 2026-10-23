@@ -340,3 +340,32 @@ test('chat polling by order returns the latest messages', async () => {
     assert.ok(thread, 'the order thread is listed');
     assert.deepEqual(thread.messages.map((m) => m.text), ['Ring the bell please', 'On my way']);
 });
+
+test('a restaurant cannot chat with the customer, and chats with the rider only once accepted', async () => {
+    const kitchen = { role: 'RESTAURANT', id: openKitchen.id };
+    const status = (err) => err?.statusCode;
+
+    await assert.rejects(
+        () => sendMessage(kitchen, { orderId: liveOrderId, peerRole: 'USER', text: 'Hi' }),
+        (err) => status(err) === 403 && /Restaurants can chat only with the delivery partner/.test(err.message),
+    );
+    await assert.rejects(
+        () => sendMessage({ role: 'USER', id: user.id }, { orderId: liveOrderId, peerRole: 'RESTAURANT', text: 'Hi' }),
+        (err) => status(err) === 403,
+    );
+
+    // The rider accepted this order earlier in the file: allowed.
+    const sent = await sendMessage(kitchen, { orderId: liveOrderId, peerRole: 'DELIVERY_PARTNER', text: 'Parcel is ready' });
+    assert.equal(sent.text, 'Parcel is ready');
+
+    // Offered but not accepted: refused.
+    await prisma.foodOrder.update({ where: { id: liveOrderId }, data: { dispatchAcceptedAt: null } });
+    try {
+        await assert.rejects(
+            () => sendMessage(kitchen, { orderId: liveOrderId, peerRole: 'DELIVERY_PARTNER', text: 'Hello?' }),
+            (err) => status(err) === 403 && /once they have accepted/.test(err.message),
+        );
+    } finally {
+        await prisma.foodOrder.update({ where: { id: liveOrderId }, data: { dispatchAcceptedAt: new Date() } });
+    }
+});
