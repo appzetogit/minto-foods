@@ -8,30 +8,40 @@ import { Clock, Loader2, Save, Tag } from "lucide-react"
 import { HighlightBadgeManager } from "@food/components/admin/restaurant/HighlightBadges"
 import { toast } from "sonner"
 
-const MIN_MINUTES = 1
-const MAX_MINUTES = 20
-const DEFAULT_MINUTES = 4
+// The restaurant's time to accept a new order, in seconds. Mirrors the
+// server's bounds (businessSettings.service.js).
+const MIN_SECONDS = 30
+const MAX_SECONDS = 600
+const DEFAULT_SECONDS = 240
 
-const clampMinutes = (value) => {
+const clampSeconds = (value) => {
   const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return DEFAULT_MINUTES
-  return Math.max(MIN_MINUTES, Math.min(MAX_MINUTES, Math.round(numeric)))
+  if (!Number.isFinite(numeric)) return DEFAULT_SECONDS
+  return Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, Math.round(numeric)))
+}
+
+const describe = (seconds) => {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  if (!m) return `${s} seconds`
+  return s ? `${m} min ${s} s` : `${m} minute${m === 1 ? "" : "s"}`
 }
 
 export default function RestaurantSettings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [savedMinutes, setSavedMinutes] = useState(DEFAULT_MINUTES)
-  const [minutes, setMinutes] = useState(DEFAULT_MINUTES)
+  const [savedSeconds, setSavedSeconds] = useState(DEFAULT_SECONDS)
+  const [seconds, setSeconds] = useState(DEFAULT_SECONDS)
 
   useEffect(() => {
     const loadSettings = async () => {
       try {
         setLoading(true)
         const response = await adminAPI.getRestaurantOrderAcceptanceSettings()
-        const value = clampMinutes(response?.data?.data?.orderAcceptanceTimeMinutes)
-        setSavedMinutes(value)
-        setMinutes(value)
+        const data = response?.data?.data || {}
+        const value = clampSeconds(data.orderAcceptanceTimeSeconds ?? (data.orderAcceptanceTimeMinutes ?? 4) * 60)
+        setSavedSeconds(value)
+        setSeconds(value)
       } catch (error) {
         toast.error(error?.response?.data?.message || "Failed to load restaurant settings.")
       } finally {
@@ -43,16 +53,16 @@ export default function RestaurantSettings() {
   }, [])
 
   const handleSave = async () => {
-    const value = clampMinutes(minutes)
+    const value = clampSeconds(seconds)
     try {
       setSaving(true)
       const response = await adminAPI.updateRestaurantOrderAcceptanceSettings({
-        orderAcceptanceTimeMinutes: value,
+        orderAcceptanceTimeSeconds: value,
       })
-      const updatedValue = clampMinutes(response?.data?.data?.orderAcceptanceTimeMinutes ?? value)
-      setSavedMinutes(updatedValue)
-      setMinutes(updatedValue)
-      toast.success("Order acceptance time updated.")
+      const updatedValue = clampSeconds(response?.data?.data?.orderAcceptanceTimeSeconds ?? value)
+      setSavedSeconds(updatedValue)
+      setSeconds(updatedValue)
+      toast.success("Restaurant accept time updated.")
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to update order acceptance time.")
     } finally {
@@ -68,8 +78,8 @@ export default function RestaurantSettings() {
     )
   }
 
-  const currentMinutes = clampMinutes(minutes)
-  const isDirty = currentMinutes !== savedMinutes
+  const currentSeconds = clampSeconds(seconds)
+  const isDirty = currentSeconds !== savedSeconds
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -84,37 +94,40 @@ export default function RestaurantSettings() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Clock className="h-5 w-5 text-slate-600" />
-            <CardTitle className="text-lg">Order Acceptance Time</CardTitle>
+            <CardTitle className="text-lg">Restaurant accept time</CardTitle>
           </div>
           <CardDescription>
-            New restaurant order popups will use this value. Existing active orders keep their current timer.
+            How long a restaurant has to accept a new order before it is rejected automatically. The popup and the
+            order card count down from it. Orders already placed keep their timer.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="orderAcceptanceTimeMinutes">Timer duration</Label>
-              <span className="text-sm font-semibold text-gray-900">{currentMinutes} minutes</span>
+              <Label htmlFor="orderAcceptanceTimeSeconds">Restaurant accept time (seconds)</Label>
+              <span className="text-sm font-semibold text-gray-900">{describe(currentSeconds)}</span>
             </div>
             <Input
-              id="orderAcceptanceTimeMinutes"
+              id="orderAcceptanceTimeSeconds"
               type="range"
-              min={MIN_MINUTES}
-              max={MAX_MINUTES}
-              value={currentMinutes}
-              onChange={(event) => setMinutes(clampMinutes(event.target.value))}
+              min={MIN_SECONDS}
+              max={MAX_SECONDS}
+              step={10}
+              value={currentSeconds}
+              onChange={(event) => setSeconds(clampSeconds(event.target.value))}
               className="h-10"
             />
             <div className="flex items-center gap-3">
               <Input
                 type="number"
-                min={MIN_MINUTES}
-                max={MAX_MINUTES}
-                value={currentMinutes}
-                onChange={(event) => setMinutes(clampMinutes(event.target.value))}
+                min={MIN_SECONDS}
+                max={MAX_SECONDS}
+                value={seconds}
+                onChange={(event) => setSeconds(event.target.value)}
+                onBlur={() => setSeconds(clampSeconds(seconds))}
                 className="w-28"
               />
-              <span className="text-sm text-gray-500">Allowed range: 1 to 20 minutes</span>
+              <span className="text-sm text-gray-500">Allowed range: 30 to 600 seconds</span>
             </div>
           </div>
 

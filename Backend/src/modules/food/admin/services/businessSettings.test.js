@@ -83,20 +83,29 @@ test('an unusable colour or font falls back instead of being stored', async () =
     assert.equal(bare.delivery.themeColor, '#ABCDEF');
 });
 
-test('the acceptance window is bounded', async () => {
-    const saved = await settings.updateOrderAcceptanceSettings('7');
-    assert.equal(saved.orderAcceptanceTimeMinutes, 7);
-    assert.equal(saved.acceptanceWindowSeconds, 420);
+test('the acceptance window is bounded, in seconds', async () => {
+    const saved = await settings.updateOrderAcceptanceSettings({ seconds: '90' });
+    assert.equal(saved.orderAcceptanceTimeSeconds, 90);
+    assert.equal(saved.acceptanceWindowSeconds, 90);
     assert.deepEqual(await settings.getOrderAcceptanceSettings(), saved);
 
-    // A restaurant needs at least a minute, and an order cannot sit unanswered
-    // for a third of an hour.
-    await assert.rejects(() => settings.updateOrderAcceptanceSettings(0), /between 1 and 20/);
-    await assert.rejects(() => settings.updateOrderAcceptanceSettings(21), /between 1 and 20/);
-    await assert.rejects(() => settings.updateOrderAcceptanceSettings('soon'), /is required/);
-    await assert.rejects(() => settings.updateOrderAcceptanceSettings(undefined), /is required/);
+    // Half a minute at least, ten minutes at most.
+    await assert.rejects(() => settings.updateOrderAcceptanceSettings({ seconds: 29 }), /between 30 and 600 seconds/);
+    await assert.rejects(() => settings.updateOrderAcceptanceSettings({ seconds: 601 }), /between 30 and 600 seconds/);
+    await assert.rejects(() => settings.updateOrderAcceptanceSettings({ seconds: 'soon' }), /between 30 and 600 seconds/);
+    await assert.rejects(() => settings.updateOrderAcceptanceSettings({}), /is required/);
 
-    assert.equal((await settings.updateOrderAcceptanceSettings(5.4)).orderAcceptanceTimeMinutes, 5);
+    // An older admin build still sends whole minutes.
+    const fromMinutes = await settings.updateOrderAcceptanceSettings({ minutes: 4 });
+    assert.equal(fromMinutes.acceptanceWindowSeconds, 240);
+    await assert.rejects(() => settings.updateOrderAcceptanceSettings({ minutes: 11 }), /between 1 and 10 minutes/);
+});
+
+test('new orders take the accept time from the seconds setting', async () => {
+    const { normalizeAcceptanceWindowSeconds } = await import('../../orders/services/order.service.js');
+    assert.equal(normalizeAcceptanceWindowSeconds({ seconds: 45, minutes: 10 }), 45);
+    assert.equal(normalizeAcceptanceWindowSeconds({ seconds: null, minutes: 3 }), 180);
+    assert.equal(normalizeAcceptanceWindowSeconds({ seconds: 5000, minutes: null }), 240);
 });
 
 test('the company details are validated', async () => {

@@ -103,29 +103,52 @@ export const updatePowerScanningSettings = async (payload = {}) => {
     return toPowerScanning(updated);
 };
 
-const acceptancePayload = (minutes) => ({
-    orderAcceptanceTimeMinutes: minutes,
-    acceptanceWindowSeconds: minutes * 60,
-});
+/** The restaurant's new-order accept time, in seconds; minutes kept for older admin builds. */
+export const MIN_ACCEPT_SECONDS = 30;
+export const MAX_ACCEPT_SECONDS = 600;
 
-export const getOrderAcceptanceSettings = async () =>
-    acceptancePayload((await loadRow()).orderAcceptanceTimeMinutes);
+const acceptancePayload = (row) => {
+    const seconds = Number.isInteger(row?.orderAcceptanceTimeSeconds)
+        ? row.orderAcceptanceTimeSeconds
+        : (Number(row?.orderAcceptanceTimeMinutes) || 4) * 60;
+    return {
+        orderAcceptanceTimeSeconds: seconds,
+        acceptanceWindowSeconds: seconds,
+        orderAcceptanceTimeMinutes: Math.max(1, Math.round(seconds / 60)),
+    };
+};
 
-export const updateOrderAcceptanceSettings = async (rawMinutes) => {
-    const numeric = Number(rawMinutes);
-    if (!Number.isFinite(numeric)) throw new ValidationError('Order acceptance time is required');
+export const getOrderAcceptanceSettings = async () => acceptancePayload(await loadRow());
 
-    const minutes = Math.round(numeric);
-    if (minutes < 1 || minutes > 20) {
-        throw new ValidationError('Order acceptance time must be between 1 and 20 minutes');
+/**
+ * Saves the accept time. Seconds (30-600) from the current admin panel, or
+ * whole minutes (1-20) from an older one.
+ */
+export const updateOrderAcceptanceSettings = async ({ seconds: rawSeconds, minutes: rawMinutes } = {}) => {
+    let seconds;
+    if (rawSeconds !== undefined && rawSeconds !== null && rawSeconds !== '') {
+        seconds = Math.round(Number(rawSeconds));
+        if (!Number.isFinite(seconds) || seconds < MIN_ACCEPT_SECONDS || seconds > MAX_ACCEPT_SECONDS) {
+            throw new ValidationError(`Restaurant accept time must be between ${MIN_ACCEPT_SECONDS} and ${MAX_ACCEPT_SECONDS} seconds`);
+        }
+    } else {
+        const minutes = Math.round(Number(rawMinutes));
+        if (!Number.isFinite(minutes)) throw new ValidationError('Order acceptance time is required');
+        if (minutes < 1 || minutes > 10) {
+            throw new ValidationError('Order acceptance time must be between 1 and 10 minutes');
+        }
+        seconds = minutes * 60;
     }
 
     const row = await loadRow();
-    await prisma.foodBusinessSettings.update({
+    const updated = await prisma.foodBusinessSettings.update({
         where: { id: row.id },
-        data: { orderAcceptanceTimeMinutes: minutes },
+        data: {
+            orderAcceptanceTimeSeconds: seconds,
+            orderAcceptanceTimeMinutes: Math.max(1, Math.round(seconds / 60)),
+        },
     });
-    return acceptancePayload(minutes);
+    return acceptancePayload(updated);
 };
 
 const validate = ({ companyName, email, phoneNumber, address, state, pincode }) => {

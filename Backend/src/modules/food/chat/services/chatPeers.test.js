@@ -44,8 +44,8 @@ test('restaurants chat with riders on accepted orders only, never with customers
     const accepted = { dispatchDeliveryPartnerId: 'd1', dispatchAcceptedAt: new Date() };
     const offered = { dispatchDeliveryPartnerId: 'd1', dispatchAcceptedAt: null };
 
-    assert.throws(() => assertChatPairAllowed('RESTAURANT', 'USER', accepted), /Restaurants can chat only with the delivery partner/);
-    assert.throws(() => assertChatPairAllowed('USER', 'RESTAURANT', accepted), /Restaurants can chat only with the delivery partner/);
+    assert.throws(() => assertChatPairAllowed('RESTAURANT', 'USER', accepted), /Restaurants cannot chat with customers/);
+    assert.throws(() => assertChatPairAllowed('USER', 'RESTAURANT', accepted), /Restaurants cannot chat with customers/);
     assert.throws(() => assertChatPairAllowed('RESTAURANT', 'DELIVERY_PARTNER', offered), /once they have accepted/);
     assert.throws(() => assertChatPairAllowed('DELIVERY_PARTNER', 'RESTAURANT', null), /once they have accepted/);
     assert.doesNotThrow(() => assertChatPairAllowed('RESTAURANT', 'DELIVERY_PARTNER', accepted));

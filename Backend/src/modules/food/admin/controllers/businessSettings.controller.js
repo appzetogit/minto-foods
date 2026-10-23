@@ -40,9 +40,10 @@ export async function getOrderAcceptanceSettings(req, res, next) {
 
 export async function updateOrderAcceptanceSettings(req, res, next) {
     try {
-        const payload = await settingsService.updateOrderAcceptanceSettings(
-            req.body?.orderAcceptanceTimeMinutes,
-        );
+        const payload = await settingsService.updateOrderAcceptanceSettings({
+            seconds: req.body?.orderAcceptanceTimeSeconds,
+            minutes: req.body?.orderAcceptanceTimeMinutes,
+        });
         return sendResponse(res, 200, 'Order acceptance settings updated successfully', payload);
     } catch (error) {
         next(error);

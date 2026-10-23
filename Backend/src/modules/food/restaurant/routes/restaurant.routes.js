@@ -81,7 +81,8 @@ import {
 } from '../controllers/bulkUpload.controller.js';
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { authMiddleware, optionalAuth } from '../../../../core/auth/auth.middleware.js';
-import { sendError } from '../../../../utils/response.js';
+import { sendError, sendResponse } from '../../../../utils/response.js';
+import { listRestaurantReviews } from '../../orders/services/rating.service.js';
 import { getRestaurantFinanceController } from '../controllers/restaurantFinance.controller.js';
 import {
     listBannersController,
@@ -324,6 +325,16 @@ router.get('/orders/rejection-reasons', authMiddleware, requireRestaurant, order
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
+
+// Reviews: what customers rated and wrote, newest first, with the average.
+router.get('/reviews', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        const data = await listRestaurantReviews(req.user?.userId, req.query || {});
+        return sendResponse(res, 200, 'Reviews fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+});
 
 // Complaints (restaurant dashboard)
 router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);

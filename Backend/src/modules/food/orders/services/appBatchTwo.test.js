@@ -347,7 +347,7 @@ test('a restaurant cannot chat with the customer, and chats with the rider only 
 
     await assert.rejects(
         () => sendMessage(kitchen, { orderId: liveOrderId, peerRole: 'USER', text: 'Hi' }),
-        (err) => status(err) === 403 && /Restaurants can chat only with the delivery partner/.test(err.message),
+        (err) => status(err) === 403 && /Restaurants cannot chat with customers/.test(err.message),
     );
     await assert.rejects(
         () => sendMessage({ role: 'USER', id: user.id }, { orderId: liveOrderId, peerRole: 'RESTAURANT', text: 'Hi' }),
@@ -368,4 +368,74 @@ test('a restaurant cannot chat with the customer, and chats with the rider only 
     } finally {
         await prisma.foodOrder.update({ where: { id: liveOrderId }, data: { dispatchAcceptedAt: new Date() } });
     }
+});
+
+// ---- 13: restaurant support chat and the rider's phone ---------------------------
+
+test("a restaurant's Chat button reaches support with the order, only for its own orders", async () => {
+    const kitchen = { role: 'RESTAURANT', id: openKitchen.id };
+    const sent = await sendMessage(kitchen, { peerRole: 'ADMIN', orderId: liveOrderId, text: 'Customer asked for extra spice' });
+    assert.equal(sent.orderId, liveOrderId, 'the thread keeps the order');
+
+    const other = await makeRestaurant({ restaurantName: `Other ${uniqueTag('K')}` });
+    await assert.rejects(
+        () => sendMessage({ role: 'RESTAURANT', id: other.id }, { peerRole: 'ADMIN', orderId: liveOrderId, text: 'Not mine' }),
+        (err) => err?.statusCode === 403,
+    );
+});
+
+test("the restaurant sees the rider's phone once the rider has accepted, not before", async () => {
+    const riderPhone = (order) => order.dispatch?.deliveryPartnerId?.phone ?? order.deliveryPartner?.phone ?? '';
+
+    const accepted = await getOrderById(liveOrderId, { restaurantId: openKitchen.id });
+    assert.equal(riderPhone(accepted), rider.phone);
+
+    await prisma.foodOrder.update({ where: { id: liveOrderId }, data: { dispatchAcceptedAt: null } });
+    try {
+        const offered = await getOrderById(liveOrderId, { restaurantId: openKitchen.id });
+        assert.equal(riderPhone(offered), '');
+    } finally {
+        await prisma.foodOrder.update({ where: { id: liveOrderId }, data: { dispatchAcceptedAt: new Date() } });
+    }
+});
+
+// ---- 15: the new-order push's item list --------------------------------------------
+
+test('the item list reads "2x Paneer Tikka (Half), 1x Naan"', async () => {
+    const { formatItemsList, acceptTimeoutSeconds } = await import('./order.helpers.js');
+    assert.equal(
+        formatItemsList([{ quantity: 2, name: 'Paneer Tikka', variantName: 'Half' }, { quantity: 1, name: 'Naan', variantName: '' }]),
+        '2x Paneer Tikka (Half), 1x Naan',
+    );
+    const now = Date.now();
+    assert.equal(acceptTimeoutSeconds({ acceptanceDeadlineAt: new Date(now + 90_000) }, now), 90);
+    assert.equal(acceptTimeoutSeconds({}, now), '');
+});
+
+// ---- 16: ratings from the orders, and the reviews list --------------------------------
+
+test("a customer's rating updates the restaurant and rider at once, and lists as a review", async () => {
+    const { submitOrderRatings } = await import('./order.service.js');
+    const { listRestaurantReviews } = await import('./rating.service.js');
+
+    await prisma.foodOrder.update({ where: { id: liveOrderId }, data: { orderStatus: 'delivered', deliveredAt: new Date() } });
+    await submitOrderRatings(liveOrderId, user.id, {
+        restaurantRating: 4, restaurantComment: 'Tasty, a bit late',
+        deliveryPartnerRating: 5, deliveryPartnerComment: 'Polite',
+    });
+
+    const kitchen = await prisma.foodRestaurant.findUnique({ where: { id: openKitchen.id }, select: { rating: true, totalRatings: true } });
+    assert.equal(Number(kitchen.rating), 4);
+    assert.equal(kitchen.totalRatings, 1);
+    const riderRow = await prisma.foodDeliveryPartner.findUnique({ where: { id: rider.id }, select: { rating: true, totalRatings: true } });
+    assert.equal(Number(riderRow.rating), 5);
+    assert.equal(riderRow.totalRatings, 1);
+
+    const { reviews, meta } = await listRestaurantReviews(openKitchen.id, { page: 1, limit: 10 });
+    assert.equal(meta.total, 1);
+    assert.equal(meta.average, 4);
+    assert.deepEqual(
+        { rating: reviews[0].rating, comment: reviews[0].comment, customerName: reviews[0].customerName, orderId: reviews[0].orderId },
+        { rating: 4, comment: 'Tasty, a bit late', customerName: user.name, orderId: liveOrderId },
+    );
 });

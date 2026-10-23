@@ -17,6 +17,7 @@ import {
 import { getBalance, recordTransaction } from '../../../../core/payments/transaction.service.js';
 import { assertCodAllowedForTotal, loadOrderLimits } from '../../shared/orderLimits.js';
 import { refreshOrderEta } from './eta.service.js';
+import { recomputePartnerRating, recomputeRestaurantRating } from './rating.service.js';
 import {
   refundOrder,
   describeRefundLegs,
@@ -96,20 +97,27 @@ function requireId(id, fieldName = 'ID') {
   return String(id);
 }
 
-function normalizeAcceptanceWindowSeconds(minutes) {
-  const numeric = Number(minutes);
-  if (!Number.isFinite(numeric)) return ORDER_ACCEPTANCE_WINDOW_SECONDS;
-  const roundedMinutes = Math.round(numeric);
-  if (roundedMinutes < 1 || roundedMinutes > 20) return ORDER_ACCEPTANCE_WINDOW_SECONDS;
-  return roundedMinutes * 60;
+/**
+ * The restaurant's accept time for a new order, in seconds: the admin's
+ * seconds setting (30-600), else the older minutes one, else the default.
+ */
+export function normalizeAcceptanceWindowSeconds({ seconds, minutes } = {}) {
+  const s = Math.round(Number(seconds));
+  if (seconds != null && Number.isFinite(s) && s >= 30 && s <= 600) return s;
+  const m = Math.round(Number(minutes));
+  if (Number.isFinite(m) && m >= 1 && m <= 20) return m * 60;
+  return ORDER_ACCEPTANCE_WINDOW_SECONDS;
 }
 
 async function getOrderAcceptanceWindowSeconds() {
   try {
     const settings = await prisma.foodBusinessSettings.findFirst({
-      select: { orderAcceptanceTimeMinutes: true },
+      select: { orderAcceptanceTimeMinutes: true, orderAcceptanceTimeSeconds: true },
     });
-    return normalizeAcceptanceWindowSeconds(settings?.orderAcceptanceTimeMinutes);
+    return normalizeAcceptanceWindowSeconds({
+      seconds: settings?.orderAcceptanceTimeSeconds,
+      minutes: settings?.orderAcceptanceTimeMinutes,
+    });
   } catch (err) {
     logger.warn(`Failed to load order acceptance setting: ${err?.message || err}`);
     return ORDER_ACCEPTANCE_WINDOW_SECONDS;
@@ -1783,9 +1791,12 @@ export async function submitOrderRatings(orderId, userId, dto) {
     return tx.foodOrder.findUnique({ where: { id: order.id }, include: orderInclude });
   });
 
+  // The restaurant and rider averages are recomputed from their orders in
+  // this request, so Outlet info shows the new rating straight away and never
+  // drifts. Dishes keep the running average.
   await Promise.all([
-    ratesRestaurant ? applyAggregateRating('restaurant', row.restaurantId, dto.restaurantRating) : null,
-    ratesPartner ? applyAggregateRating('deliveryPartner', partnerId, dto.deliveryPartnerRating) : null,
+    ratesRestaurant ? recomputeRestaurantRating(row.restaurantId) : null,
+    ratesPartner ? recomputePartnerRating(partnerId) : null,
     ...itemRatings.map((entry) => applyAggregateRating('foodItem', entry.itemId, entry.rating)),
   ]);
 

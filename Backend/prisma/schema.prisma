@@ -2589,6 +2589,9 @@ model FoodBusinessSettings {
   deliveryFontFamily   String @default("Poppins")
 
   orderAcceptanceTimeMinutes Int @default(4)
+  /// The restaurant's accept time for a new order, in seconds (30-600). Wins
+  /// over the minutes above, which older admin builds still write.
+  orderAcceptanceTimeSeconds Int?
 
   /// How many days before a promotional/offer banner or an admin coupon ends
   /// the admin bell starts warning about it.

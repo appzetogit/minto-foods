@@ -13,7 +13,7 @@ const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
 /** The order columns that decide who may talk to whom. */
 const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true, dispatchAcceptedAt: true };
 
-export const RESTAURANT_CUSTOMER_CHAT_MESSAGE = 'Restaurants can chat only with the delivery partner';
+export const RESTAURANT_CUSTOMER_CHAT_MESSAGE = 'Restaurants cannot chat with customers';
 export const RIDER_NOT_ACCEPTED_CHAT_MESSAGE = 'You can chat with the rider once they have accepted the order';
 
 /**
@@ -225,7 +225,15 @@ export async function sendMessage(sender, dto) {
             }
             peerId = String(dto.peerId);
         }
-        if (isId(orderIdRaw)) orderId = orderIdRaw;
+        if (isId(orderIdRaw)) {
+            // A support thread "about order X" (the restaurant app's Chat
+            // button) keeps the order so the admin sees which one it is --
+            // but only an order the sender is actually on.
+            if (sender.role !== 'ADMIN') {
+                await assertOrderParticipants(orderIdRaw, [partyToken(sender.role, sender.id)]);
+            }
+            orderId = orderIdRaw;
+        }
     }
 
     const senderToken = partyToken(sender.role, sender.id);

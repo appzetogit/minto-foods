@@ -130,6 +130,17 @@ export function toRestaurantContact(order) {
   if (out.user && typeof out.user === "object") out.user = person(out.user);
   if (out.deliveryAddress && typeof out.deliveryAddress === "object") out.deliveryAddress = { ...out.deliveryAddress, phone: "" };
   if (out.userId && typeof out.userId === "object") out.userId = person(out.userId);
+
+  // The Call button rings the rider -- once the rider has accepted. A rider
+  // the order is only offered to is not the restaurant's to call.
+  const riderAccepted = Boolean(order.dispatchAcceptedAt || order.dispatch?.acceptedAt);
+  if (!riderAccepted) {
+    const noPhone = (p) => (p && typeof p === "object" ? { ...p, phone: "" } : p);
+    if (out.dispatch && typeof out.dispatch === "object") {
+      out.dispatch = { ...out.dispatch, deliveryPartnerId: noPhone(out.dispatch.deliveryPartnerId) };
+    }
+    if (out.deliveryPartner) out.deliveryPartner = noPhone(out.deliveryPartner);
+  }
   return out;
 }
 
@@ -679,6 +690,29 @@ export function canExposeOrderToRestaurant(orderLike) {
   return ["paid", "authorized", "captured", "settled"].includes(status);
 }
 
+/** "2x Paneer Tikka (Half), 1x Naan": quantity, x, dish, the size in brackets. */
+export function formatItemsList(items) {
+  if (!Array.isArray(items)) return "";
+  return items
+    .map((it) => {
+      const variant = String(it?.variantName || it?.variant || "").trim();
+      return `${Number(it?.quantity) || 1}x ${it?.name || ""}${variant ? ` (${variant})` : ""}`;
+    })
+    .join(", ");
+}
+
+/**
+ * Seconds the restaurant has left to accept, counted when the alert goes out
+ * -- which is the moment the order reaches it, so it is the admin's accept
+ * time. Counted from now rather than from createdAt because a prepaid order's
+ * window starts at payment. Empty when the order carries no deadline.
+ */
+export function acceptTimeoutSeconds(order, now = Date.now()) {
+  const deadline = order?.acceptanceDeadlineAt ? new Date(order.acceptanceDeadlineAt).getTime() : NaN;
+  if (!Number.isFinite(deadline)) return "";
+  return Math.max(0, Math.round((deadline - now) / 1000));
+}
+
 export async function notifyRestaurantNewOrder(orderDoc) {
   try {
     if (!orderDoc || !canExposeOrderToRestaurant(orderDoc)) return;
@@ -711,9 +745,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
     const itemCount = Array.isArray(orderDoc.items)
       ? orderDoc.items.reduce((sum, it) => sum + (Number(it?.quantity) || 0), 0)
       : 0;
-    const itemsList = Array.isArray(orderDoc.items)
-      ? orderDoc.items.map((it) => `${it.quantity}x ${it.name}`).join(", ")
-      : "";
+    // "2x Paneer Tikka (Half), 1x Naan": the popup shows one item per line.
+    const itemsList = formatItemsList(orderDoc.items);
     // deliveryAddressSchema has street/additionalDetails/city — there is no `address`
     // or `area` field on it, so reading those yielded undefined and the restaurant
     // only ever saw the city.
@@ -775,6 +808,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           total: str(total),
           paymentMethod: str(orderDoc.payment?.method),
           acceptanceDeadlineAt: str(orderDoc.acceptanceDeadlineAt?.toISOString?.() || ""),
+          // The admin's accept time this order was given, for the countdown.
+          acceptTimeoutSeconds: str(acceptTimeoutSeconds(orderDoc)),
         },
       },
     );
