@@ -122,6 +122,9 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     if (path.startsWith('/customers') || path.startsWith('/support-tickets')) return 'customer_management';
     if (path === '/zones' && String(method).toUpperCase() === 'GET') return null;
     if (/^\/zones\/[^/]+$/.test(path) && String(method).toUpperCase() === 'GET') return null;
+    // Zones and price rules decide where the platform delivers and what every
+    // customer pays: system settings, not everyday restaurant or food work.
+    if (path.startsWith('/zones') || path.startsWith('/price-rules')) return 'system_settings';
     if (path === '/restaurants' && String(method).toUpperCase() === 'GET') return null;
     if (/^\/restaurants\/[^/]+$/.test(path) && String(method).toUpperCase() === 'GET') return null;
     if (/^\/restaurants\/[^/]+\/analytics$/.test(path) && String(method).toUpperCase() === 'GET') return null;
@@ -132,10 +135,9 @@ const resolveSectionFromRequest = (path = '', method = '') => {
         path.startsWith('/highlight-badges') ||
         path.startsWith('/restaurant-settings') ||
         path.startsWith('/restaurant-subscription-settings') ||
-        path.startsWith('/restaurant-subscriptions') ||
-        path.startsWith('/zones')
+        path.startsWith('/restaurant-subscriptions')
     ) return 'restaurant_management';
-    if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods') || path.startsWith('/price-rules')) return 'food_management';
+    if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
     if (path.startsWith('/offers')) return 'promotions_management';
     if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/dispatch')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
@@ -607,6 +609,7 @@ router.get(
         { section: 'food_management', action: 'view' },
         { section: 'delivery_management', action: 'view' },
         { section: 'report_management', action: 'view' },
+        { section: 'system_settings', action: 'view' },
     ]),
     adminController.getZones
 );
@@ -620,6 +623,7 @@ router.get(
         { section: 'food_management', action: 'view' },
         { section: 'delivery_management', action: 'view' },
         { section: 'report_management', action: 'view' },
+        { section: 'system_settings', action: 'view' },
     ]),
     adminController.getZoneCities
 );
@@ -632,6 +636,7 @@ router.get(
         { section: 'food_management', action: 'view' },
         { section: 'delivery_management', action: 'view' },
         { section: 'report_management', action: 'view' },
+        { section: 'system_settings', action: 'view' },
     ]),
     adminController.getZoneById
 );
@@ -650,6 +655,7 @@ const ZONE_VIEWERS = [
     { section: 'food_management', action: 'view' },
     { section: 'delivery_management', action: 'view' },
     { section: 'report_management', action: 'view' },
+    { section: 'system_settings', action: 'view' },
 ];
 const superAdminOnly = (req, res, next) =>
     req.adminAccess?.adminType === 'sub_admin'
@@ -662,9 +668,9 @@ router.patch('/cities/:id', superAdminOnly, adminCityController.updateCity);
 router.delete('/cities/:id', superAdminOnly, adminCityController.deleteCity);
 
 // ----- COD & User Payments -----
-// The platform switch is filed under system_settings and the per-zone one under
-// restaurant_management, both by resolveSectionFromRequest above: whoever edits
-// a zone already decides what that zone does.
+// The platform switch and the per-zone one are both filed under system_settings
+// by resolveSectionFromRequest above: whoever edits a zone already decides what
+// that zone does.
 router.get('/cod-settings', adminController.getCodSettings);
 router.patch('/cod-settings', adminController.updateCodSettings);
 router.patch('/zones/:id/cod', adminController.updateZoneCodSettings);

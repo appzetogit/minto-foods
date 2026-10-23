@@ -33,7 +33,11 @@ const ADMIN_PERMISSION_PATH_MAP = [
   { prefix: "/food/admin/restaurant-settings", section: "restaurant_management" },
   { prefix: "/food/admin/restaurant-subscription-settings", section: "restaurant_management" },
   { prefix: "/food/admin/restaurant-subscriptions", section: "restaurant_management" },
-  { prefix: "/food/admin/zones", section: "restaurant_management" },
+  // Zones and price rules change where the platform delivers and what every
+  // customer pays, so they are system settings, not everyday restaurant or
+  // food work. Reading the zone list stays open (see isZonesRead below).
+  { prefix: "/food/admin/zones", section: "system_settings" },
+  { prefix: "/food/admin/price-rules", section: "system_settings" },
 
   { prefix: "/food/admin/cuisines", section: "restaurant_management" },
   { prefix: "/food/admin/categories", section: "food_management" },
@@ -394,7 +398,8 @@ apiClient.interceptors.request.use(
             hasAdminAction(adminUser, "point_of_sale", "view") ||
             hasAdminAction(adminUser, "food_management", "view") ||
             hasAdminAction(adminUser, "delivery_management", "view") ||
-            hasAdminAction(adminUser, "report_management", "view");
+            hasAdminAction(adminUser, "report_management", "view") ||
+            hasAdminAction(adminUser, "system_settings", "view");
           if (!isAllowed) {
             const error = new Error("Insufficient permissions for this action");
             error.response = {
