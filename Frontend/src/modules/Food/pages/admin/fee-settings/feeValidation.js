@@ -18,6 +18,7 @@ export const FEE_FIELDS = [
     { key: "quickDeliveryFee", label: "Quick Delivery Extra", max: MAX_AMOUNT, unit: "₹" },
     { key: "gstRate", label: "GST Rate", max: 100, unit: "%" },
     { key: "deliveryFeeGstRate", label: "Delivery Fee GST Rate", max: 100, unit: "%" },
+    { key: "codMaxOrderValue", label: "Cash on Delivery limit", max: MAX_AMOUNT, unit: "₹" },
 ];
 
 /**
@@ -50,6 +51,13 @@ export const validateFeeSettings = (settings = {}) => {
     for (const field of FEE_FIELDS) {
         const problem = checkFee(settings[field.key], field);
         if (problem) errors[field.key] = problem;
+    }
+    const qty = String(settings.maxItemQuantity ?? "").trim();
+    if (qty !== "") {
+        const n = Number(qty);
+        if (!Number.isInteger(n) || n < 1 || n > 999) {
+            errors.maxItemQuantity = "Max quantity per item must be a whole number from 1 to 999";
+        }
     }
     // Same bounds as the server: 1 (no longer than the straight line) to 5.
     const cap = String(settings.roadDistanceCapFactor ?? "").trim();

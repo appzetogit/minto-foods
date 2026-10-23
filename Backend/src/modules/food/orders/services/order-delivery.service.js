@@ -28,9 +28,11 @@ import {
   partnerHasActiveDelivery,
   pushStatusHistory,
   sanitizeOrderForDeliveryPartner,
+  riderContact,
   TERMINAL_ORDER_STATUSES,
   isStatusAdvance,
 } from './order.helpers.js';
+import { refreshOrderEta } from './eta.service.js';
 
 /**
  * The restaurant fields the rider app needs.
@@ -91,7 +93,14 @@ function emitOrderUpdate(order, deliveryPartnerId, customerEvent = null) {
         deliveryState: order.deliveryState,
         deliveryVerification: order.deliveryVerification,
       };
-      io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', payload);
+      // The rider's copy names who they meet at the door: the receiver on an
+      // order for someone else, before and after pickup alike.
+      const contact = riderContact(order);
+      io.to(rooms.delivery(deliveryPartnerId)).emit('order_status_update', {
+        ...payload,
+        customerName: contact.name,
+        customerPhone: contact.phone,
+      });
       io.to(rooms.restaurant(order.restaurantId?.id ?? order.restaurantId)).emit('order_status_update', payload);
       io.to(rooms.user(order.userId?.id ?? order.userId)).emit('order_status_update', payload);
     }
@@ -132,6 +141,8 @@ function emitOrderUpdate(order, deliveryPartnerId, customerEvent = null) {
             orderId,
             orderMongoId: orderId,
             paymentMethod: order.payment?.method || order.paymentMethod,
+            customerName: riderContact(order).name,
+            customerPhone: riderContact(order).phone,
             amountCollected: String(order.pricing?.total || order.amounts?.totalCustomerPaid || 0),
           },
         },
@@ -589,6 +600,8 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
 
       // The customer gets "Rider {name} is assigned" from notifyCustomer.
       void notifyCustomer(id, 'rider_assigned', { riderId: partnerId });
+      // The rider's ride to the restaurant now counts in the ETA.
+      void refreshOrderEta(id, { force: true });
       await notifyOwnersSafely(
         [
           { ownerType: 'RESTAURANT', ownerId: row.restaurantId },

@@ -137,10 +137,16 @@ export const buildInvoice = ({ order, business = null } = {}) => {
             phone: [business?.phoneCountryCode, business?.phoneNumber].map(text).filter(Boolean).join(' ') || null,
         },
 
+        // An order for someone else is delivered to the receiver, whose name
+        // and phone the bill shows; the account holder who paid is orderedBy.
         customer: {
-            name: text(order.customerName || order.addrName || order.addrFullName),
+            name: text(
+                (order.isForSomeoneElse && (order.recipientName || order.addrName))
+                    || order.customerName || order.addrName || order.addrFullName,
+            ),
             phone: text(order.addrPhone || order.customerPhone),
             address: addr,
+            ...(order.isForSomeoneElse ? { orderedBy: text(order.customerName) } : {}),
         },
 
         items,
@@ -175,7 +181,7 @@ const ORDER_SELECT = {
     tax: true, deliveryFee: true, deliveryFeeGst: true, platformFee: true,
     quickDeliveryFee: true, tipAmount: true, total: true,
     paymentMethod: true, paymentStatus: true, refundStatus: true, refundAmount: true,
-    customerName: true, customerPhone: true,
+    customerName: true, customerPhone: true, isForSomeoneElse: true, recipientName: true,
     addrName: true, addrFullName: true, addrPhone: true, addrStreet: true,
     addrAdditionalDetails: true, addrCity: true, addrState: true, addrZipCode: true,
     items: {

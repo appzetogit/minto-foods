@@ -356,6 +356,8 @@ export function withOpenStatus(restaurant, now = new Date()) {
     openingTime: status.openingTime || restaurant.openingTime || null,
     closingTime: status.closingTime || restaurant.closingTime || null,
     nextOpeningAt: next ? toRestaurantIsoString(next) : null,
+    // The same moment under the name the newer app builds read.
+    nextOpenAt: next ? toRestaurantIsoString(next) : null,
   };
 }
 

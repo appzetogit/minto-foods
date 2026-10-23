@@ -9,12 +9,25 @@ import {
     isValidLongitude,
 } from '../../shared/geo.utils.js';
 import { getPublicHomePromotionBanners } from '../services/homePromotionBanner.service.js';
-import { withoutOfflineRestaurants } from '../services/bannerRestaurant.service.js';
+import {
+    bannerZoneWhere,
+    resolveBannerZoneId,
+    withoutOfflineRestaurants,
+} from '../services/bannerRestaurant.service.js';
 
 const ACTIVE_BY_ORDER = {
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
 };
+
+/**
+ * Active banners for the customer's zone (from zoneId, else lat/lng) plus the
+ * every-zone ones. Each row carries its zoneId.
+ */
+const activeForZone = async (query = {}) => ({
+    ...ACTIVE_BY_ORDER,
+    where: { ...ACTIVE_BY_ORDER.where, ...bannerZoneWhere(await resolveBannerZoneId(query)) },
+});
 
 /** The card fields every restaurant rail on the landing page renders. */
 const RESTAURANT_CARD = {
@@ -59,7 +72,9 @@ const hydrateRestaurants = async (ids, select, extraWhere = {}) => {
 export const getPublicHeroBannersController = async (req, res, next) => {
     try {
         // A banner whose link opens a switched-off restaurant is dropped.
-        const docs = await withoutOfflineRestaurants(await prisma.foodHeroBanner.findMany(ACTIVE_BY_ORDER));
+        const docs = await withoutOfflineRestaurants(
+            await prisma.foodHeroBanner.findMany(await activeForZone(req.query)),
+        );
 
         // One query for every banner's links, rather than one per banner.
         const linked = await hydrateRestaurants(
@@ -83,14 +98,13 @@ export const getPublicHeroBannersController = async (req, res, next) => {
 
 export const getPublicTopBannersController = async (req, res, next) => {
     try {
-        const zoneId = req.query?.zoneId;
+        const zoneId = await resolveBannerZoneId(req.query || {});
         const banners = await prisma.topBanner.findMany({
             where: {
                 isActive: true,
                 // Global banners (zoneId null) always show; a zone only ever
-                // adds to them. Filtering to the zone alone would hide every
-                // global banner the moment one zone-scoped banner existed.
-                ...(isId(zoneId) ? { OR: [{ zoneId: null }, { zoneId: String(zoneId) }] } : {}),
+                // adds to them, and another zone's never show.
+                ...bannerZoneWhere(zoneId),
             },
             orderBy: { order: 'asc' },
         });
@@ -102,7 +116,7 @@ export const getPublicTopBannersController = async (req, res, next) => {
 
 export const getPublicUnder250BannersController = async (req, res, next) => {
     try {
-        const banners = await prisma.foodUnder250Banner.findMany(ACTIVE_BY_ORDER);
+        const banners = await prisma.foodUnder250Banner.findMany(await activeForZone(req.query));
         return sendResponse(res, 200, 'Under 250 banners fetched', { banners });
     } catch (error) {
         next(error);
@@ -135,7 +149,8 @@ export const getPublicExploreIconsController = async (req, res, next) => {
 
 export const getPublicHomePromotionBannersController = async (req, res, next) => {
     try {
-        const banners = await getPublicHomePromotionBanners(req.query.zoneId);
+        const { zoneId, lat, lng, placement } = req.query;
+        const banners = await getPublicHomePromotionBanners({ zoneId, lat, lng, placement });
         return sendResponse(res, 200, 'Home promotion banners fetched', { banners });
     } catch (error) {
         next(error);

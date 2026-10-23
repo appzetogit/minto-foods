@@ -12,6 +12,7 @@ import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restau
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
 import { checkOfferEligibility, computeOfferDiscount } from '../../shared/offerRules.js';
 import { getTipSettings } from '../../admin/services/tip.service.js';
+import { assertItemQuantities, loadOrderLimits } from '../../shared/orderLimits.js';
 
 /**
  * Whether a tip given at checkout is allowed. Pure, so it is tested without a
@@ -630,6 +631,9 @@ async function resolveDeliveryAddress(userId, dto) {
 
 export async function calculateOrderPricing(userId, dto, options = {}) {
   const at = options.at instanceof Date ? options.at : new Date();
+  // The admin's cap on one dish, for the quote and for the order (createOrder
+  // prices through here too).
+  assertItemQuantities(dto?.items, await loadOrderLimits());
   const restaurant =
     options.restaurant || (await loadRestaurantForOrdering(dto.restaurantId));
 

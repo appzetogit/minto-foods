@@ -205,6 +205,16 @@ function EntityMultiSelect({ options, value, onChange, error, noun = "restaurant
   )
 }
 
+/** Coupon categories, matching OFFER_CATEGORIES on the server. */
+const COUPON_CATEGORIES = [
+  { value: "", label: "No category" },
+  { value: "bank", label: "Bank offers" },
+  { value: "free_delivery", label: "Free delivery" },
+  { value: "new_user", label: "New users" },
+  { value: "top_brands", label: "Top brands" },
+  { value: "combo", label: "Combo deals" },
+]
+
 export default function Coupons() {
   const [searchQuery, setSearchQuery] = useState("")
   const [offers, setOffers] = useState([])
@@ -236,7 +246,17 @@ export default function Coupons() {
     isFirstOrderOnly: false,
     adminBearPercentage: "100",
     restaurantBearPercentage: "0",
+    category: "",
   })
+
+  const handleCategoryChange = async (offerId, category) => {
+    try {
+      await adminAPI.updateAdminOfferCategory(offerId, category)
+      setOffers((prev) => prev.map((o) => (o.offerId === offerId ? { ...o, category: category || null } : o)))
+    } catch (error) {
+      alert(error?.response?.data?.message || "Could not save the category")
+    }
+  }
 
   const fetchOffers = useCallback(async () => {
     try {
@@ -447,6 +467,7 @@ export default function Coupons() {
       isFirstOrderOnly: false,
       adminBearPercentage: "100",
       restaurantBearPercentage: "0",
+      category: "",
     })
   }
 
@@ -499,6 +520,7 @@ export default function Coupons() {
         isFirstOrderOnly: Boolean(formData.isFirstOrderOnly),
         adminBearPercentage: Number(formData.adminBearPercentage),
         restaurantBearPercentage: Number(formData.restaurantBearPercentage),
+        category: formData.category || null,
       }
       await adminAPI.createAdminOffer(payload)
 
@@ -780,6 +802,20 @@ export default function Coupons() {
                 <label htmlFor="isFirstOrderOnly" className="text-sm text-slate-700">First order only</label>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => handleFormChange("category", e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  {COUPON_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">The app's "Top Coupon Categories" chips filter by this.</p>
+              </div>
+
                 {formData.restaurantScope === "selected" && (
                   <div className="md:col-span-2 lg:col-span-3">
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Select Restaurants</label>
@@ -915,6 +951,16 @@ export default function Coupons() {
                         <span className="text-sm font-mono font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded whitespace-nowrap">
                           {offer.couponCode}
                         </span>
+                        <select
+                          value={offer.category || ""}
+                          onChange={(e) => handleCategoryChange(offer.offerId, e.target.value)}
+                          title="Coupon category"
+                          className="mt-1 block text-xs rounded border border-slate-200 bg-white px-1.5 py-1 text-slate-600"
+                        >
+                          {COUPON_CATEGORIES.map((c) => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${

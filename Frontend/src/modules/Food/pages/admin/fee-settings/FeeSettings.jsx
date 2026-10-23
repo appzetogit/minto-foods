@@ -116,6 +116,8 @@ export default function FeeSettings() {
     platformFee: "",
     quickDeliveryFee: "",
     riderMinPayPerTrip: "",
+    codMaxOrderValue: "",
+    maxItemQuantity: "",
     gstRate: "",
     deliveryFeeGstRate: "",
     deliveryDistanceMode: "",
@@ -156,6 +158,8 @@ export default function FeeSettings() {
           platformFee: response.data.data.feeSettings.platformFee ?? "",
           quickDeliveryFee: response.data.data.feeSettings.quickDeliveryFee ?? "",
           riderMinPayPerTrip: response.data.data.feeSettings.riderMinPayPerTrip ?? "",
+          codMaxOrderValue: response.data.data.feeSettings.codMaxOrderValue ?? "",
+          maxItemQuantity: response.data.data.feeSettings.maxItemQuantity ?? "",
           gstRate: response.data.data.feeSettings.gstRate ?? "",
           deliveryFeeGstRate: response.data.data.feeSettings.deliveryFeeGstRate ?? "",
           deliveryDistanceMode: response.data.data.feeSettings.deliveryDistanceMode ?? "",
@@ -170,6 +174,8 @@ export default function FeeSettings() {
           platformFee: "",
           quickDeliveryFee: "",
           riderMinPayPerTrip: "",
+          codMaxOrderValue: "",
+          maxItemQuantity: "",
           gstRate: "",
           deliveryFeeGstRate: "",
           deliveryDistanceMode: "",
@@ -248,6 +254,16 @@ export default function FeeSettings() {
         // Without this a zone edit would land on the global row and change
         // the fees for every zone that inherits it.
         zoneId: selectedZoneId || null,
+        // Order limits apply to every zone, so they are saved from the default
+        // view only. Blank COD limit = the ₹2000 default.
+        ...(selectedZoneId
+          ? {}
+          : {
+              codMaxOrderValue:
+                settingsToSave.codMaxOrderValue === "" ? null : Number(settingsToSave.codMaxOrderValue),
+              maxItemQuantity:
+                settingsToSave.maxItemQuantity === "" ? undefined : Number(settingsToSave.maxItemQuantity),
+            }),
       }
       
       debugLog('[DEBUG] Saving Fee Settings Payload:', payload)
@@ -269,6 +285,8 @@ export default function FeeSettings() {
             platformFee: saved.platformFee ?? "",
             quickDeliveryFee: saved.quickDeliveryFee ?? "",
             riderMinPayPerTrip: saved.riderMinPayPerTrip ?? "",
+            codMaxOrderValue: saved.codMaxOrderValue ?? "",
+            maxItemQuantity: saved.maxItemQuantity ?? "",
             gstRate: saved.gstRate ?? "",
             deliveryFeeGstRate: saved.deliveryFeeGstRate ?? "",
             deliveryDistanceMode: saved.deliveryDistanceMode ?? "",
@@ -948,6 +966,50 @@ export default function FeeSettings() {
                     <p className="text-xs font-medium text-red-600">{feeErrors.riderMinPayPerTrip}</p>
                   ) : null}
                 </div>
+
+                {/* Order limits: every zone, so only on the default view */}
+                {!selectedZoneId && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-semibold text-slate-700">
+                        Cash on Delivery limit (₹)
+                      </label>
+                      <input
+                        type="number"
+                        value={feeSettings.codMaxOrderValue}
+                        onChange={(e) => setFee("codMaxOrderValue", e.target.value)}
+                        onKeyDown={blockExponent}
+                        min="0"
+                        step="1"
+                        className={feeInputClass("codMaxOrderValue")}
+                        placeholder="2000"
+                      />
+                      <p className="text-xs text-slate-500">
+                        Cash on Delivery is hidden for orders at or above this amount, in every zone.
+                        Blank uses ₹2000; 0 means no limit.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-semibold text-slate-700">
+                        Max quantity per item
+                      </label>
+                      <input
+                        type="number"
+                        value={feeSettings.maxItemQuantity}
+                        onChange={(e) => setFee("maxItemQuantity", e.target.value)}
+                        onKeyDown={blockExponent}
+                        min="1"
+                        max="999"
+                        step="1"
+                        className={feeInputClass("maxItemQuantity")}
+                        placeholder="50"
+                      />
+                      <p className="text-xs text-slate-500">
+                        Customers can't add more of one dish than this (1–999), in every zone.
+                      </p>
+                    </div>
+                  </>
+                )}
 
                 {/* GST Rate */}
                 <div className="space-y-2">

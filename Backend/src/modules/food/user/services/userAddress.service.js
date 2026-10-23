@@ -10,6 +10,21 @@ const normalizeLabel = (label) => {
     return 'Other';
 };
 
+/**
+ * The customer's own name for an address ("Mom's house"), or null.
+ *
+ * The app sends label "Other" with customLabel. An older build that put the
+ * name in label itself ("Mom's house" folds to Other) keeps the name too.
+ */
+const toCustomLabel = (dto) => {
+    if (dto.customLabel !== undefined && dto.customLabel !== null) {
+        return String(dto.customLabel).trim().slice(0, 40) || null;
+    }
+    const raw = String(dto.label || '').trim();
+    if (raw && normalizeLabel(raw) === 'Other' && raw.toLowerCase() !== 'other') return raw.slice(0, 40);
+    return null;
+};
+
 const coords = ({ latitude, longitude }) => {
     const lat = Number(latitude);
     const lng = Number(longitude);
@@ -93,6 +108,12 @@ export const addAddress = async (userId, dto) => {
     // "Other" in Bhiwandi still both save.
     const duplicate = await findDuplicateAddress(user.id, dto);
     if (duplicate) {
+        // The same place saved again under a new name keeps the new name.
+        const name = toCustomLabel(dto);
+        if (name && name !== duplicate.customLabel) {
+            const renamed = await prisma.userAddress.update({ where: { id: duplicate.id }, data: { customLabel: name } });
+            return { address: normalizeDeliveryAddress(renamed) };
+        }
         return { address: normalizeDeliveryAddress(duplicate) };
     }
 
@@ -100,6 +121,7 @@ export const addAddress = async (userId, dto) => {
         data: {
             userId: user.id,
             label: normalizeLabel(dto.label),
+            customLabel: toCustomLabel(dto),
             street: dto.street,
             additionalDetails: dto.additionalDetails || '',
             city: dto.city,
@@ -120,6 +142,19 @@ export const updateAddress = async (userId, addressId, dto) => {
 
     const data = {};
     if (dto.label !== undefined) data.label = normalizeLabel(dto.label);
+    // Home and Office carry no name of their own; an Other keeps or gets one.
+    if (dto.customLabel !== undefined || dto.label !== undefined) {
+        const label = data.label ?? existing.label;
+        if (label !== 'Other') {
+            data.customLabel = null;
+        } else if (dto.customLabel !== undefined) {
+            data.customLabel = toCustomLabel(dto);
+        } else {
+            // Only a label was sent: a free-text one renames, plain "Other" keeps the name.
+            const fromLabel = toCustomLabel(dto);
+            if (fromLabel) data.customLabel = fromLabel;
+        }
+    }
     if (dto.street !== undefined) data.street = dto.street;
     if (dto.additionalDetails !== undefined) data.additionalDetails = dto.additionalDetails || '';
     if (dto.city !== undefined) data.city = dto.city;

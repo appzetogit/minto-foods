@@ -5,7 +5,7 @@ import { isId } from '../../../../utils/helpers.js';
 import * as adminService from '../services/admin.service.js';
 import * as featureSettingsService from '../services/featureSettings.service.js';
 import { validateCategoryListQuery, validateCategoryRejectDto, validateCategoryUpsertDto } from '../validators/category.validator.js';
-import { validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
+import { normalizeOfferCategory, validateCreateOfferDto, validateUpdateOfferCartVisibilityDto } from '../validators/offer.validator.js';
 import { validateAddDeliveryBonusDto } from '../validators/deliveryBonus.validator.js';
 import { validateCheckCompletionsDto, validateEarningAddonHistoryActionDto, validateEarningAddonUpsertDto, validateToggleEarningAddonStatusDto } from '../validators/earningAddon.validator.js';
 import { validateDeliveryCommissionRuleDto, validateOptionalStatusDto, validateRestaurantCommissionUpsertDto } from '../validators/commission.validator.js';
@@ -772,6 +772,15 @@ export async function createAdminOffer(req, res, next) {
     }
 }
 
+export async function updateAdminOfferCategory(req, res, next) {
+    try {
+        const offer = await adminService.updateAdminOfferCategory(req.params.id, normalizeOfferCategory(req.body?.category));
+        res.status(200).json({ success: true, message: 'Coupon category saved', data: { offer } });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function updateAdminOfferCartVisibility(req, res, next) {
     try {
         const { id } = req.params;
@@ -1203,6 +1212,16 @@ export async function toggleDeliveryCommissionRuleStatus(req, res, next) {
 export async function getFeeSettings(req, res, next) {
     try {
         const data = await adminService.getFeeSettings(req.query?.zoneId);
+        res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/** GET /fee-settings/public: the zone's fees plus the order limits in force. */
+export async function getPublicFeeSettings(req, res, next) {
+    try {
+        const data = await adminService.getPublicFeeSettings(req.query?.zoneId);
         res.status(200).json({ success: true, message: 'Fee settings fetched successfully', data });
     } catch (error) {
         next(error);

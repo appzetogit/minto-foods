@@ -287,7 +287,16 @@ export async function sendMessage(sender, dto) {
         body: text
             ? text.slice(0, 120)
             : `Sent ${attachments.length} photo${attachments.length === 1 ? '' : 's'}`,
-        data: { type: 'chat_message', conversationId, orderId: orderId ? String(orderId) : '' },
+        // What the app needs to open Order details -> Chat from the tray:
+        // the order, the thread, and who wrote (from the reader's side).
+        // `event` keeps the old type name for builds that still match on it.
+        data: {
+            type: 'chat',
+            event: 'chat_message',
+            conversationId,
+            orderId: orderId ? String(orderId) : '',
+            peerRole: PEER_ROLE_NAMES[sender.role] || String(sender.role || '').toLowerCase(),
+        },
     };
     if (peerRole === 'ADMIN') {
         notifyAdminsSafely(pushPayload).catch(() => {});
@@ -297,6 +306,14 @@ export async function sendMessage(sender, dto) {
 
     return payload;
 }
+
+/** How the apps name the other side of a chat. */
+const PEER_ROLE_NAMES = {
+    USER: 'customer',
+    DELIVERY_PARTNER: 'rider',
+    RESTAURANT: 'restaurant',
+    ADMIN: 'support',
+};
 
 const chatTitle = (senderRole) => {
     if (senderRole === 'USER') return 'New message from customer';
@@ -484,8 +501,37 @@ export async function listConversations(me, query = {}) {
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
 
-    return { conversations: await attachOrderNumbers(await attachAssignees(await attachPeers(merged))) };
+    const conversations = await attachOrderNumbers(await attachAssignees(await attachPeers(merged)));
+
+    // For one order the app polls this every few seconds while its socket is
+    // down, so each thread carries its latest messages (oldest first) and the
+    // chat screen can update from this one call. Read-only: reading here does
+    // not mark anything read -- opening the history does.
+    if (orderId && conversations.length) {
+        const recent = await prisma.foodChatMessage.findMany({
+            where: {
+                conversationId: { in: conversations.map((c) => c.conversationId) },
+                participants: { has: myToken },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: RECENT_MESSAGES_PER_ORDER,
+        });
+        const byThread = new Map();
+        for (const row of recent.reverse()) {
+            const list = byThread.get(row.conversationId) || [];
+            list.push(serializeMessage(row));
+            byThread.set(row.conversationId, list);
+        }
+        for (const c of conversations) {
+            c.messages = await attachSenderNames(byThread.get(c.conversationId) || []);
+        }
+    }
+
+    return { conversations };
 }
+
+/** How many of an order's latest messages GET /conversations?orderId= carries. */
+const RECENT_MESSAGES_PER_ORDER = 50;
 
 /**
  * Put a name and a number on the other side of each thread.

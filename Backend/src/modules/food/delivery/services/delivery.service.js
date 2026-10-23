@@ -6,6 +6,7 @@ import { getDeliveryCashLimitSettings } from '../../admin/services/admin.service
 import { upsertFirebaseDeviceToken } from '../../../../core/notifications/firebase.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { collectDynamicRegistration } from './driverRegistrationField.service.js';
+import { saveRiderActiveOrdersPosition } from './riderPosition.service.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -455,6 +456,12 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     // transition -- otherwise the log would be one row per ping.
     const wasOnline = partner.availabilityStatus === 'online';
     const isOnline = validStatus === 'online';
+
+    // The heartbeat's position also goes on the orders the rider is carrying.
+    if (hasFix) {
+        void saveRiderActiveOrdersPosition({ riderId: partner.id, lat, lng, at: data.lastLocationAt })
+            .catch(() => {});
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.foodDeliveryPartner.update({ where: { id: partner.id }, data });

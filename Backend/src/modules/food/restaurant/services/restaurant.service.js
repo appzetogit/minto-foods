@@ -14,6 +14,8 @@ import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
 import { getRestaurantOperationalStatus, withOpenStatus } from '../helpers/restaurantAvailability.helper.js';
 import { slugifyRestaurantName } from '../../shared/restaurantSlug.js';
+import { restaurantIdForFormerSlug } from './restaurantLookup.helper.js';
+import { openFirst } from '../../shared/openFirst.js';
 import {
     calculateDistanceKm,
     normalizeRestaurantLocation,
@@ -1767,6 +1769,24 @@ const toPublicCard = (r) => ({
     slug: r.nameSlug || slugifyRestaurantName(r.restaurantName),
 });
 
+const TOP_WINDOW_DAYS = 30;
+
+/**
+ * Score for "Top restaurants": rating x orders delivered in the last 30 days.
+ * Exported for the tests.
+ */
+export const topRestaurantScores = async (ids, rows = []) => {
+    if (!ids.length) return new Map();
+    const since = new Date(Date.now() - TOP_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const delivered = await prisma.foodOrder.groupBy({
+        by: ['restaurantId'],
+        where: { restaurantId: { in: ids }, orderStatus: 'delivered', createdAt: { gte: since } },
+        _count: { _all: true },
+    });
+    const count = new Map(delivered.map((d) => [d.restaurantId, d._count._all]));
+    return new Map(rows.map((r) => [r.id, (Number(r.rating) || 0) * (count.get(r.id) || 0)]));
+};
+
 export const listApprovedRestaurants = async (query = {}) => {
     await loadHighlightBadges();
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
@@ -1860,8 +1880,6 @@ export const listApprovedRestaurants = async (query = {}) => {
     // radiusKm is preferred; maxDistance is the legacy frontend param.
     const radiusKm = toFiniteNumber(query.radiusKm) ?? toFiniteNumber(query.maxDistance);
     const sortBy = parseSortBy(query.sortBy);
-    // Asked for by the caller: rank by distance.
-    const askedForGeo = radiusKm !== null || sortBy === 'nearest';
 
     // By distance from the customer, never by zone: a zone (sent by the app or
     // found from the point) used to hide restaurants a few km away across a
@@ -1871,18 +1889,6 @@ export const listApprovedRestaurants = async (query = {}) => {
     if (reach.requiresLocation) {
         return { restaurants: [], total: 0, page, limit, outOfService: false, requiresLocation: true };
     }
-
-    const finish = async (rows, total) => {
-        const withRecommended = await attachRecommendedItems(rows);
-        const withOffers = await attachPublicOffersToRestaurants(withRecommended);
-        const withTimings = await attachOutletTimingsToRestaurants(withOffers);
-        return {
-            restaurants: withTimings.map((r) => withOpenStatus(normalizePublicRestaurantGeo(r, lat, lng))),
-            total,
-            page,
-            limit,
-        };
-    };
 
     const { distanceById } = reach;
     if (!distanceById.size) return { restaurants: [], total: 0, page, limit };
@@ -1897,11 +1903,22 @@ export const listApprovedRestaurants = async (query = {}) => {
     });
     if (!inRange.length) return { restaurants: [], total: 0, page, limit };
 
+    // Open status first: every list puts restaurants that can take an order now
+    // ahead of the closed ones, never mixed.
+    const cards = (await attachOutletTimingsToRestaurants(
+        inRange.map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null })),
+    )).map((r) => withOpenStatus(r));
+
     const byDistance = (a, b) =>
         (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
 
+    // "Top restaurants" (sortBy=rating): rating x orders delivered in the last
+    // 30 days, so a well-rated kitchen nobody orders from does not lead, and a
+    // new one does not either. Never by date added.
+    const topScore = sortBy === 'rating' ? await topRestaurantScores(cards.map((r) => r.id), cards) : null;
+
     const sorters = {
-        rating: (a, b) => b.rating - a.rating || byDistance(a, b),
+        rating: (a, b) => (topScore.get(b.id) ?? 0) - (topScore.get(a.id) ?? 0) || byDistance(a, b),
         'rating-high': (a, b) => b.rating - a.rating || byDistance(a, b),
         'rating-low': (a, b) => a.rating - b.rating || byDistance(a, b),
         'price-low': (a, b) =>
@@ -1913,14 +1930,23 @@ export const listApprovedRestaurants = async (query = {}) => {
             (a.estimatedDeliveryTimeMinutes ?? Infinity) -
                 (b.estimatedDeliveryTimeMinutes ?? Infinity) || byDistance(a, b),
     };
+    // Nearest first unless another order was asked for.
+    const within = sorters[sortBy] || byDistance;
+    const sorted = cards.sort((a, b) => openFirst(a, b) || within(a, b));
 
-    const sorted = inRange
-        .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
-        // Without an explicit sort, newest first as the list has always been,
-        // unless the caller asked for distance.
-        .sort(sorters[sortBy] || (askedForGeo ? byDistance : sorters.newest));
-
-    return finish(sorted.slice(skip, skip + limit), sorted.length);
+    const pageRows = sorted.slice(skip, skip + limit);
+    const withRecommended = await attachRecommendedItems(pageRows);
+    const withOffers = await attachPublicOffersToRestaurants(withRecommended);
+    return {
+        restaurants: withOffers.map((r) => {
+            const card = normalizePublicRestaurantGeo(r, lat, lng);
+            // distanceKm is the name the apps read; distanceInKm stays for older builds.
+            return { ...card, distanceKm: card.distanceInKm ?? distanceById.get(r.id) ?? null };
+        }),
+        total: sorted.length,
+        page,
+        limit,
+    };
 };
 
 /**
@@ -2006,11 +2032,21 @@ export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
         ? { id: value, status: 'approved' }
         : { nameSlug: slug, status: 'approved' };
 
-    const doc = await prisma.foodRestaurant.findFirst({
+    let doc = await prisma.foodRestaurant.findFirst({
         where,
         select: PUBLIC_RESTAURANT_SELECT,
         orderBy: { createdAt: 'asc' },
     });
+    // A slug the restaurant had before a rename still opens it.
+    if (!doc && slug) {
+        const formerId = await restaurantIdForFormerSlug(slug);
+        if (formerId) {
+            doc = await prisma.foodRestaurant.findFirst({
+                where: { id: formerId, status: 'approved' },
+                select: PUBLIC_RESTAURANT_SELECT,
+            });
+        }
+    }
     if (!doc) return null;
 
     const [withTimings] = await attachOutletTimingsToRestaurants([
@@ -2135,6 +2171,8 @@ export const listPublicOffers = async (query = {}) => {
             perUserLimit: o.perUserLimit ?? null,
             customerScope: o.customerScope,
             isFirstOrderOnly: !!o.isFirstOrderOnly,
+            // bank | free_delivery | new_user | top_brands | combo, or null.
+            category: o.category || null,
             restaurantScope: o.restaurantScope,
             restaurantId:
                 restaurant?.id || (o.restaurantScope === 'selected' ? o.restaurantId : null),

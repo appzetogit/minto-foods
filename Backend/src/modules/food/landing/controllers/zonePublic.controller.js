@@ -4,24 +4,10 @@ import { findZoneForPoint } from '../../shared/zone.service.js';
 
 const ACTIVE_ZONES_CACHE_KEY = 'zones:active:list:v1';
 const ACTIVE_ZONES_CACHE_TTL_SECONDS = 120;
-const ZONE_DETECT_CACHE_TTL_SECONDS = 180;
 
 const toFinite = (v) => {
     const n = typeof v === 'number' ? v : parseFloat(String(v));
     return Number.isFinite(n) ? n : null;
-};
-
-const roundCoordinate = (value, precision = 3) => {
-    const numeric = toFinite(value);
-    if (numeric === null) return null;
-    return Number(numeric.toFixed(precision));
-};
-
-const buildZoneDetectCacheKey = (lat, lng) => {
-    const roundedLat = roundCoordinate(lat, 3);
-    const roundedLng = roundCoordinate(lng, 3);
-    if (roundedLat === null || roundedLng === null) return null;
-    return `zones:detect:${roundedLat}:${roundedLng}`;
 };
 
 const getCachedJson = async (key) => {
@@ -81,10 +67,10 @@ export const detectZonePublicController = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'lat and lng are required' });
         }
 
-        const cacheKey = buildZoneDetectCacheKey(lat, lng);
-        const cached = await getCachedJson(cacheKey);
-        if (cached) return res.status(200).json(cached);
-
+        // Answered fresh every time. A 3-minute cache keyed on the rounded
+        // point kept giving the old answer after a zone was drawn or edited,
+        // so a new zone looked like it worked only once. The lookup is one
+        // indexed query.
         // One GIST-indexed containment test. This used to load every active zone
         // and walk each ring edge-by-edge in Node, which also meant the answer
         // depended on zone insertion order when two zones overlapped —
@@ -106,7 +92,6 @@ export const detectZonePublicController = async (req, res, next) => {
                 data: { status: 'OUT_OF_SERVICE', zoneId: null, zone: null },
             };
 
-        await setCachedJson(cacheKey, response, ZONE_DETECT_CACHE_TTL_SECONDS);
         return res.status(200).json(response);
     } catch (error) {
         next(error);

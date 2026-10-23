@@ -5,6 +5,7 @@ import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
 import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { withOpenStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
+import { openFirst } from '../../shared/openFirst.js';
 import { restoreExpiredFoodAvailability } from '../../restaurant/services/foodAvailability.service.js';
 
 /** Columns the search cards need, plus the address columns toRestaurant() rebuilds `location` from. */
@@ -181,31 +182,29 @@ export const searchUnified = async (query = {}, options = {}) => {
         for (const restaurant of allMatching) found.set(restaurant.id, restaurant);
     }
 
-    // Nearest first, by the distance the reach check measured.
-    const results = [...found.values()]
-        .map((restaurant) => ({
-            ...restaurant,
-            distanceScore: reach.distanceById.get(restaurant.id) ?? 999,
-            distanceInKm: reach.distanceById.get(restaurant.id) ?? null,
-        }))
-        .sort((a, b) => a.distanceScore - b.distanceScore);
-
-    // toRestaurant rebuilds the nested `location` the cards read; withOpenStatus
-    // adds isOpenNow, openStatusReason and nextOpeningAt, as the list has them.
-    const pageRows = await attachOutletTimingsToRestaurants(
-        results
-            .slice(skip, skip + limitNumber)
-            .map(({ nameSlug, ...restaurant }) => ({
+    // Open restaurants first, then nearest -- never mixed. toRestaurant
+    // rebuilds the nested `location` the cards read; withOpenStatus adds
+    // isOpenNow, openStatusReason and nextOpeningAt, as the list has them.
+    const ranked = (await attachOutletTimingsToRestaurants(
+        [...found.values()].map(({ nameSlug, ...restaurant }) => {
+            const km = reach.distanceById.get(restaurant.id) ?? null;
+            return {
                 ...toRestaurant(restaurant),
                 slug: nameSlug || null,
-            })),
-    );
+                distanceScore: km ?? 999,
+                distanceInKm: km,
+                distanceKm: km,
+            };
+        }),
+    ))
+        .map((restaurant) => withOpenStatus(restaurant))
+        .sort((x, y) => openFirst(x, y) || x.distanceScore - y.distanceScore);
 
     const finalResult = {
         success: true,
         data: {
-            restaurants: pageRows.map((restaurant) => withOpenStatus(restaurant)),
-            total: results.length,
+            restaurants: ranked.slice(skip, skip + limitNumber),
+            total: ranked.length,
             page: pageNumber,
             limit: limitNumber,
         },

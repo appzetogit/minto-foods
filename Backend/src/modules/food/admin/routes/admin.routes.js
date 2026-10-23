@@ -41,7 +41,7 @@ const router = express.Router();
 // ----- Public Business Settings (No Admin Required) -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings);
 router.get('/power-scanning/public', businessSettingsController.getPowerScanningSettings);
-router.get('/fee-settings/public', adminController.getFeeSettings);
+router.get('/fee-settings/public', adminController.getPublicFeeSettings);
 router.get('/restaurant-subscription-settings/public', adminController.getRestaurantSubscriptionSettings);
 router.get('/feature-settings/public', adminController.getFeatureSettings);
 router.get('/highlight-badges/public', highlightBadges.listPublicBadges);
@@ -441,6 +441,7 @@ router.post('/foods/bulk-approve', adminController.bulkApproveFoodItems);
 router.get('/offers', adminController.getAllOffers);
 router.post('/offers', adminController.createAdminOffer);
 router.patch('/offers/:id/cart-visibility', adminController.updateAdminOfferCartVisibility);
+router.patch('/offers/:id/category', adminController.updateAdminOfferCategory);
 router.delete('/offers/:id', adminController.deleteAdminOffer);
 
 // ----- Feedback Experience (Admin) -----

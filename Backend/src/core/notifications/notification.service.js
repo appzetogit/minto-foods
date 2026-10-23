@@ -127,7 +127,8 @@ export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limi
     ]);
 
     return {
-        items,
+        // A broadcast's picture, at the top level as well as in metadata.
+        items: items.map((item) => ({ ...item, imageUrl: String(item?.metadata?.imageUrl || '') })),
         pagination: {
             page: meta.page,
             limit: meta.limit,

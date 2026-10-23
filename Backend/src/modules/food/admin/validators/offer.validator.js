@@ -8,6 +8,19 @@ import {
     parseClock,
 } from '../../shared/offerRules.js';
 
+/** The app's "Top Coupon Categories" chips filter on this. */
+export const OFFER_CATEGORIES = ['bank', 'free_delivery', 'new_user', 'top_brands', 'combo'];
+
+/** A category from the form: one of OFFER_CATEGORIES, or null for none. */
+export const normalizeOfferCategory = (value) => {
+    const category = String(value ?? '').trim().toLowerCase();
+    if (!category) return null;
+    if (!OFFER_CATEGORIES.includes(category)) {
+        throw new ValidationError(`Category must be one of: ${OFFER_CATEGORIES.join(', ')}`);
+    }
+    return category;
+};
+
 const createOfferSchema = z.object({
     couponCode: z.string().min(1, 'Coupon code is required'),
     discountType: z.enum(['percentage', 'flat_price'], {
@@ -208,6 +221,7 @@ export const validateCreateOfferDto = (body) => {
         activeFromTime: from || null,
         activeToTime: to || null,
         newToRestaurantOnly: data.newToRestaurantOnly === true,
+        category: normalizeOfferCategory(body?.category),
     };
 };
 

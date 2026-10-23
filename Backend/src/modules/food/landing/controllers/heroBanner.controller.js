@@ -27,7 +27,8 @@ export const uploadHeroBannersController = async (req, res, next) => {
         const meta = {
             title: req.body.title,
             ctaText: req.body.ctaText,
-            ctaLink: req.body.ctaLink
+            ctaLink: req.body.ctaLink,
+            zoneId: req.body.zoneId,
         };
 
         const results = await createHeroBannersFromFiles(req.files, meta);

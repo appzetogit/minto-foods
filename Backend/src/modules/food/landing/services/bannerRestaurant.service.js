@@ -6,6 +6,9 @@ import {
     restaurantLink,
     slugifyRestaurantName,
 } from '../../shared/restaurantSlug.js';
+import { findZoneForPoint } from '../../shared/zone.service.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
+import { withOpenStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
 
 /**
  * Banners that open a restaurant.
@@ -21,16 +24,27 @@ const bannerRestaurantKey = (banner) =>
     (isId(banner?.restaurantId) ? String(banner.restaurantId) : null) ||
     restaurantKeyFromLink(banner?.ctaLink);
 
-/** Restaurants for a set of keys (ids or slugs), indexed by both. */
+/**
+ * Restaurants for a set of keys (ids or slugs), indexed by both. A slug a
+ * restaurant had before a rename finds it too.
+ */
 const loadRestaurantsByKey = async (keys, select = {}) => {
     const ids = keys.filter(isId);
     const slugs = [...new Set(keys.filter((k) => !isId(k)).map(slugifyRestaurantName).filter(Boolean))];
     if (!ids.length && !slugs.length) return new Map();
 
+    const former = slugs.length
+        ? await prisma.foodRestaurantSlugHistory.findMany({
+            where: { slug: { in: slugs } },
+            select: { slug: true, restaurantId: true },
+        })
+        : [];
+    const allIds = [...ids, ...former.map((f) => f.restaurantId)];
+
     const rows = await prisma.foodRestaurant.findMany({
         where: {
             OR: [
-                ...(ids.length ? [{ id: { in: ids } }] : []),
+                ...(allIds.length ? [{ id: { in: allIds } }] : []),
                 ...(slugs.length ? [{ nameSlug: { in: slugs } }] : []),
             ],
         },
@@ -48,8 +62,14 @@ const loadRestaurantsByKey = async (keys, select = {}) => {
             }
         }
     }
+    // A current slug beats a former one.
+    for (const { slug, restaurantId } of former) {
+        if (!byKey.has(slug) && byKey.has(restaurantId)) byKey.set(slug, byKey.get(restaurantId));
+    }
     return byKey;
 };
+
+const NOT_APPROVED = 'That restaurant is not approved, so a banner cannot open it';
 
 const lookup = (byKey, key) => (key ? byKey.get(isId(key) ? key : slugifyRestaurantName(key)) : null);
 
@@ -69,8 +89,9 @@ export const resolveBannerLink = async ({ ctaLink, restaurantId } = {}) => {
     if (sentId) {
         const id = String(restaurantId).trim();
         if (!isId(id)) throw new ValidationError('Invalid restaurant');
-        const exists = await prisma.foodRestaurant.findUnique({ where: { id }, select: { id: true } });
+        const exists = await prisma.foodRestaurant.findUnique({ where: { id }, select: { id: true, status: true } });
         if (!exists) throw new ValidationError('That restaurant was not found');
+        if (exists.status !== 'approved') throw new ValidationError(NOT_APPROVED);
         return { restaurantId: id, ctaLink: restaurantLink(id) };
     }
     if (ctaLink === undefined) {
@@ -85,26 +106,72 @@ export const resolveBannerLink = async ({ ctaLink, restaurantId } = {}) => {
     if (!match) {
         throw new ValidationError(`The link points to a restaurant that does not exist ("${key}"). Pick the restaurant again.`);
     }
+    if (match.status !== 'approved') throw new ValidationError(NOT_APPROVED);
     return { restaurantId: match.id, ctaLink: restaurantLink(match.id) };
 };
 
 /**
- * The public list without banners for a restaurant that is switched off.
- * Banners linking to no restaurant, or to one that cannot be found, stay.
- * Each banner gains restaurantId when its restaurant is known.
+ * The public list, as the app should get it.
+ *
+ * Dropped: a banner for a restaurant that is switched off, deleted, or no
+ * longer approved -- tapping it would only open "Restaurant not found" or a
+ * shop that cannot take the order. Banners that open no restaurant stay.
+ *
+ * A restaurant closed by its hours keeps its banner, and the banner says so
+ * (restaurantIsOpen, restaurantOpenStatusReason, restaurantNextOpenAt) so the
+ * app can show when it opens. Each kept banner gains restaurantId.
  */
 export const withoutOfflineRestaurants = async (banners = []) => {
     const keys = [...new Set(banners.map(bannerRestaurantKey).filter(Boolean))];
     if (!keys.length) return banners;
 
-    const byKey = await loadRestaurantsByKey(keys);
-    return banners
-        .filter((banner) => lookup(byKey, bannerRestaurantKey(banner))?.isAcceptingOrders !== false)
-        .map((banner) => {
-            const match = lookup(byKey, bannerRestaurantKey(banner));
-            return match ? { ...banner, restaurantId: match.id } : banner;
-        });
+    const byKey = await loadRestaurantsByKey(keys, { openingTime: true, closingTime: true, openDays: true });
+    const usable = [...new Map(
+        [...byKey.values()]
+            .filter((r) => r.status === 'approved' && r.isAcceptingOrders !== false)
+            .map((r) => [r.id, r]),
+    ).values()];
+    const statusById = new Map(
+        (await attachOutletTimingsToRestaurants(usable)).map((r) => [r.id, withOpenStatus(r)]),
+    );
+
+    return banners.flatMap((banner) => {
+        const key = bannerRestaurantKey(banner);
+        if (!key) return [banner];
+        const match = lookup(byKey, key);
+        const status = match ? statusById.get(match.id) : null;
+        if (!status) return [];
+        return [{
+            ...banner,
+            restaurantId: match.id,
+            restaurantIsOpen: status.isOpenNow,
+            restaurantOpenStatusReason: status.openStatusReason,
+            restaurantNextOpenAt: status.nextOpeningAt,
+        }];
+    });
 };
+
+/**
+ * The zone a public banner request is for: the zoneId the app sent, else the
+ * zone the lat/lng falls in. Null when neither gives one.
+ */
+export const resolveBannerZoneId = async ({ zoneId, lat, lng } = {}) => {
+    if (isId(zoneId)) return String(zoneId);
+    if (lat === undefined || lat === null || lat === '' || lng === undefined || lng === null || lng === '') return null;
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    const zone = await findZoneForPoint(latitude, longitude);
+    return zone?.id || null;
+};
+
+/**
+ * Prisma filter for zone-wise banners: the all-zones banners (zoneId null)
+ * plus, when the customer's zone is known, that zone's own. A zone-2 banner
+ * never shows in zone 1.
+ */
+export const bannerZoneWhere = (zoneId) =>
+    zoneId ? { OR: [{ zoneId: null }, { zoneId }] } : { zoneId: null };
 
 /**
  * For the admin list: which restaurant each banner opens, and whether its

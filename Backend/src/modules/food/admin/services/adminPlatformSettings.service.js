@@ -2,6 +2,7 @@ import { dayRange } from '../../../../utils/timezone.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { loadOrderLimits } from '../../shared/orderLimits.js';
 
 /**
  * Fee settings, referral settings and the safety/emergency inbox, extracted
@@ -44,6 +45,8 @@ const serializeFeeSettings = (doc) => {
         gstRate: num(doc.gstRate),
         deliveryFeeGstRate: num(doc.deliveryFeeGstRate),
         riderMinPayPerTrip: num(doc.riderMinPayPerTrip),
+        codMaxOrderValue: num(doc.codMaxOrderValue),
+        maxItemQuantity: doc.maxItemQuantity ?? null,
         deliveryDistanceMode: doc.deliveryDistanceMode || null,
         roadDistanceCapFactor: num(doc.roadDistanceCapFactor),
         deliveryFeeRanges: toFeeRanges(deliveryFeeBands),
@@ -78,8 +81,15 @@ export async function getFeeSettings(zoneId = null) {
  * The distinction is the whole point: an unset platform fee means it is not
  * charged, which is different from "this request did not mention it".
  */
-const feeColumns = (body = {}) => {
+const feeColumns = (body = {}, { isDefaultRow = false } = {}) => {
     const data = {};
+    // The order limits apply to every zone, so only the default row holds them;
+    // on a zone row they would look set and do nothing.
+    if (isDefaultRow) {
+        if (body.codMaxOrderValue === null) data.codMaxOrderValue = null;
+        else if (body.codMaxOrderValue !== undefined) data.codMaxOrderValue = Number(body.codMaxOrderValue);
+        if (body.maxItemQuantity !== undefined) data.maxItemQuantity = Number(body.maxItemQuantity);
+    }
     for (const key of ['deliveryFee', 'platformFee', 'quickDeliveryFee', 'gstRate', 'riderMinPayPerTrip']) {
         if (body[key] === null) data[key] = null;
         else if (body[key] !== undefined) data[key] = Number(body[key]);
@@ -123,11 +133,11 @@ const asBandError = (error) => {
 };
 
 export async function upsertFeeSettings(body = {}) {
-    const data = feeColumns(body);
-    const ranges = body.deliveryFeeRanges;
     // Absent means the global default, which is what every existing caller
     // means and what the single pre-zone row already is.
     const zoneId = isId(body.zoneId) ? String(body.zoneId) : null;
+    const data = feeColumns(body, { isDefaultRow: zoneId === null });
+    const ranges = body.deliveryFeeRanges;
 
     try {
         const saved = await prisma.$transaction(async (tx) => {
@@ -164,6 +174,17 @@ export async function upsertFeeSettings(body = {}) {
     } catch (error) {
         throw asBandError(error);
     }
+}
+
+/**
+ * What the apps read from GET /fee-settings/public: the zone's row as before
+ * (the app draws its fee explainer from the bands), plus the order limits in
+ * force everywhere -- a COD limit that was never set comes back as the ₹2000
+ * default, so the app never has to guess it.
+ */
+export async function getPublicFeeSettings(zoneId = null) {
+    const [{ feeSettings }, limits] = await Promise.all([getFeeSettings(zoneId), loadOrderLimits()]);
+    return { feeSettings: { ...(feeSettings || {}), ...limits } };
 }
 
 // ─── Referral settings ───────────────────────────────────────────────────────

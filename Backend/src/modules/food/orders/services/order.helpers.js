@@ -182,9 +182,24 @@ export function sanitizeOrderForDeliveryPartner(orderDoc) {
     out.customerName = contact.name;
     out.customerPhone = contact.phone;
     out.customerCallUri = buildTelUri(contact.phone);
-    // The account holder's own number is not the rider's business.
+    // The account holder's own number is not the rider's business. Every
+    // place a rider screen might read a name from says the receiver's: the
+    // pickup screens read user.name, which still said the account holder
+    // ("Raziya" before pickup, "Arman" after).
     if (out.userId && typeof out.userId === "object") {
       out.userId = { ...out.userId, name: contact.name, phone: contact.phone };
+    }
+    if (out.user && typeof out.user === "object") {
+      out.user = { ...out.user, name: contact.name, phone: contact.phone };
+    }
+    if (out.deliveryAddress && typeof out.deliveryAddress === "object") {
+      out.deliveryAddress = {
+        ...out.deliveryAddress,
+        name: contact.name,
+        fullName: contact.name,
+        recipientName: contact.name,
+        phone: contact.phone,
+      };
     }
   }
   return out;
@@ -299,6 +314,13 @@ export async function pushStatusHistory(orderId, { byRole, byId, from, to, note 
     },
   });
   notifyAdminsOfOrderChange(orderId, from, to);
+  // Every status change moves the ETA (accepted, ready, picked up, ...). A
+  // moment later, so a caller inside a transaction has committed first.
+  setTimeout(() => {
+    import('./eta.service.js')
+      .then(({ refreshOrderEta }) => refreshOrderEta(orderId, { force: true }))
+      .catch(() => {});
+  }, 600);
   return row;
 }
 

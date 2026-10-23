@@ -27,11 +27,34 @@ export async function findApprovedRestaurant(restaurantIdOrSlug, select = { id: 
     // keeps punctuation, which is why slugs used to miss.
     const slug = slugifyRestaurantName(value);
     if (!slug) return null;
-    return prisma.foodRestaurant.findFirst({
+    const current = await prisma.foodRestaurant.findFirst({
         where: { nameSlug: slug, status: 'approved' },
         orderBy: { createdAt: 'asc' },
         select,
     });
+    if (current) return current;
+
+    const formerId = await restaurantIdForFormerSlug(slug);
+    return formerId
+        ? prisma.foodRestaurant.findFirst({ where: { id: formerId, status: 'approved' }, select })
+        : null;
+}
+
+/**
+ * The restaurant that used to have this slug before it was renamed, or null.
+ *
+ * A rename changes nameSlug, and links already out there -- banners, shared
+ * links, an app's cache -- still carry the old one ("sdad" after the rename to
+ * "saad"). The database records each replaced slug in
+ * food_restaurant_slug_history.
+ */
+export async function restaurantIdForFormerSlug(slug) {
+    if (!slug) return null;
+    const row = await prisma.foodRestaurantSlugHistory.findUnique({
+        where: { slug },
+        select: { restaurantId: true },
+    });
+    return row?.restaurantId || null;
 }
 
 /**

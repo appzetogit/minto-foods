@@ -62,11 +62,17 @@ const handleHotSync = async ({ userId, orderId }) => {
             void checkRiderNearDrop({ orderId, riderId: userId, lat: riderData.lat, lng: riderData.lng });
         }
 
-        if (orderData && orderId) {
+        if (orderData && orderId && userId) {
+            // By any form of the order id, and only on this rider's own order.
+            // Matching orderId alone never hit: the app sends the internal id.
+            const { saveOrderRiderPosition } = await import('../../modules/food/delivery/services/riderPosition.service.js');
             updates.push(
-                prisma.foodOrder.updateMany({
-                    where: { orderId: String(orderId) },
-                    data: { riderLat: orderData.lat, riderLng: orderData.lng },
+                saveOrderRiderPosition({
+                    orderId,
+                    riderId: userId,
+                    lat: orderData.lat,
+                    lng: orderData.lng,
+                    at: orderData.timestamp ? new Date(orderData.timestamp) : new Date(),
                 })
             );
         }

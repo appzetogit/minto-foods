@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { BellRing, Loader2, Search, Send, Trash2 } from "lucide-react";
-import { adminAPI } from "@food/api";
+import { adminAPI, uploadAPI } from "@food/api";
 
 const TARGET_OPTIONS = [
   { value: "ALL", label: "All" },
@@ -54,7 +54,33 @@ export default function NotificationBroadcast() {
     lapsedIncludeNeverOrdered: false,
     // Optional coupon sent with the campaign.
     couponId: "",
+    // Optional picture, shown big in the phone tray and in the app's list.
+    imageUrl: "",
   });
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState("");
+
+  const handleImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setImageError("Choose an image file");
+      return;
+    }
+    setImageError("");
+    setImageUploading(true);
+    try {
+      const response = await uploadAPI.uploadMedia(file, { folder: "food/notifications" });
+      const url = response?.data?.data?.url;
+      if (!url) throw new Error("Upload returned no link");
+      setForm((prev) => ({ ...prev, imageUrl: url }));
+    } catch (error) {
+      setImageError(error?.response?.data?.message || error?.message || "Could not upload the image");
+    } finally {
+      setImageUploading(false);
+    }
+  };
   const [lapsedPreview, setLapsedPreview] = useState(null);
   const [coupons, setCoupons] = useState([]);
   const [lapsedLoading, setLapsedLoading] = useState(false);
@@ -224,6 +250,7 @@ export default function NotificationBroadcast() {
         message: form.message.trim(),
         targetType: form.targetType,
         ...(form.couponId ? { couponId: form.couponId } : {}),
+        ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
         ...(form.targetType === "LAPSED"
           ? {
               lapsedDays: Number(form.lapsedDays) || 30,
@@ -244,7 +271,7 @@ export default function NotificationBroadcast() {
               }))
             : [],
       });
-      setForm({ title: "", message: "", targetType: "ALL" });
+      setForm({ title: "", message: "", targetType: "ALL", imageUrl: "" });
       setSelectedRecipients([]);
       setSearch("");
       window.dispatchEvent(new Event("adminBroadcastUpdated"));
@@ -421,6 +448,37 @@ export default function NotificationBroadcast() {
               className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
             />
           </label>
+
+          <div className="block">
+            <span className="text-sm font-semibold text-slate-700">Image (optional)</span>
+            {form.imageUrl ? (
+              <div className="mt-2 flex items-start gap-3">
+                <img
+                  src={form.imageUrl}
+                  alt="Notification"
+                  className="h-28 w-48 rounded-2xl border border-slate-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, imageUrl: "" }))}
+                  className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500 hover:border-blue-400">
+                {imageUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {imageUploading ? "Uploading..." : "Choose an image"}
+                <input type="file" accept="image/*" onChange={handleImageChange} disabled={imageUploading} className="hidden" />
+              </label>
+            )}
+            <p className="mt-1 text-xs text-slate-500">
+              Shown as the big picture in the phone's notification tray and in the app's Notifications list.
+            </p>
+            {imageError ? <p className="mt-1 text-xs font-medium text-red-600">{imageError}</p> : null}
+          </div>
 
           {form.targetType === "CUSTOM" && (
             <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">

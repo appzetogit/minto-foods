@@ -281,6 +281,16 @@ $$ LANGUAGE sql IMMUTABLE;
 CREATE OR REPLACE FUNCTION sync_restaurant_name_slug() RETURNS trigger AS $$
 BEGIN
   NEW."nameSlug" := restaurant_name_slug(NEW."restaurantName");
+  -- A rename keeps the old slug resolving to this restaurant. The newest owner
+  -- of a slug wins it; a restaurant taking back its own old slug drops the row.
+  IF TG_OP = 'UPDATE' AND OLD."nameSlug" IS NOT NULL AND OLD."nameSlug" IS DISTINCT FROM NEW."nameSlug" THEN
+    INSERT INTO "food_restaurant_slug_history" ("slug", "restaurantId")
+    VALUES (OLD."nameSlug", NEW."id")
+    ON CONFLICT ("slug") DO UPDATE SET "restaurantId" = EXCLUDED."restaurantId", "createdAt" = CURRENT_TIMESTAMP;
+  END IF;
+  IF NEW."nameSlug" IS NOT NULL THEN
+    DELETE FROM "food_restaurant_slug_history" WHERE "slug" = NEW."nameSlug" AND "restaurantId" = NEW."id";
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

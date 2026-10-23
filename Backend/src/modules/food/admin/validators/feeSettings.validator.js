@@ -64,6 +64,14 @@ const feeSettingsUpsertSchema = z.object({
         .max(5, 'Road distance cap must be at most 5')
         .nullable()
         .optional(),
+    // Order limits for every zone (saved on the default row only): COD below
+    // this total (null = ₹2000, 0 = no limit), and the most of one dish.
+    codMaxOrderValue: bounded('Cash on Delivery limit', MAX_AMOUNT).nullable().optional(),
+    maxItemQuantity: z.number({ invalid_type_error: 'Max quantity per item must be a number' })
+        .int('Max quantity per item must be a whole number')
+        .min(1, 'Max quantity per item must be at least 1')
+        .max(999, 'Max quantity per item cannot be more than 999')
+        .optional(),
     isActive: z.boolean().optional(),
     // Which zone these fees are for. Absent/null is the global default, which
     // is what every pre-zone caller means. Zod strips undeclared keys, so
@@ -124,6 +132,16 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 : body?.roadDistanceCapFactor !== undefined
                     ? Number(body.roadDistanceCapFactor)
                     : undefined,
+        codMaxOrderValue:
+            body?.codMaxOrderValue === null || body?.codMaxOrderValue === ''
+                ? null
+                : body?.codMaxOrderValue !== undefined
+                    ? Number(body.codMaxOrderValue)
+                    : undefined,
+        maxItemQuantity:
+            body?.maxItemQuantity === null || body?.maxItemQuantity === '' || body?.maxItemQuantity === undefined
+                ? undefined
+                : Number(body.maxItemQuantity),
         isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined,
         zoneId: body?.zoneId ? String(body.zoneId) : body?.zoneId === null ? null : undefined
     };

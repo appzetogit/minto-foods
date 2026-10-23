@@ -1014,6 +1014,13 @@ export const adminAPI = {
     apiClient.post("/food/admin/offers", body ?? {}, {
       contextModule: "admin",
     }),
+  /** bank | free_delivery | new_user | top_brands | combo, or "" to clear. */
+  updateAdminOfferCategory: (offerId, category) =>
+    apiClient.patch(
+      `/food/admin/offers/${String(offerId)}/category`,
+      { category: category || null },
+      { contextModule: "admin" },
+    ),
   updateAdminOfferCartVisibility: (offerId, itemId, showInCart) =>
     apiClient.patch(
       `/food/admin/offers/${String(offerId)}/cart-visibility`,

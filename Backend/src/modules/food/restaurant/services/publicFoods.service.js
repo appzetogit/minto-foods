@@ -8,6 +8,9 @@ import {
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
 import { restaurantsInReach } from '../../shared/deliveryRadius.js';
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
+import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
+import { withOpenStatus } from '../helpers/restaurantAvailability.helper.js';
+import { openFirst } from '../../shared/openFirst.js';
 
 const buildCategoryKeywords = (categorySlug) => {
     const raw = String(categorySlug || '').trim().toLowerCase();
@@ -51,7 +54,13 @@ export async function listPublicFoods(query = {}) {
 
     if (!restaurants.length) return { foods: [], total: 0 };
 
-    const restaurantMap = new Map(restaurants.map((r) => [r.id, r]));
+    // Open restaurants' dishes first, then the nearest kitchen's.
+    const withStatus = (await attachOutletTimingsToRestaurants(restaurants)).map((r) => withOpenStatus(r));
+    const restaurantMap = new Map(withStatus.map((r) => [r.id, r]));
+    const rank = (restaurantId) => {
+        const r = restaurantMap.get(restaurantId);
+        return { isOpenNow: Boolean(r?.isOpenNow), km: reach.distanceById.get(restaurantId) ?? Infinity };
+    };
     const restaurantIds = restaurants.map((r) => r.id);
 
     await restoreExpiredFoodAvailability({ restaurantId: { in: restaurantIds } });
@@ -94,6 +103,8 @@ export async function listPublicFoods(query = {}) {
                 _id: food.id,
                 restaurantId: food.restaurantId,
                 restaurantName: restaurant?.restaurantName || 'Unknown Restaurant',
+                restaurantIsOpen: Boolean(restaurant?.isOpenNow),
+                distanceKm: reach.distanceById.get(food.restaurantId) ?? null,
                 categoryId: food.categoryId || null,
                 categoryName: food.categoryName || '',
                 category: food.categoryName || '',
@@ -128,6 +139,11 @@ export async function listPublicFoods(query = {}) {
             if (food.isAvailable === false) return false;
             if (isSwitch99Promo) return isSwitch99Price(food.price);
             return true;
+        })
+        .sort((a, b) => {
+            const x = rank(a.restaurantId);
+            const y = rank(b.restaurantId);
+            return openFirst(x, y) || x.km - y.km;
         })
         .slice(0, limit);
 

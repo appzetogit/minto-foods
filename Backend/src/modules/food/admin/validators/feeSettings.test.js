@@ -107,3 +107,14 @@ test('the range rules that already existed still hold', () => {
         /must not overlap/,
     );
 });
+
+test('the order limits are validated', async () => {
+    const { validateFeeSettingsUpsertDto } = await import('./feeSettings.validator.js');
+    const ok = validateFeeSettingsUpsertDto({ codMaxOrderValue: '1500', maxItemQuantity: '10' });
+    assert.equal(ok.codMaxOrderValue, 1500);
+    assert.equal(ok.maxItemQuantity, 10);
+    assert.equal(validateFeeSettingsUpsertDto({ codMaxOrderValue: '' }).codMaxOrderValue, null);
+    assert.throws(() => validateFeeSettingsUpsertDto({ codMaxOrderValue: -1 }), /Cash on Delivery limit cannot be negative/);
+    assert.throws(() => validateFeeSettingsUpsertDto({ maxItemQuantity: 0 }), /at least 1/);
+    assert.throws(() => validateFeeSettingsUpsertDto({ maxItemQuantity: 1000 }), /more than 999/);
+});

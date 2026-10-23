@@ -5,6 +5,7 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import {
     resolveBannerLink,
+    resolveBannerZoneId,
     withoutOfflineRestaurants,
     withRestaurantLinkStatus,
 } from '../../landing/services/bannerRestaurant.service.js';
@@ -93,12 +94,13 @@ export const listBannersAdmin = async () => {
  * Filtered in the query rather than in JS so a long list never travels just to
  * be discarded, and ordered here so the app can render what it receives.
  */
-export const listLiveBanners = async (zoneId = null) => {
+export const listLiveBanners = async (query = {}) => {
     const now = new Date();
-    // An unknown or missing zone still gets the everywhere banners rather than
-    // an empty strip: a customer who has not set an address yet is the common
-    // case, not an error.
-    const zone = isId(zoneId) ? String(zoneId) : null;
+    // The zone the app sent, else the one its lat/lng is in (a bare string is
+    // a zoneId, as older callers pass it). An unknown or missing zone still
+    // gets the everywhere banners rather than an empty strip: a customer who
+    // has not set an address yet is the common case, not an error.
+    const zone = await resolveBannerZoneId(typeof query === 'object' && query !== null ? query : { zoneId: query });
     const banners = await prisma.foodOfferBanner.findMany({
         where: {
             isActive: true,
@@ -120,6 +122,7 @@ export const listLiveBanners = async (zoneId = null) => {
             title: b.title || '',
             ctaLink: b.ctaLink || '',
             restaurantId: b.restaurantId || null,
+            zoneId: b.zoneId || null,
             sortOrder: b.sortOrder,
         }))),
     };

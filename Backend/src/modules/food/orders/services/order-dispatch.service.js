@@ -7,6 +7,7 @@ import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import {
   buildDeliverySocketPayload,
+  riderContact,
   buildOrderIdentityFilter,
   getBusyDeliveryPartnerIds,
   haversineKm,
@@ -133,8 +134,9 @@ export function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt,
     pickupLng: s(payload?.restaurantLocation?.longitude ?? ''),
     dropLat: s(payload?.customerLocation?.latitude ?? ''),
     dropLng: s(payload?.customerLocation?.longitude ?? ''),
-    customerName: s(payload?.customerName || order?.customerName || ''),
-    customerPhone: s(payload?.customerPhone || order?.customerPhone || ''),
+    // The receiver on an order for someone else, never the account holder.
+    customerName: s(payload?.customerName || riderContact(order).name || ''),
+    customerPhone: s(payload?.customerPhone || riderContact(order).phone || ''),
     itemsCount: s(Array.isArray(order?.items) ? order.items.length : ''),
   };
 }

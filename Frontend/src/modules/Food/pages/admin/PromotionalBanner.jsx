@@ -19,6 +19,7 @@ export default function PromotionalBanner() {
     ctaLink: "",
     restaurantId: "",
     zoneId: "",
+    placement: "home",
     startDate: "",
     endDate: "",
     file: null,
@@ -134,6 +135,7 @@ export default function PromotionalBanner() {
       // The server stores the restaurant by id and builds the link from it,
       // so renaming the restaurant cannot break the banner.
       data.append("restaurantId", formData.restaurantId || "")
+      data.append("placement", formData.placement || "home")
       if (formData.zoneId) data.append("zoneId", formData.zoneId)
       if (formData.startDate) data.append("startDate", formData.startDate)
       if (formData.endDate) data.append("endDate", formData.endDate)
@@ -144,6 +146,7 @@ export default function PromotionalBanner() {
           title: formData.title,
           ctaLink: formData.ctaLink,
           restaurantId: formData.restaurantId || "",
+          placement: formData.placement || "home",
           zoneId: formData.zoneId || null,
           startDate: formData.startDate || null,
           endDate: formData.endDate || null
@@ -195,6 +198,7 @@ export default function PromotionalBanner() {
       ctaLink: "",
       restaurantId: "",
       zoneId: "",
+      placement: "home",
       startDate: "",
       endDate: "",
       file: null,
@@ -210,6 +214,7 @@ export default function PromotionalBanner() {
       ctaLink: banner.ctaLink || "",
       restaurantId: banner.restaurantId || "",
       zoneId: banner.zoneId?._id || banner.zoneId || "",
+      placement: banner.placement || "home",
       startDate: banner.startDate ? new Date(banner.startDate).toISOString().split('T')[0] : "",
       endDate: banner.endDate ? new Date(banner.endDate).toISOString().split('T')[0] : "",
       file: null,
@@ -310,6 +315,11 @@ export default function PromotionalBanner() {
                 </div>
                 <div className="p-4">
                   <h3 className="font-bold text-slate-900 truncate mb-1">{banner.title || "Untitled Banner"}</h3>
+                  <div className="text-[11px] font-semibold text-slate-500">
+                    {banner.placement === "tracking" ? "Order tracking page" : "Home"}
+                    {" · "}
+                    {zones.find(z => (z._id || z.id) === (banner.zoneId?._id || banner.zoneId))?.name || (banner.zoneId ? "One zone" : "Every zone")}
+                  </div>
                   <div className="space-y-1.5 mt-3">
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <LinkIcon className="w-3.5 h-3.5" />
@@ -382,13 +392,24 @@ export default function PromotionalBanner() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Zone (Required for Filtering)</label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Show on</label>
+                      <select
+                        value={formData.placement}
+                        onChange={(e) => setFormData(p => ({...p, placement: e.target.value}))}
+                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                      >
+                        <option value="home">Home</option>
+                        <option value="tracking">Order tracking page (paid ad)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Zone (blank = every zone)</label>
                       <select
                         value={formData.zoneId}
                         onChange={(e) => setFormData(p => ({...p, zoneId: e.target.value, restaurantId: ""}))}
                         className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
                       >
-                        <option value="">Select a zone...</option>
+                        <option value="">Every zone</option>
                         {zones.map(z => (
                           <option key={z._id} value={z._id}>{z.name || z.zoneName}</option>
                         ))}

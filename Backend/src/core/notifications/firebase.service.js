@@ -307,6 +307,13 @@ const buildMessagePayload = (payload = {}, token) => {
         }
     };
 
+    // The picture in the tray on iOS: FCM attaches it through the app's
+    // notification service extension, which only runs for mutable content.
+    if (image && !isDataOnlyPush) {
+        message.apns.payload.aps['mutable-content'] = 1;
+        message.apns.fcm_options = { image };
+    }
+
     message.webpush = {
         headers: {
             Urgency: 'high'

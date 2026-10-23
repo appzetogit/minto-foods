@@ -643,6 +643,8 @@ model UserAddress {
   userId String @db.VarChar(24)
 
   label             AddressLabel @default(Home)
+  /// What the customer named it ("Mom's house"); label stays Other.
+  customLabel       String?      @db.VarChar(40)
   street            String
   additionalDetails String       @default("")
   city              String
@@ -931,6 +933,7 @@ model FoodRestaurant {
   emergencyRequests    DeliveryOrderEmergencyRequest[]
   feedback             FeedbackExperience[]
   offers               FoodOffer[]
+  slugHistory          FoodRestaurantSlugHistory[]
 
   @@unique([restaurantNameNormalized, ownerPhoneLast10])
   @@index([ownerPhone])
@@ -1543,6 +1546,12 @@ model FoodOrder {
 
   riderLat          Float?
   riderLng          Float?
+  riderLocationAt   DateTime?
+  /// Live ETA, worked out by the server (eta.service.js) and refreshed on
+  /// status changes and rider pings.
+  etaMinutes          Int?
+  estimatedDeliveryAt DateTime?
+  etaComputedAt       DateTime?
   lastRiderLocation Unsupported("geography(Point, 4326)")?
 
   createdAt DateTime @default(now())
@@ -2318,6 +2327,8 @@ model FoodOffer {
 
   status     OfferStatus @default(active)
   showInCart Boolean     @default(true)
+  /// bank | free_delivery | new_user | top_brands | combo, for the app's category chips.
+  category   String?     @db.VarChar(30)
 
   createdByRole            CreatorRole @default(ADMIN)
   adminBearPercentage      Decimal     @default(100) @db.Decimal(5, 2)
@@ -2449,6 +2460,11 @@ model FoodFeeSettings {
   /// work out to. Without it a one-kilometre trip paid per km earned almost
   /// nothing. Null means no floor.
   riderMinPayPerTrip Decimal? @db.Decimal(14, 2)
+
+  /// Cash on delivery only below this order total. Null = ₹2000, 0 = no limit.
+  codMaxOrderValue Decimal? @db.Decimal(14, 2)
+  /// The most of one dish a customer may order.
+  maxItemQuantity  Int      @default(50)
 
   /// Which distance the delivery fee and rider pay are worked out on:
   /// "road_capped" (Google driving distance, but never more than
@@ -3404,6 +3420,8 @@ model NotificationBroadcast {
   targets    Json                @default("[]")
 
   link String @default("")
+  /// Optional picture: shown big in the phone tray and in the inbox.
+  imageUrl String @default("")
 
   /// A coupon sent with this campaign, if any.
   ///
@@ -3514,6 +3532,9 @@ model FoodHeroBanner {
   /// ponytail: id array, matching the Mongo access pattern.
   linkedRestaurantIds String[]
 
+  /// Null = every zone.
+  zoneId String? @db.VarChar(24)
+
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
 
@@ -3521,6 +3542,7 @@ model FoodHeroBanner {
   updatedAt DateTime @updatedAt
 
   @@index([isActive, sortOrder])
+  @@index([zoneId])
   @@map("food_hero_banners")
 }
 
@@ -3581,6 +3603,8 @@ model HomePromotionBanner {
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
   zoneId    String? @db.VarChar(24)
+  /// 'home' or 'tracking' (paid ads on the order tracking page).
+  placement String  @default("home") @db.VarChar(20)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3589,6 +3613,7 @@ model HomePromotionBanner {
 
   @@index([isActive, sortOrder])
   @@index([zoneId])
+  @@index([placement])
   @@map("food_home_promotion_banners")
 }
 
@@ -3906,4 +3931,17 @@ model FoodHighlightBadge {
   updatedAt DateTime @updatedAt
 
   @@map("food_highlight_badges")
+}
+
+/// Slugs a restaurant had before a rename, so old links and banners still
+/// open it. Written by the restaurant_name_slug_sync trigger.
+model FoodRestaurantSlugHistory {
+  slug         String   @id
+  restaurantId String   @db.VarChar(24)
+  createdAt    DateTime @default(now())
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@map("food_restaurant_slug_history")
 }

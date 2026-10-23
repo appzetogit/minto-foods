@@ -4,6 +4,7 @@ import { ValidationError, NotFoundError } from '../../../../core/auth/errors.js'
 import { createInboxNotifications } from '../../../../core/notifications/notification.service.js';
 import { notifyOwnersSafely } from '../../../../core/notifications/firebase.service.js';
 import { getIO, rooms } from '../../../../config/socket.js';
+import { buildPublicUrl } from '../../../../services/storage.service.js';
 
 /**
  * Admin broadcasts: one message fanned out to every customer, restaurant or
@@ -335,10 +336,30 @@ const withCouponCode = (message, code) => {
 Use code ${couponCode}`;
 };
 
+/**
+ * The broadcast's optional picture: an upload of ours (http(s) or /uploads/),
+ * or '' for none. Anything else is refused -- the url goes into every
+ * recipient's tray and inbox, so it must not be one somebody typed in.
+ */
+export const normalizeBroadcastImage = (value) => {
+    const url = String(value ?? '').trim();
+    if (!url) return '';
+    if (url.length > 1000) throw new ValidationError('Image link is too long');
+    if (!/^https?:\/\/\S+$/i.test(url) && !/^\/uploads\/\S+$/.test(url)) {
+        throw new ValidationError('Image must be an uploaded picture (http(s) or /uploads/ link)');
+    }
+    return url;
+};
+
+/** A phone loads the tray picture itself, so a relative /uploads/ path is made absolute. */
+const absoluteImageUrl = (url) =>
+    url.startsWith('/uploads/') ? buildPublicUrl(url.slice('/uploads/'.length)) : url;
+
 export const createBroadcastNotification = async ({ body = {}, adminId } = {}) => {
     const title = normalizeText(body?.title, 'title');
     const message = normalizeText(body?.message, 'message');
     const link = normalizeText(body?.link, 'link', false);
+    const imageUrl = normalizeBroadcastImage(body?.imageUrl);
 
     const targetType = String(body?.targetType || '').trim().toUpperCase();
     if (!TARGET_TYPES.has(targetType)) throw new ValidationError('targetType is invalid');
@@ -368,6 +389,7 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
             title,
             message: finalMessage,
             link,
+            imageUrl,
             targetType,
             couponId: coupon?.id || null,
             couponCode: coupon?.code || '',
@@ -396,6 +418,8 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
                 // So the app can show the code as something tappable rather
                 // than leaving the customer to retype it out of the message.
                 couponCode: coupon?.code || '',
+                // The picture the app shows in the Notifications list.
+                imageUrl,
             },
         })),
     });
@@ -410,6 +434,9 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
                 broadcastId: broadcast.id,
                 link,
                 couponCode: coupon?.code || '',
+                // The sender turns this into the big tray picture (Android
+                // notification.image, iOS fcm_options.image).
+                ...(imageUrl ? { imageUrl: absoluteImageUrl(imageUrl) } : {}),
             },
         }
     );

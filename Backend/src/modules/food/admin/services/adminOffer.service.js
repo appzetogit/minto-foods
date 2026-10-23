@@ -85,6 +85,7 @@ export async function getAllOffers(_query = {}) {
             // date has passed reads inactive even before the sweep runs.
             status: isExpired ? 'inactive' : o.status || 'active',
             showInCart: o.showInCart !== false,
+            category: o.category || null,
             endDate: o.endDate || null,
             minOrderValue: num(o.minOrderValue),
             maxDiscount: o.maxDiscount === null ? null : num(o.maxDiscount),
@@ -128,6 +129,7 @@ export async function createAdminOffer(body = {}) {
                 startDate: body.startDate ? new Date(body.startDate) : null,
                 endDate: body.endDate ? new Date(body.endDate) : null,
                 isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                category: body.category ?? null,
                 // Created already expired: start inactive rather than appearing
                 // live until a sweep notices.
                 status:
@@ -173,6 +175,19 @@ export async function createAdminOffer(body = {}) {
     }
 
     return offer;
+}
+
+/** Sets or clears a coupon's category (bank, free_delivery, ...). */
+export async function updateAdminOfferCategory(offerId, category) {
+    if (!isId(offerId)) throw new ValidationError('Invalid offer id');
+    const updated = await prisma.foodOffer
+        .update({ where: { id: String(offerId) }, data: { category }, select: { id: true, category: true } })
+        .catch((error) => {
+            if (error?.code === 'P2025') return null;
+            throw error;
+        });
+    if (!updated) throw new ValidationError('Offer not found');
+    return updated;
 }
 
 export async function updateAdminOfferCartVisibility(offerId, itemId, showInCart) {

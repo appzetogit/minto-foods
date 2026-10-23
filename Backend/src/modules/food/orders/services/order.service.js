@@ -15,6 +15,8 @@ import {
     fetchRazorpayPayment
 } from '../helpers/razorpay.helper.js';
 import { getBalance, recordTransaction } from '../../../../core/payments/transaction.service.js';
+import { assertCodAllowedForTotal, loadOrderLimits } from '../../shared/orderLimits.js';
+import { refreshOrderEta } from './eta.service.js';
 import {
   refundOrder,
   describeRefundLegs,
@@ -651,6 +653,9 @@ export async function createOrder(userId, rawDto) {
         : null,
     };
 
+    // Cash on delivery only below the admin's limit, whatever the app offered.
+    if (isCash) assertCodAllowedForTotal(normalizedPricing.total, await loadOrderLimits());
+
     if (!Number.isFinite(normalizedPricing.total) || normalizedPricing.total <= 0) {
       throw new ValidationError("Order total must be greater than zero");
     }
@@ -908,6 +913,8 @@ export async function createOrder(userId, rawDto) {
       // fired while the customer was sitting on the Razorpay sheet actually paying.
       if (!isAwaitingOnlinePayment) {
         await notifyCustomer(order.id, "placed");
+        // An ETA from the moment it is placed, not only once someone moves it.
+        void refreshOrderEta(order.id, { force: true });
 
         await notifyRestaurantNewOrder(order);
       }
@@ -1086,6 +1093,7 @@ export async function finalizeOrderPayment(orderId, { source = "SYSTEM", userId 
   // an online order is only "placed" for them once the money has gone through.
   await notifyRestaurantNewOrder(updated);
   await notifyCustomer(updated.id, "placed");
+  void refreshOrderEta(updated.id, { force: true });
 
   return updated;
 }

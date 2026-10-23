@@ -1,8 +1,11 @@
 import { prisma } from '../../../../config/prisma.js';
 import { makeBannerService } from './bannerService.factory.js';
+import { isId } from '../../../../utils/helpers.js';
 
 const banners = makeBannerService(prisma.foodHeroBanner, 'food/hero-banners', (meta) => ({
     linkedRestaurantIds: meta.linkedRestaurantIds || [],
+    // Blank is every zone.
+    zoneId: isId(meta.zoneId) ? String(meta.zoneId) : null,
 }));
 
 export const listHeroBanners = banners.list;
