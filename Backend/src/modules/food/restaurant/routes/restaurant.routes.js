@@ -158,7 +158,9 @@ router.post(
 // One minute, not five: the cards say whether each restaurant is open now.
 router.get('/restaurants', cacheResponse(60, 'restaurants'), listApprovedRestaurantsController);
 router.get('/restaurants/:id', cacheResponse(60, 'restaurant_detail'), getApprovedRestaurantController);
-router.get('/restaurants/:id/menu', cacheResponse(600, 'restaurant_menu'), getPublicRestaurantMenuController);
+// One minute: out-of-stock dishes are left out, and one with a timed
+// out-of-stock has to come back when its time is up, not ten minutes later.
+router.get('/restaurants/:id/menu', cacheResponse(60, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/public/foods', cacheResponse(300, 'public_foods'), listPublicFoodsController);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
 router.get('/offers', optionalAuth, listPublicOffersController);

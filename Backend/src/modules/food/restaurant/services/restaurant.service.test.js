@@ -68,10 +68,10 @@ test.after(async () => {
 });
 
 test('the feed lists approved restaurants and hides the rest', async () => {
-    const open = await makeRestaurant();
-    const pending = await makeRestaurant({ status: 'pending' });
+    const open = await makeRestaurant({ latitude: HERE.lat, longitude: HERE.lng });
+    const pending = await makeRestaurant({ status: 'pending', latitude: HERE.lat, longitude: HERE.lng });
 
-    const { restaurants } = await listApprovedRestaurants({ limit: 1000 });
+    const { restaurants } = await listApprovedRestaurants({ lat: HERE.lat, lng: HERE.lng, limit: 1000 });
     const ids = new Set(restaurants.map((r) => r.id));
 
     assert.ok(ids.has(open.id));
@@ -96,21 +96,26 @@ test('a radius search returns only what is inside it, with a distance', async ()
     assert.ok(row.distanceInKm < 5, `expected a short distance, got ${row.distanceInKm}`);
 });
 
-test('a restaurant with no coordinates still shows in the default feed', async () => {
+test('the feed goes by distance: no location, no list; no pin, not listed', async () => {
     const noGeo = await makeRestaurant();
 
-    // No radius and no nearest sort, so the geo path must not run — otherwise a
-    // restaurant that has not pinned itself yet silently disappears.
+    // Discovery is by distance from the customer, so there is nothing to
+    // measure from without a location -- and a restaurant that has not pinned
+    // itself cannot be measured.
+    const unlocated = await listApprovedRestaurants({ limit: 1000 });
+    assert.equal(unlocated.requiresLocation, true);
+    assert.equal(unlocated.restaurants.length, 0);
+
     const { restaurants } = await listApprovedRestaurants({ lat: HERE.lat, lng: HERE.lng, limit: 1000 });
-    assert.ok(new Set(restaurants.map((r) => r.id)).has(noGeo.id));
+    assert.ok(!new Set(restaurants.map((r) => r.id)).has(noGeo.id));
 });
 
 test('searching matches the name', async () => {
     const unique = `Zqx${stamp()}`;
-    const match = await makeRestaurant({ restaurantName: `${unique} Kitchen` });
-    await makeRestaurant();
+    const match = await makeRestaurant({ restaurantName: `${unique} Kitchen`, latitude: HERE.lat, longitude: HERE.lng });
+    await makeRestaurant({ latitude: HERE.lat, longitude: HERE.lng });
 
-    const { restaurants, total } = await listApprovedRestaurants({ search: unique });
+    const { restaurants, total } = await listApprovedRestaurants({ search: unique, lat: HERE.lat, lng: HERE.lng });
     assert.equal(total, 1);
     assert.equal(restaurants[0].id, match.id);
 });
@@ -328,4 +333,101 @@ test('a restaurant that never traded deletes, taking its dishes with it', async 
     assert.equal(await prisma.foodItem.findUnique({ where: { id: food.id } }), null);
 
     created.restaurants = created.restaurants.filter((id) => id !== r.id);
+});
+
+// ---- slugs, the public detail, and discovery by distance ---------------------
+
+test('a slug with punctuation resolves, even with no normalised name stored', async () => {
+    // Admin-created restaurants have no restaurantNameNormalized, and the old
+    // match kept the " - " -- this one opened "Restaurant not found".
+    const r = await makeRestaurant({ restaurantName: `Zinger madness - CRUNCHY BURGERS AND MORE ${stamp()}` });
+    const row = await prisma.foodRestaurant.findUnique({ where: { id: r.id }, select: { nameSlug: true } });
+    assert.match(row.nameSlug, /^zinger-madness-crunchy-burgers-and-more-\d+$/);
+
+    const found = await getApprovedRestaurantByIdOrSlug(row.nameSlug);
+    assert.equal(found?.id, r.id);
+    assert.equal(found.slug, row.nameSlug);
+});
+
+test('renaming a restaurant moves its slug with it', async () => {
+    const r = await makeRestaurant({ restaurantName: `Sdad ${stamp()}` });
+    const renamed = `Saad ${stamp()}`;
+    await prisma.foodRestaurant.update({ where: { id: r.id }, data: { restaurantName: renamed } });
+
+    const row = await prisma.foodRestaurant.findUnique({ where: { id: r.id }, select: { nameSlug: true } });
+    assert.equal(row.nameSlug, renamed.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+    assert.equal((await getApprovedRestaurantByIdOrSlug(row.nameSlug))?.id, r.id);
+});
+
+test('the public detail has no owner, bank, PAN or UPI fields, and GST is masked', async () => {
+    const r = await makeRestaurant({
+        ownerEmail: 'owner@example.com',
+        panNumber: 'ABCDE1234F',
+        fssaiNumber: '12345678901234',
+        gstRegistered: true,
+        gstNumber: '23ABCDE1234F1ZX',
+        gstLegalName: 'Test Foods Pvt Ltd',
+    });
+    const detail = await getApprovedRestaurantByIdOrSlug(r.id);
+    const body = JSON.stringify(detail);
+
+    for (const key of ['ownerName', 'ownerEmail', 'ownerPhone', 'primaryContactNumber', 'panNumber',
+        'accountNumber', 'ifscCode', 'accountHolderName', 'accountType', 'upiId', 'upiQrImage',
+        'fcmTokens', 'fcmTokenMobile', 'panImage', 'gstImage', 'fssaiImage']) {
+        assert.ok(!(key in detail), `${key} is not public`);
+    }
+    assert.ok(!body.includes('owner@example.com'));
+    assert.ok(!body.includes('ABCDE1234F1'), 'the full GSTIN never leaves');
+    assert.equal(detail.gstNumber, '23XXXXXXXXXX1ZX');
+    assert.equal(detail.gstLegalName, 'Test Foods Pvt Ltd');
+    assert.equal(detail.fssaiNumber, '12345678901234');
+
+    const unregistered = await makeRestaurant({ gstRegistered: false, gstNumber: '23ABCDE1234F1ZX' });
+    const plain = await getApprovedRestaurantByIdOrSlug(unregistered.id);
+    assert.equal(plain.gstNumber, null);
+    assert.equal(plain.gstLegalName, null);
+});
+
+test('the feed goes by distance, not zone: a restaurant 5 km away across a zone line is listed', async () => {
+    // The restaurant sits in a small zone; the customer is 5 km north, outside
+    // every zone -- the Kongaon / Bhiwandi case, which used to list nothing.
+    const AREA = testPatch(12);
+    const zone = await prisma.foodZone.create({
+        data: {
+            name: `Distance Zone ${stamp()}`,
+            isActive: true,
+            coordinates: [
+                { latitude: AREA.lat - 0.01, longitude: AREA.lng - 0.01 },
+                { latitude: AREA.lat - 0.01, longitude: AREA.lng + 0.01 },
+                { latitude: AREA.lat + 0.01, longitude: AREA.lng + 0.01 },
+                { latitude: AREA.lat + 0.01, longitude: AREA.lng - 0.01 },
+            ],
+        },
+    });
+    created.zones.push(zone.id);
+    const fees = await prisma.foodFeeSettings.create({ data: { zoneId: zone.id, isActive: true } });
+    await prisma.deliveryFeeBand.create({
+        data: { feeSettingsId: fees.id, minDistanceKm: 0, maxDistanceKm: 10, fee: 10, feePerKm: 7 },
+    });
+
+    try {
+        const r = await makeRestaurant({ zoneId: zone.id, latitude: AREA.lat, longitude: AREA.lng });
+        const customer = { lat: AREA.lat + 0.045, lng: AREA.lng };
+
+        const { restaurants } = await listApprovedRestaurants({ ...customer, zoneId: zone.id, limit: 1000 });
+        const row = restaurants.find((x) => x.id === r.id);
+        assert.ok(row, 'listed although the customer is in no zone');
+        assert.ok(row.distanceInKm > 4.5 && row.distanceInKm < 5.5, `distance ${row.distanceInKm}`);
+        assert.ok('nextOpeningAt' in row, 'the open-status fields come with it');
+
+        // Beyond the zone's widest band (10 km) it is not offered.
+        const far = await listApprovedRestaurants({ lat: AREA.lat + 0.12, lng: AREA.lng, limit: 1000 });
+        assert.ok(!far.restaurants.some((x) => x.id === r.id), '13 km is past every band');
+
+        // A radius the app passes narrows it.
+        const narrow = await listApprovedRestaurants({ ...customer, radiusKm: 3, limit: 1000 });
+        assert.ok(!narrow.restaurants.some((x) => x.id === r.id));
+    } finally {
+        await prisma.foodFeeSettings.delete({ where: { id: fees.id } });
+    }
 });

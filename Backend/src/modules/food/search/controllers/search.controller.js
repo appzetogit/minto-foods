@@ -6,7 +6,8 @@ import { sendResponse, sendError } from '../../../../utils/response.js';
  */
 export const searchController = async (req, res, next) => {
     try {
-        const { q, lat, lng, radiusKm, categoryId, minRating, maxDeliveryTime, isVeg, page, limit, zoneId, strictZone } = req.query;
+        // A zoneId the app sends is ignored: search goes by distance.
+        const { q, lat, lng, radiusKm, categoryId, minRating, maxDeliveryTime, isVeg, page, limit } = req.query;
 
         const results = await searchUnified({
             q,
@@ -19,8 +20,6 @@ export const searchController = async (req, res, next) => {
             isVeg,
             page: parseInt(page, 10) || 1,
             limit: parseInt(limit, 10) || 20,
-            zoneId,
-            strictZone
         });
 
         return sendResponse(res, 200, 'Search results fetched successfully', results.data);
@@ -34,8 +33,8 @@ export const searchController = async (req, res, next) => {
  */
 export const listAdminCategoriesController = async (req, res, next) => {
     try {
-        const { zoneId } = req.query;
-        const categories = await getAdminCategories({ zoneId });
+        const { lat, lng, radiusKm } = req.query;
+        const categories = await getAdminCategories({ lat, lng, radiusKm });
         
         return sendResponse(res, 200, 'Admin categories fetched successfully', { categories });
     } catch (error) {

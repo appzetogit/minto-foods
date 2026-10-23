@@ -199,7 +199,7 @@ test('cancelling refunds the right amount and blocks a second cancel', async () 
     assert.equal(Number(row.refundAmount), 0);
 
     // Cancelling twice must not run the refund path again.
-    await assert.rejects(() => cancelOrder(id, userId, 'again'), /cannot be cancelled/i);
+    await assert.rejects(() => cancelOrder(id, userId, 'again'), /within 1 minute of placing them/);
 });
 
 test('another customer cannot see or cancel this order', async () => {

@@ -162,3 +162,26 @@ test('a trip past the last band keeps accruing the rate, not the start price', (
 test('bands with no rate price exactly as before', () => {
     assert.equal(resolveUserDeliveryFee(settings, { distanceKm: 9 }).deliveryFee, 70);
 });
+
+test('the fee follows the band exactly, and says which band priced it', () => {
+    const bands = { deliveryFeeRanges: [{ min: 0, max: 50, fee: 10, feePerKm: 7 }] };
+
+    // 0 km is the band's 0 km price: its base fee, nothing per km.
+    const zero = resolveUserDeliveryFee(bands, { distanceKm: 0 });
+    assert.equal(zero.deliveryFee, 10);
+    assert.equal(zero.source, 'distance');
+    assert.deepEqual(zero.band, { bandMin: 0, bandMax: 50, baseFee: 10, perKm: 7, surgeFee: 0 });
+
+    // fee + feePerKm x km past the band start.
+    assert.equal(resolveUserDeliveryFee(bands, { distanceKm: 3 }).deliveryFee, 31);
+
+    // Past the last band: priced on the widest band, which is reported.
+    const over = resolveUserDeliveryFee(bands, { distanceKm: 60 });
+    assert.equal(over.source, 'distance_over_range');
+    assert.equal(over.band.bandMax, 50);
+
+    // A surge shows in the breakdown as well as in the fee.
+    const surged = resolveUserDeliveryFee({ ...bands, surgeFee: 15 }, { distanceKm: 0 });
+    assert.equal(surged.deliveryFee, 25);
+    assert.equal(surged.band.surgeFee, 15);
+});

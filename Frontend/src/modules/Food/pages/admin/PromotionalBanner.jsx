@@ -131,6 +131,9 @@ export default function PromotionalBanner() {
       if (formData.file) data.append("file", formData.file)
       data.append("title", formData.title)
       data.append("ctaLink", formData.ctaLink)
+      // The server stores the restaurant by id and builds the link from it,
+      // so renaming the restaurant cannot break the banner.
+      data.append("restaurantId", formData.restaurantId || "")
       if (formData.zoneId) data.append("zoneId", formData.zoneId)
       if (formData.startDate) data.append("startDate", formData.startDate)
       if (formData.endDate) data.append("endDate", formData.endDate)
@@ -140,6 +143,7 @@ export default function PromotionalBanner() {
         res = await api.patch(`/food/hero-banners/home-promotion/${editingBanner._id}`, {
           title: formData.title,
           ctaLink: formData.ctaLink,
+          restaurantId: formData.restaurantId || "",
           zoneId: formData.zoneId || null,
           startDate: formData.startDate || null,
           endDate: formData.endDate || null
@@ -155,7 +159,7 @@ export default function PromotionalBanner() {
         setEditingBanner(null)
       }
     } catch (error) {
-      alert("Failed to save banner")
+      alert(error?.response?.data?.message || "Failed to save banner")
       debugError(error)
     } finally {
       setSubmitting(false)
@@ -201,18 +205,10 @@ export default function PromotionalBanner() {
   const openEdit = (banner) => {
     setEditingBanner(banner)
     
-    // Try to find if ctaLink matches a restaurant route
-    let matchedRestaurantId = "";
-    if (banner.ctaLink?.startsWith("/restaurant/")) {
-      const slug = banner.ctaLink.replace("/restaurant/", "");
-      const found = restaurants.find(r => r.slug === slug);
-      if (found) matchedRestaurantId = found._id;
-    }
-
     setFormData({
       title: banner.title || "",
       ctaLink: banner.ctaLink || "",
-      restaurantId: matchedRestaurantId,
+      restaurantId: banner.restaurantId || "",
       zoneId: banner.zoneId?._id || banner.zoneId || "",
       startDate: banner.startDate ? new Date(banner.startDate).toISOString().split('T')[0] : "",
       endDate: banner.endDate ? new Date(banner.endDate).toISOString().split('T')[0] : "",
@@ -226,19 +222,11 @@ export default function PromotionalBanner() {
     const restaurant = restaurants.find(r => r._id === id);
     
     if (restaurant) {
-      // PRO LOGIC: Use existing slug, or generate one from name if missing
-      const slug = restaurant.slug || 
-                   restaurant.restaurantName
-                     .toLowerCase()
-                     .trim()
-                     .replace(/[^\w\s-]/g, '')
-                     .replace(/[\s_-]+/g, '-')
-                     .replace(/^-+|-+$/g, '');
-
+      // By id: a link built from the name broke when the restaurant was renamed.
       setFormData(prev => ({
-        ...prev, 
+        ...prev,
         restaurantId: id,
-        ctaLink: `/food/user/restaurants/${slug}`
+        ctaLink: `/food/user/restaurants/${id}`
       }))
     } else {
       setFormData(prev => ({...prev, restaurantId: ""}))
@@ -325,8 +313,13 @@ export default function PromotionalBanner() {
                   <div className="space-y-1.5 mt-3">
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <LinkIcon className="w-3.5 h-3.5" />
-                      <span className="truncate">{banner.ctaLink || "No link attached"}</span>
+                      <span className="truncate">{banner.restaurantName || banner.ctaLink || "No link attached"}</span>
                     </div>
+                    {banner.restaurantLinkBroken && (
+                      <div className="text-xs font-semibold text-red-600">
+                        Restaurant link is broken: that restaurant no longer exists or was renamed. Edit the banner and pick the restaurant again.
+                      </div>
+                    )}
                     {(banner.startDate || banner.endDate) && (
                       <div className="flex items-center gap-2 text-xs text-slate-500">
                         <Calendar className="w-3.5 h-3.5" />

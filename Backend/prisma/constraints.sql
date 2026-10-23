@@ -270,6 +270,26 @@ CREATE TRIGGER order_rider_location_sync
   BEFORE INSERT OR UPDATE OF "riderLat", "riderLng" ON "food_orders"
   FOR EACH ROW EXECUTE FUNCTION sync_geography('lastRiderLocation', 'riderLat', 'riderLng');
 
+-- ─── restaurant name slug is derived, never written by hand ──────────────────
+-- Lowercase, every run of non-alphanumerics one hyphen, ends trimmed: the same
+-- rule as slugifyRestaurantName() in restaurantSlug.js. Banner links and the
+-- public restaurant lookup match on it.
+CREATE OR REPLACE FUNCTION restaurant_name_slug(name text) RETURNS text AS $$
+  SELECT NULLIF(btrim(regexp_replace(lower(coalesce(name, '')), '[^a-z0-9]+', '-', 'g'), '-'), '')
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION sync_restaurant_name_slug() RETURNS trigger AS $$
+BEGIN
+  NEW."nameSlug" := restaurant_name_slug(NEW."restaurantName");
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS restaurant_name_slug_sync ON "food_restaurants";
+CREATE TRIGGER restaurant_name_slug_sync
+  BEFORE INSERT OR UPDATE OF "restaurantName", "nameSlug" ON "food_restaurants"
+  FOR EACH ROW EXECUTE FUNCTION sync_restaurant_name_slug();
+
 -- ─── FCM device token lists ──────────────────────────────────────────────────
 -- Mongo's $addToSet with a trailing cap, as one expression.
 --

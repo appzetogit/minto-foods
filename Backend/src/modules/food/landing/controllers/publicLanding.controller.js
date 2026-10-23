@@ -9,6 +9,7 @@ import {
     isValidLongitude,
 } from '../../shared/geo.utils.js';
 import { getPublicHomePromotionBanners } from '../services/homePromotionBanner.service.js';
+import { withoutOfflineRestaurants } from '../services/bannerRestaurant.service.js';
 
 const ACTIVE_BY_ORDER = {
     where: { isActive: true },
@@ -18,9 +19,10 @@ const ACTIVE_BY_ORDER = {
 /** The card fields every restaurant rail on the landing page renders. */
 const RESTAURANT_CARD = {
     id: true, restaurantName: true, area: true, city: true,
-    // The slug is the normalised name — there is no separate column, and
-    // getApprovedRestaurantByIdOrSlug resolves a slug against this one.
+    // Kept for older app builds that link with it; nameSlug is what
+    // getApprovedRestaurantByIdOrSlug matches a slug against.
     restaurantNameNormalized: true,
+    nameSlug: true,
     rating: true, cuisines: true, profileImage: true, pureVegRestaurant: true,
 };
 
@@ -56,7 +58,8 @@ const hydrateRestaurants = async (ids, select, extraWhere = {}) => {
 
 export const getPublicHeroBannersController = async (req, res, next) => {
     try {
-        const docs = await prisma.foodHeroBanner.findMany(ACTIVE_BY_ORDER);
+        // A banner whose link opens a switched-off restaurant is dropped.
+        const docs = await withoutOfflineRestaurants(await prisma.foodHeroBanner.findMany(ACTIVE_BY_ORDER));
 
         // One query for every banner's links, rather than one per banner.
         const linked = await hydrateRestaurants(

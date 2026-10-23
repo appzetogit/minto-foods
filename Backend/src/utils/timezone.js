@@ -41,6 +41,30 @@ export const getRestaurantLocalTimeParts = (
   };
 };
 
+/**
+ * A moment as an ISO timestamp in the restaurant's timezone, e.g.
+ * "2026-10-23T18:00:00+05:30" -- what an app shows as a local time without
+ * converting.
+ */
+export const toRestaurantIsoString = (date, timeZone = RESTAURANT_TIMEZONE) => {
+  const at = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(at.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(at);
+  const get = (type) => Number(getPartValue(parts, type));
+  const hour = get('hour') === 24 ? 0 : get('hour');
+  const wall = Date.UTC(get('year'), get('month') - 1, get('day'), hour, get('minute'), get('second'));
+  const offsetMinutes = Math.round((wall - (at.getTime() - at.getMilliseconds())) / 60000);
+  const pad = (n) => String(Math.abs(n)).padStart(2, '0');
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  return `${get('year')}-${pad(get('month'))}-${pad(get('day'))}T${pad(hour)}:${pad(get('minute'))}:${pad(get('second'))}`
+    + `${sign}${pad(Math.trunc(offsetMinutes / 60))}:${pad(offsetMinutes % 60)}`;
+};
+
 export const getPreviousDayName = (dayName) => {
   const index = DAY_NAMES.indexOf(dayName);
   if (index < 0) return DAY_NAMES[6];

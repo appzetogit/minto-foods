@@ -732,7 +732,60 @@ export const sendTestNotification = async ({ ownerType, ownerId, platform }) => 
         }
     });
 };
+/** The order pushes a customer sees, by data.type, that are kept in their inbox. */
+const ORDER_INBOX_TYPES = new Set(['order_update', 'order_status_update', 'order_cancelled']);
+
+/**
+ * Rows for the customer's inbox: one per USER target of a visible order push.
+ *
+ * Order pushes were push-only, so the app's Notifications screen -- which reads
+ * the inbox -- stayed empty however many orders a customer placed. Silent
+ * data-only pushes are skipped (the visible copy is the one kept), as is
+ * anything that is not an order push: admin broadcasts write their own rows.
+ * Exported for the tests.
+ */
+export const orderInboxRows = (targets = [], payload = {}) => {
+    if (payload?.dataOnly || payload?.saveToInbox === false) return [];
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
+    const orderId = String(data.orderMongoId || data.orderId || '').trim();
+    const title = String(payload?.title || '').trim();
+    const message = String(payload?.body || '').trim();
+    if (!ORDER_INBOX_TYPES.has(String(data.type || '')) || !orderId || !title || !message) return [];
+
+    const users = new Set(
+        (Array.isArray(targets) ? targets : [targets])
+            .filter((t) => String(t?.ownerType || '').toUpperCase() === 'USER' && t?.ownerId)
+            .map((t) => String(t.ownerId)),
+    );
+    return [...users].map((ownerId) => ({
+        ownerType: 'USER',
+        ownerId,
+        title,
+        message,
+        link: `/food/user/orders/${orderId}`,
+        category: 'order',
+        source: 'ORDER_EVENT',
+        metadata: data,
+    }));
+};
+
+/** Saves the inbox copy in the background: it never delays or fails the push. */
+const saveOrderPushToInbox = (targets, payload) => {
+    let rows;
+    try {
+        rows = orderInboxRows(targets, payload);
+    } catch (error) {
+        logger.warn(`Order inbox rows failed: ${error.message}`);
+        return;
+    }
+    if (!rows.length) return;
+    void prisma.foodNotification.createMany({ data: rows }).catch((error) => {
+        logger.warn(`Order inbox save failed: ${error.message}`);
+    });
+};
+
 export const notifyOwnerSafely = async (target = {}, payload = {}) => {
+    saveOrderPushToInbox([target], payload);
     try {
         return await sendNotificationToOwner({ ...target, payload });
     } catch (error) {
@@ -742,6 +795,7 @@ export const notifyOwnerSafely = async (target = {}, payload = {}) => {
 };
 
 export const notifyOwnersSafely = async (targets = [], payload = {}) => {
+    saveOrderPushToInbox(targets, payload);
     try {
         return await sendNotificationToOwners(targets, payload);
     } catch (error) {

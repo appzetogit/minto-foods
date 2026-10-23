@@ -136,9 +136,11 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
     const restaurant = await findApprovedRestaurant(restaurantIdOrSlug);
     if (!restaurant?.id) return null;
 
+    // Timed out-of-stock dishes come back first; whatever is still out of stock
+    // is not sent to customers at all. The owner's menu above keeps listing it.
     await restoreExpiredFoodAvailability({ restaurantId: restaurant.id });
     const foods = await prisma.foodItem.findMany({
-        where: { restaurantId: restaurant.id, approvalStatus: 'approved' },
+        where: { restaurantId: restaurant.id, approvalStatus: 'approved', isAvailable: true },
         include: { variants: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] } },
         orderBy: { createdAt: 'desc' },
         take: 2000,

@@ -368,8 +368,15 @@ export default function OfferBanners() {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${state.tone}`}>{state.label}</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-1 truncate">
-                        {banner.ctaLink ? `Opens ${banner.ctaLink}` : "Not tappable"}
+                        {banner.restaurantName
+                          ? `Opens ${banner.restaurantName}`
+                          : banner.ctaLink ? `Opens ${banner.ctaLink}` : "Not tappable"}
                       </p>
+                      {banner.restaurantLinkBroken && (
+                        <p className="text-xs font-semibold text-red-600 mt-0.5">
+                          Restaurant link is broken: that restaurant no longer exists or was renamed.
+                        </p>
+                      )}
                       <p className="text-xs text-slate-400 mt-0.5">
                         {banner.zoneName ? `${banner.zoneName} only` : "Every zone"}
                         {" · "}

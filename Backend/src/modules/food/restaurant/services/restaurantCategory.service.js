@@ -9,6 +9,7 @@ import {
     serializeCategoryForResponse,
     zoneVisibilityFilter,
 } from '../../shared/categoryWorkflow.js';
+import { restaurantsInReach } from '../../shared/deliveryRadius.js';
 
 /** Columns the category screens read. */
 const CATEGORY_SELECT = {
@@ -114,17 +115,28 @@ export async function listPublicCategories(query = {}) {
     const skip = (page - 1) * limit;
 
     const search = typeof query.search === 'string' ? query.search.trim() : '';
-    const zoneIdRaw = typeof query.zoneId === 'string' ? query.zoneId.trim() : '';
+
+    // Not by zone: with a location, the categories that have a dish from a
+    // restaurant the customer can order from (by distance); without one, every
+    // category with a dish anywhere.
+    const reach = await restaurantsInReach({ lat: query.lat, lng: query.lng, radiusKm: query.radiusKm });
+    const nearby = reach.requiresLocation ? null : [...reach.distanceById.keys()];
 
     const AND = [
         GLOBAL_CATEGORY_FILTER,
         APPROVED_CATEGORY_FILTER,
-        zoneVisibilityFilter(zoneIdRaw),
         // Only categories that actually have an approved dish — an empty
         // category is a dead tab in the app. This was a distinct() over
         // food_items followed by an $in; a relation filter does it in one query
         // instead of shipping every category id back to Node first.
-        { foodItems: { some: { approvalStatus: 'approved' } } },
+        {
+            foodItems: {
+                some: {
+                    approvalStatus: 'approved',
+                    ...(nearby ? { isAvailable: true, restaurantId: { in: nearby } } : {}),
+                },
+            },
+        },
     ];
     if (search) {
         AND.push({ name: { contains: search.slice(0, 80), mode: 'insensitive' } });

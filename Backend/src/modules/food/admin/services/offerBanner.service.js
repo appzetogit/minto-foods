@@ -3,6 +3,11 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
+import {
+    resolveBannerLink,
+    withoutOfflineRestaurants,
+    withRestaurantLinkStatus,
+} from '../../landing/services/bannerRestaurant.service.js';
 
 /**
  * Offer banners: the artwork the apps show for current offers.
@@ -21,6 +26,7 @@ const serialize = (b) => ({
     imageUrl: b.imageUrl,
     title: b.title || '',
     ctaLink: b.ctaLink || '',
+    restaurantId: b.restaurantId || null,
     startDate: b.startDate,
     endDate: b.endDate,
     zoneId: b.zoneId || null,
@@ -77,7 +83,8 @@ export const listBannersAdmin = async () => {
         orderBy: ORDER,
         include: { zone: { select: { name: true } } },
     });
-    return { banners: banners.map(serialize) };
+    // Flags banners whose restaurant link points at no restaurant.
+    return { banners: await withRestaurantLinkStatus(banners.map(serialize)) };
 };
 
 /**
@@ -105,15 +112,16 @@ export const listLiveBanners = async (zoneId = null) => {
     });
     // Deliberately fewer fields than the admin list: the scheduling dates are
     // already applied, so sending them would invite an app to apply them again
-    // against its own clock.
+    // against its own clock. A banner for a switched-off restaurant is dropped.
     return {
-        banners: banners.map((b) => ({
+        banners: await withoutOfflineRestaurants(banners.map((b) => ({
             id: b.id,
             imageUrl: b.imageUrl,
             title: b.title || '',
             ctaLink: b.ctaLink || '',
+            restaurantId: b.restaurantId || null,
             sortOrder: b.sortOrder,
-        })),
+        }))),
     };
 };
 
@@ -125,6 +133,10 @@ export const createBanner = async (file, body = {}) => {
     if (startDate && endDate && endDate < startDate) {
         throw new ValidationError('The end date cannot be before the start date');
     }
+    const link = await resolveBannerLink({
+        ctaLink: String(body.ctaLink || '').trim(),
+        restaurantId: body.restaurantId,
+    });
 
     const imageUrl = await uploadImageBuffer(file.buffer, FOLDER);
     if (!imageUrl) throw new ValidationError('Image upload failed');
@@ -139,7 +151,8 @@ export const createBanner = async (file, body = {}) => {
         data: {
             imageUrl,
             title: String(body.title || '').trim(),
-            ctaLink: String(body.ctaLink || '').trim(),
+            ctaLink: link.ctaLink,
+            restaurantId: link.restaurantId ?? null,
             startDate,
             endDate,
             zoneId: toZoneId(body.zoneId),
@@ -163,7 +176,10 @@ export const updateBanner = async (id, body = {}, file = null) => {
         if (imageUrl) data.imageUrl = imageUrl;
     }
     if (body.title !== undefined) data.title = String(body.title || '').trim();
-    if (body.ctaLink !== undefined) data.ctaLink = String(body.ctaLink || '').trim();
+    Object.assign(data, await resolveBannerLink({
+        ctaLink: body.ctaLink === undefined ? undefined : String(body.ctaLink || '').trim(),
+        restaurantId: body.restaurantId,
+    }));
     if (body.startDate !== undefined) data.startDate = toDate(body.startDate);
     if (body.endDate !== undefined) data.endDate = toDate(body.endDate, 'end');
     if (body.zoneId !== undefined) data.zoneId = toZoneId(body.zoneId);

@@ -1,4 +1,3 @@
-import { resolveServiceZone } from '../../shared/zone.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import {
@@ -7,7 +6,7 @@ import {
     serializeFoodVariants,
 } from '../../admin/services/foodVariant.service.js';
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
-import { loadRadiusSettings, withinDeliveryRadius } from '../../shared/deliveryRadius.js';
+import { restaurantsInReach } from '../../shared/deliveryRadius.js';
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
 
 const buildCategoryKeywords = (categorySlug) => {
@@ -23,26 +22,22 @@ const isSwitch99Price = (price) => String(price ?? '').includes('99');
 
 export async function listPublicFoods(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 500, 1), 1000);
-    const zoneIdRaw = String(query.zoneId || '').trim();
     const categorySlug = String(query.categorySlug || query.category || '').trim().toLowerCase();
     const promo = String(query.promo || query.promoSlug || '').trim().toLowerCase();
     const isSwitch99Promo = promo === 'switch99' || promo === 'under-250' || promo === 'under250';
 
-    // Dishes come from one zone only, like the restaurant feed.
-    const service = await resolveServiceZone({ zoneId: zoneIdRaw, lat: query.lat, lng: query.lng });
-    if (!service.zoneId) {
-        return {
-            foods: [],
-            total: 0,
-            outOfService: Boolean(service.outOfService),
-            requiresLocation: Boolean(service.requiresLocation),
-        };
+    // Dishes from the restaurants the customer can order from, by distance --
+    // not one zone, which hid kitchens a few km away across a zone line.
+    const reach = await restaurantsInReach({ lat: query.lat, lng: query.lng, radiusKm: query.radiusKm });
+    if (reach.requiresLocation) {
+        return { foods: [], total: 0, outOfService: false, requiresLocation: true };
     }
+    if (!reach.distanceById.size) return { foods: [], total: 0 };
 
-    let restaurants = await prisma.foodRestaurant.findMany({
+    const restaurants = await prisma.foodRestaurant.findMany({
         where: {
             status: 'approved',
-            zoneId: service.zoneId,
+            id: { in: [...reach.distanceById.keys()] },
         },
         select: {
             id: true, restaurantName: true, zoneId: true, profileImage: true,
@@ -51,21 +46,8 @@ export async function listPublicFoods(query = {}) {
             latitude: true, longitude: true,
             coverImages: true, menuImages: true,
             isAcceptingOrders: true, openDays: true, openingTime: true, closingTime: true,
-            deliveryRadiusKm: true,
         },
     });
-
-    // A dish is only worth showing if its restaurant delivers to the customer.
-    // Applied when the app sends a location and a radius is set anywhere.
-    const lat = Number(query.lat);
-    const lng = Number(query.lng);
-    if (query.lat != null && query.lng != null && Number.isFinite(lat) && Number.isFinite(lng) && restaurants.length) {
-        const radius = await loadRadiusSettings();
-        if (radius.inForce) {
-            restaurants = restaurants.filter((r) =>
-                withinDeliveryRadius(r, lat, lng, radius.platformRadiusKm));
-        }
-    }
 
     if (!restaurants.length) return { foods: [], total: 0 };
 

@@ -56,6 +56,10 @@ import {
 } from './order.helpers.js';
 
 const ORDER_ACCEPTANCE_WINDOW_SECONDS = 240;
+/** How long after placing an order the customer may still cancel it. */
+export const CUSTOMER_CANCEL_WINDOW_MS = 60 * 1000;
+export const CUSTOMER_CANCEL_GRACE_MS = 5 * 1000;
+export const CUSTOMER_CANCEL_WINDOW_MESSAGE = "Orders can only be cancelled within 1 minute of placing them";
 const PENDING_PAYMENT_TTL_MS = 30 * 60 * 1000;
 
 /** Projections that replace the old `.populate(path, fields)` calls. */
@@ -1547,9 +1551,14 @@ export async function cancelOrder(orderId, userId, reason) {
   if (!row) throw new NotFoundError("Order not found");
   const order = toOrder(row);
 
+  // A customer may cancel only while the order is still new, and only for the
+  // first minute: after that the kitchen may already be cooking it. The few
+  // seconds of grace cover a tap made in time that reaches us late.
   const allowed = ["created"];
-  if (!allowed.includes(order.orderStatus)) {
-    throw new ValidationError("Order cannot be cancelled");
+  const placedAt = new Date(row.createdAt).getTime();
+  const cancelDeadline = new Date(placedAt + CUSTOMER_CANCEL_WINDOW_MS + CUSTOMER_CANCEL_GRACE_MS);
+  if (!allowed.includes(order.orderStatus) || !(Date.now() <= cancelDeadline.getTime())) {
+    throw new ValidationError(CUSTOMER_CANCEL_WINDOW_MESSAGE);
   }
 
   const from = order.orderStatus;
@@ -1563,7 +1572,7 @@ export async function cancelOrder(orderId, userId, reason) {
     where: { id: order.id, orderStatus: { in: allowed } },
     data: { orderStatus: "cancelled_by_user" },
   });
-  if (!cancelled) throw new ValidationError("Order cannot be cancelled");
+  if (!cancelled) throw new ValidationError(CUSTOMER_CANCEL_WINDOW_MESSAGE);
 
   let refund;
   try {
@@ -1643,9 +1652,30 @@ export async function cancelOrder(orderId, userId, reason) {
       };
       io.to(rooms.user(userId)).emit("order_status_update", payload);
       io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+      // A rider already on the order must stop heading for it.
+      if (row.dispatchDeliveryPartnerId) {
+        io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_status_update", {
+          ...payload,
+          message: `Order #${updated.order_id || updated.id} was cancelled by the customer.`,
+        });
+      }
     }
   } catch (err) {
     logger.warn(`cancelOrder socket emit failed: ${err?.message || err}`);
+  }
+
+  if (row.dispatchDeliveryPartnerId) {
+    void notifyOwnersSafely([{ ownerType: "DELIVERY_PARTNER", ownerId: row.dispatchDeliveryPartnerId }], {
+      title: "Order cancelled",
+      body: `Order #${updated.order_id || updated.id} was cancelled by the customer. You don't need to pick it up.`,
+      image: BRAND_IMAGE_URL,
+      data: {
+        type: "order_cancelled",
+        orderId: updated.id,
+        orderMongoId: updated.id,
+        orderStatus: "cancelled_by_user",
+      },
+    });
   }
 
   return normalizeOrderForClient(updated);
@@ -1948,6 +1978,28 @@ export async function listOrdersRestaurant(restaurantId, query) {
   };
 }
 
+const STATUS_WORDS = {
+  created: "new",
+  confirmed: "accepted",
+  preparing: "being prepared",
+  ready_for_pickup: "ready for pickup",
+  reached_pickup: "waiting for pickup",
+  picked_up: "picked up by the rider",
+  reached_drop: "with the rider at the customer",
+  delivered: "delivered",
+  cancelled_by_user: "cancelled by the customer",
+  cancelled_by_restaurant: "cancelled",
+  cancelled_by_admin: "cancelled by support",
+};
+
+/** Why a restaurant cannot move an order to a status, in words the app can show. */
+export function restaurantStatusRefusal(from, to) {
+  const now = STATUS_WORDS[from] || String(from || "").replace(/_/g, " ");
+  const wanted = STATUS_WORDS[to] || String(to || "").replace(/_/g, " ");
+  if (String(from).startsWith("cancelled")) return `This order was ${now}, so it can't be marked ${wanted}.`;
+  return `This order is already ${now}, so it can't be marked ${wanted}.`;
+}
+
 export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "") {
   await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
 
@@ -1978,10 +2030,15 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
   }
 
   const from = order.orderStatus;
+  // The same status again is a repeated tap or a retried request whose first
+  // try already worked -- most "Mark ready" failures in the logs were exactly
+  // this. Answer with the order as it is instead of an error, and do nothing
+  // else: no second push, no second dispatch.
+  if (String(from) === String(orderStatus)) {
+    return toRestaurantView(normalizeOrderForClient(order));
+  }
   if (!isStatusAdvance(from, orderStatus)) {
-    throw new ValidationError(
-      `Current order status '${from}' is further ahead than '${orderStatus}'. Order cannot be moved backwards.`,
-    );
+    throw new ValidationError(restaurantStatusRefusal(from, orderStatus));
   }
 
   const normalizedPaymentMethod = String(order.paymentMethod || "cash").toLowerCase();
@@ -2201,7 +2258,8 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     }
   }
 
-  return normalizeOrderForClient(updated);
+  // What the restaurant may see: its own prices, and no customer phone.
+  return toRestaurantView(normalizeOrderForClient(updated));
 }
 
 export async function resendDeliveryNotificationRestaurant(orderId, restaurantId) {

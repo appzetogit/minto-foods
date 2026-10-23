@@ -1,6 +1,7 @@
 import {
   getPreviousDayName,
   getRestaurantLocalTimeParts,
+  toRestaurantIsoString,
 } from '../../../../utils/timezone.js';
 import { readSlots } from './daySlots.helper.js';
 
@@ -288,6 +289,74 @@ export function assertRestaurantAcceptingOrders(restaurant, at = new Date()) {
   }
 
   throw new Error('RESTAURANT_CLOSED');
+}
+
+/**
+ * When a closed restaurant next opens by its hours, as a Date, or null when no
+ * opening is found in the coming week.
+ *
+ * Walks today's remaining windows, then each following day's, in order. A day
+ * with no hours of its own is open from midnight, as the open-now check reads
+ * it. Ignores the manual switch: callers decide whether a switched-off
+ * restaurant gets a time at all.
+ */
+export function getNextOpeningAt(restaurant, now = new Date()) {
+  if (!restaurant) return null;
+  const { dayName, nowMinutes } = getRestaurantLocalTimeParts(now);
+  const todayIndex = Math.max(0, DAY_NAMES.indexOf(dayName));
+  const minuteStart = now.getTime() - (now.getTime() % 60000);
+  const at = (minutesFromTodayMidnight) =>
+    new Date(minuteStart + (minutesFromTodayMidnight - nowMinutes) * 60000);
+
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const day = readDay(restaurant, DAY_NAMES[(todayIndex + offset) % 7]);
+    if (day.closedDay) continue;
+    if (!day.hasWindow) {
+      // Today with no hours would already be open, so only a later day counts.
+      if (offset > 0) return at(offset * 1440);
+      continue;
+    }
+    const opens = day.windows
+      .map((w) => w.open)
+      .filter((open) => offset > 0 || open > nowMinutes)
+      .sort((a, b) => a - b);
+    if (opens.length) return at(offset * 1440 + opens[0]);
+  }
+  return null;
+}
+
+/**
+ * A restaurant with the open-now fields every customer list returns:
+ * isOpenNow / isOpen / openStatusReason, the effective isAcceptingOrders, the
+ * window's hours, and nextOpeningAt when it is closed by its hours.
+ *
+ * Open means the restaurant's switch AND its hours (overnight hours included).
+ * The apps read `isAcceptingOrders` as "can I order from here now". It used to
+ * be only the switch in the restaurant panel, so a restaurant open 4pm-2am
+ * showed as open at 11am and the order was then refused. It is now the real
+ * answer; the switch itself is still there as `manualAcceptingOrders`.
+ * `openingTime`/`closingTime` become today's current (or next) window.
+ *
+ * nextOpeningAt is null while open, and when switched off by hand -- the
+ * hours cannot say when someone will switch it back on.
+ */
+export function withOpenStatus(restaurant, now = new Date()) {
+  if (!restaurant) return restaurant;
+  const status = getRestaurantOperationalStatus({ ...restaurant, outsideHoursOverride: false }, now);
+  const next = status.isEffectivelyOnline || status.reason === 'not-accepting-orders'
+    ? null
+    : getNextOpeningAt(restaurant, now);
+  return {
+    ...restaurant,
+    manualAcceptingOrders: restaurant.isAcceptingOrders !== false,
+    isAcceptingOrders: status.isEffectivelyOnline,
+    isOpen: status.isEffectivelyOnline,
+    isOpenNow: status.isEffectivelyOnline,
+    openStatusReason: status.reason,
+    openingTime: status.openingTime || restaurant.openingTime || null,
+    closingTime: status.closingTime || restaurant.closingTime || null,
+    nextOpeningAt: next ? toRestaurantIsoString(next) : null,
+  };
 }
 
 export function shouldAutoTurnOffAcceptingOrders(restaurant, now = new Date()) {

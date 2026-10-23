@@ -1,5 +1,6 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
+import { slugifyRestaurantName } from '../../shared/restaurantSlug.js';
 
 /**
  * Resolve an approved restaurant from either its id or its name-slug.
@@ -21,9 +22,14 @@ export async function findApprovedRestaurant(restaurantIdOrSlug, select = { id: 
         });
     }
 
-    const normalized = value.toLowerCase().replace(/-/g, ' ').replace(/\s+/g, ' ');
+    // nameSlug is derived from the name by the database, so every restaurant
+    // has one -- restaurantNameNormalized is empty on admin-created ones and
+    // keeps punctuation, which is why slugs used to miss.
+    const slug = slugifyRestaurantName(value);
+    if (!slug) return null;
     return prisma.foodRestaurant.findFirst({
-        where: { restaurantNameNormalized: normalized, status: 'approved' },
+        where: { nameSlug: slug, status: 'approved' },
+        orderBy: { createdAt: 'asc' },
         select,
     });
 }

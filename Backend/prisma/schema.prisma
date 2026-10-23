@@ -497,6 +497,8 @@ enum NotificationSource {
   ADMIN_BROADCAST
   FSSAI_EXPIRY
   SUPPORT_RESPONSE
+  /// A customer's order push, kept in their inbox.
+  ORDER_EVENT
 }
 
 enum BroadcastTargetType {
@@ -741,6 +743,10 @@ model FoodRestaurant {
 
   /// Derived at write time — the pre('validate') hook moves into the service layer.
   restaurantNameNormalized String?
+  /// The name as a URL slug ("Zinger madness - CRUNCHY" -> "zinger-madness-crunchy"),
+  /// kept in step with restaurantName by the restaurant_name_slug_sync trigger.
+  /// Never written by the application.
+  nameSlug                 String?
   ownerPhoneDigits         String? @db.VarChar(15)
   ownerPhoneLast10         String? @db.VarChar(10)
   primaryContactNumber     String? @db.VarChar(20)
@@ -930,6 +936,7 @@ model FoodRestaurant {
   @@index([ownerPhone])
   @@index([restaurantName])
   @@index([restaurantNameNormalized])
+  @@index([nameSlug])
   @@index([city])
   @@index([status, createdAt(sort: Desc)])
   @@index([isAcceptingOrders])
@@ -3564,6 +3571,9 @@ model HomePromotionBanner {
   publicId String
   title    String?
   ctaLink  String?
+  /// The restaurant the banner opens, by id, so renaming it cannot break the
+  /// link. ctaLink is rebuilt from it.
+  restaurantId String? @db.VarChar(24)
 
   startDate DateTime?
   endDate   DateTime?
@@ -3632,6 +3642,9 @@ model FoodOfferBanner {
   title    String @default("")
   /// Optional deep link opened on tap. Blank = not tappable.
   ctaLink  String @default("")
+  /// Set when ctaLink opens a restaurant: the link is rebuilt from the id, so
+  /// renaming the restaurant cannot break it.
+  restaurantId String? @db.VarChar(24)
 
   /// An offer runs for a while. Null on either side means open-ended, so a
   /// banner with neither is simply always on while isActive is true.

@@ -105,20 +105,31 @@ export function toRestaurantPrices(order) {
 }
 
 /**
- * An order for someone else, as the restaurant sees it: the receiver's name
- * on the ticket, the isForSomeoneElse tag, and neither phone number -- the
- * restaurant never needs to call either person.
+ * An order as the restaurant sees it: the customer's name and never a phone
+ * number. The restaurant has no reason to call the customer -- the rider
+ * does that -- so no restaurant payload carries the account's phone, the
+ * address phone or a receiver's phone. For an order for someone else the
+ * ticket shows the receiver's name, with the isForSomeoneElse tag.
  */
 export function toRestaurantContact(order) {
-  if (!order?.isForSomeoneElse) return order;
-  const name = order.recipientName || order.recipient?.name || "";
-  const out = { ...order, customerName: name, customerPhone: "", recipient: { name, phone: "" } };
+  if (!order || typeof order !== "object") return order;
+  const name = order.isForSomeoneElse
+    ? order.recipientName || order.recipient?.name || ""
+    : order.customerName || order.deliveryAddress?.fullName || order.userId?.name || order.user?.name || "";
+  const out = { ...order, customerName: name, customerPhone: "" };
+  if (order.recipient && typeof order.recipient === "object") {
+    out.recipient = { name: order.isForSomeoneElse ? name : order.recipient.name || "", phone: "" };
+  }
   // The mapped order also carries the raw columns; none of the numbers stay.
   delete out.recipientPhone;
   delete out.addrPhone;
-  if (out.user && typeof out.user === "object") out.user = { ...out.user, name, phone: "" };
-  if (out.deliveryAddress) out.deliveryAddress = { ...out.deliveryAddress, phone: "" };
-  if (out.userId && typeof out.userId === "object") out.userId = { ...out.userId, name, phone: "" };
+  delete out.customerCallUri;
+  delete out.userPhone;
+  // The account's email is no more the restaurant's business than its phone.
+  const person = (p) => ({ ...p, ...(order.isForSomeoneElse ? { name } : {}), phone: "", email: "" });
+  if (out.user && typeof out.user === "object") out.user = person(out.user);
+  if (out.deliveryAddress && typeof out.deliveryAddress === "object") out.deliveryAddress = { ...out.deliveryAddress, phone: "" };
+  if (out.userId && typeof out.userId === "object") out.userId = person(out.userId);
   return out;
 }
 

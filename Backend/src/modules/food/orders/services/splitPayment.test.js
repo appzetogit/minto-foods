@@ -392,7 +392,7 @@ test('cancelling a split order sends each part back where it came from', async (
     assert.equal(row.refundLegs.length, 2);
     assert.ok(cancelled, 'the customer gets the order back');
 
-    await assert.rejects(() => cancelOrder(order.id, userId, 'again'), /cannot be cancelled/i);
+    await assert.rejects(() => cancelOrder(order.id, userId, 'again'), /within 1 minute of placing them/);
     assert.equal(refundsFor(payment.id).length, 1, 'no second refund');
     assert.equal(await walletOf(userId), 100);
 });

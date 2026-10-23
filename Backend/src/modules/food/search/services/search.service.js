@@ -1,14 +1,14 @@
-import { resolveServiceZone } from '../../shared/zone.service.js';
 import { prisma } from '../../../../config/prisma.js';
-import { loadRadiusSettings, withinDeliveryRadius } from '../../shared/deliveryRadius.js';
+import { restaurantsInReach } from '../../shared/deliveryRadius.js';
 import { isId } from '../../../../utils/helpers.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
+import { withOpenStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
+import { restoreExpiredFoodAvailability } from '../../restaurant/services/foodAvailability.service.js';
 
 /** Columns the search cards need, plus the address columns toRestaurant() rebuilds `location` from. */
 const RESTAURANT_SEARCH_SELECT = {
-    // Read to apply the delivery radius, and removed before the response.
-    deliveryRadiusKm: true,
     id: true, restaurantName: true, restaurantNameNormalized: true,
     cuisines: true, profileImage: true, coverImages: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
@@ -18,6 +18,8 @@ const RESTAURANT_SEARCH_SELECT = {
     zoneId: true, area: true, city: true,
     latitude: true, longitude: true, formattedAddress: true,
     addressLine1: true, addressLine2: true, state: true, pincode: true, landmark: true,
+    // The open-now fields, worked out the same way as the restaurant list.
+    openingTime: true, closingTime: true, openDays: true, nameSlug: true,
 };
 
 const FOOD_MATCH_SELECT = { id: true, restaurantId: true, name: true, image: true };
@@ -28,35 +30,14 @@ const toFiniteNumber = (value) => {
     return Number.isFinite(numeric) ? numeric : null;
 };
 
-/** Great-circle distance in km, used only to rank an already-fetched page. */
-const addDistanceScore = (restaurant, userLat, userLng) => {
-    const restaurantLat = Number(restaurant?.latitude);
-    const restaurantLng = Number(restaurant?.longitude);
-    if (!Number.isFinite(restaurantLat) || !Number.isFinite(restaurantLng)) {
-        return { ...restaurant, distanceScore: 999 };
-    }
-
-    const dLat = ((restaurantLat - userLat) * Math.PI) / 180;
-    const dLon = ((restaurantLng - userLng) * Math.PI) / 180;
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((userLat * Math.PI) / 180) *
-            Math.cos((restaurantLat * Math.PI) / 180) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return { ...restaurant, distanceScore: 6371 * c };
-};
-
 /**
  * Unified search: matches restaurants by name or cuisine, and also matches
  * dishes, surfacing the restaurant that serves them.
  */
 export const searchUnified = async (query = {}, options = {}) => {
     const {
-        q, lat, lng, categoryId, minRating, maxDeliveryTime,
-        isVeg, page = 1, limit = 20, zoneId, strictZone,
+        q, lat, lng, radiusKm, categoryId, minRating, maxDeliveryTime,
+        isVeg, page = 1, limit = 20,
     } = query;
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
@@ -65,32 +46,23 @@ export const searchUnified = async (query = {}, options = {}) => {
     const term = String(q || '').trim();
     const userLat = toFiniteNumber(lat);
     const userLng = toFiniteNumber(lng);
-    const hasGeoSorting = userLat !== null && userLng !== null;
     const fetchLimit = Math.min(limitNumber * 3, 120);
 
-    // Search is limited to one zone like every customer list: the zone asked
-    // for, or the one at the customer's location. Outside every zone, or with
-    // no location, there is nothing to search.
-    const service = await resolveServiceZone({ zoneId, lat, lng });
-    if (!service.zoneId) {
-        return {
-            success: true,
-            data: {
-                restaurants: [],
-                total: 0,
-                page: Math.max(parseInt(page, 10) || 1, 1),
-                limit: Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50),
-                outOfService: Boolean(service.outOfService),
-                requiresLocation: Boolean(service.requiresLocation),
-            },
-        };
-    }
-    const zoneFiltered = true;
+    // Search covers what the customer can order from, by distance -- never one
+    // zone, which hid restaurants a few km away across a zone line. With no
+    // location there is nothing to measure from.
+    const reach = await restaurantsInReach({ lat: userLat, lng: userLng, radiusKm });
+    const empty = (extra = {}) => ({
+        success: true,
+        data: { restaurants: [], total: 0, page: pageNumber, limit: limitNumber, ...extra },
+    });
+    if (reach.requiresLocation) return empty({ outOfService: false, requiresLocation: true });
+    const reachIds = [...reach.distanceById.keys()];
+    if (!reachIds.length) return empty();
     const categoryFiltered = isId(categoryId);
 
     // 1. Base filter
-    const where = { status: 'approved' };
-    where.zoneId = service.zoneId;
+    const where = { status: 'approved', id: { in: reachIds } };
     if (isVeg === 'true') where.pureVegRestaurant = true;
     // Filters from the URL are only applied when they are real numbers. A value
     // like `minRating=abc` used to reach the query as NaN, which the database
@@ -102,21 +74,25 @@ export const searchUnified = async (query = {}, options = {}) => {
         where.estimatedDeliveryTimeMinutes = { lte: Math.min(minutes, 1440) };
     }
 
+    // Dishes whose timed out-of-stock has run out come back before matching,
+    // and anything still out of stock never matches: a customer must not be
+    // sent to a restaurant for a dish they cannot order.
+    if (term || categoryFiltered) await restoreExpiredFoodAvailability();
+
     // 2. Category filter — restaurants have no category, their dishes do.
     if (categoryFiltered) {
         const catFoodItems = await prisma.foodItem.findMany({
-            where: { categoryId: String(categoryId), approvalStatus: 'approved' },
+            where: {
+                categoryId: String(categoryId),
+                approvalStatus: 'approved',
+                isAvailable: true,
+                restaurantId: { in: reachIds },
+            },
             select: { restaurantId: true },
             distinct: ['restaurantId'],
-            take: fetchLimit * 4,
         });
 
-        if (!catFoodItems.length) {
-            return {
-                success: true,
-                data: { restaurants: [], total: 0, page: pageNumber, limit: limitNumber },
-            };
-        }
+        if (!catFoodItems.length) return empty();
         where.id = { in: catFoodItems.map((food) => food.restaurantId) };
     }
 
@@ -150,6 +126,8 @@ export const searchUnified = async (query = {}, options = {}) => {
         const matchedFoods = await prisma.foodItem.findMany({
             where: {
                 approvalStatus: 'approved',
+                isAvailable: true,
+                restaurantId: { in: reachIds },
                 name: { contains: term, mode: 'insensitive' },
                 ...(isVeg === 'true' ? { foodType: 'Veg' } : {}),
             },
@@ -203,46 +181,35 @@ export const searchUnified = async (query = {}, options = {}) => {
         for (const restaurant of allMatching) found.set(restaurant.id, restaurant);
     }
 
-    let results = [...found.values()];
+    // Nearest first, by the distance the reach check measured.
+    const results = [...found.values()]
+        .map((restaurant) => ({
+            ...restaurant,
+            distanceScore: reach.distanceById.get(restaurant.id) ?? 999,
+            distanceInKm: reach.distanceById.get(restaurant.id) ?? null,
+        }))
+        .sort((a, b) => a.distanceScore - b.distanceScore);
 
-    // Search surfaces restaurants the feed would hide just as easily, so a
-    // located search respects the same delivery radius.
-    if (hasGeoSorting && results.length) {
-        const radius = await loadRadiusSettings();
-        if (radius.inForce) {
-            results = results.filter((r) =>
-                withinDeliveryRadius(r, userLat, userLng, radius.platformRadiusKm));
-        }
-    }
-
-    if (hasGeoSorting && results.length) {
-        results = results
-            .map((restaurant) => addDistanceScore(restaurant, userLat, userLng))
-            .sort((a, b) => (a.distanceScore || 999) - (b.distanceScore || 999));
-    }
+    // toRestaurant rebuilds the nested `location` the cards read; withOpenStatus
+    // adds isOpenNow, openStatusReason and nextOpeningAt, as the list has them.
+    const pageRows = await attachOutletTimingsToRestaurants(
+        results
+            .slice(skip, skip + limitNumber)
+            .map(({ nameSlug, ...restaurant }) => ({
+                ...toRestaurant(restaurant),
+                slug: nameSlug || null,
+            })),
+    );
 
     const finalResult = {
         success: true,
         data: {
-            // toRestaurant rebuilds the nested `location` the cards read.
-            restaurants: results
-                .slice(skip, skip + limitNumber)
-                .map(({ deliveryRadiusKm, ...restaurant }) => toRestaurant(restaurant)),
+            restaurants: pageRows.map((restaurant) => withOpenStatus(restaurant)),
             total: results.length,
             page: pageNumber,
             limit: limitNumber,
-            zoneFiltered,
         },
     };
-
-    // Nothing in this zone: widen once rather than showing an empty screen.
-    const shouldSkipZoneFallback =
-        strictZone === true || strictZone === 'true' || categoryFiltered;
-
-    // The old fallback re-ran an empty search with no zone, which searched every
-    // city on the platform and offered restaurants that cannot deliver here. An
-    // empty result now stays empty.
-    void shouldSkipZoneFallback;
 
     return finalResult;
 };
@@ -257,12 +224,23 @@ export const getAdminCategories = async (query = {}) => {
         restaurantId: null,
     };
 
-    // A zone filter must NARROW the global set. The Mongo version assigned to
-    // filter.$or, which overwrote the "global only" clause it already held, so
-    // asking for one zone's categories also let in every restaurant's private
-    // ones.
-    if (isId(query.zoneId)) {
-        where.OR = [{ zoneId: String(query.zoneId) }, { zoneId: null }];
+    // Not by zone. With a location: every-zone categories, plus a zone's own
+    // ones when a restaurant the customer can order from (by distance) has a
+    // dish in them. The zone the app sends is ignored.
+    const reach = await restaurantsInReach({ lat: query.lat, lng: query.lng, radiusKm: query.radiusKm });
+    if (!reach.requiresLocation) {
+        where.OR = [
+            { zoneId: null },
+            {
+                foodItems: {
+                    some: {
+                        approvalStatus: 'approved',
+                        isAvailable: true,
+                        restaurantId: { in: [...reach.distanceById.keys()] },
+                    },
+                },
+            },
+        ];
     }
 
     return prisma.foodCategory.findMany({

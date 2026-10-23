@@ -1,5 +1,4 @@
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
-import { resolveServiceZone } from '../../shared/zone.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -10,13 +9,11 @@ import { findZoneForPoint } from '../../shared/zone.service.js';
 import { parseDayBound } from '../../../../utils/timezone.js';
 import { extractBankChange, requestBankChange, getPendingBankChange } from './bankChange.service.js';
 import { splitHeld, requestProfileChange, getOpenProfileChange, pendingChangesOf } from './profileChange.service.js';
-import {
-    restaurantIdsMatchingCuisine,
-    restaurantsNearPoint,
-} from '../../shared/restaurantQuery.util.js';
+import { restaurantIdsMatchingCuisine } from '../../shared/restaurantQuery.util.js';
 import { fromRestaurantLocation, toRestaurant } from '../restaurant.mapper.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
-import { getRestaurantOperationalStatus } from '../helpers/restaurantAvailability.helper.js';
+import { getRestaurantOperationalStatus, withOpenStatus } from '../helpers/restaurantAvailability.helper.js';
+import { slugifyRestaurantName } from '../../shared/restaurantSlug.js';
 import {
     calculateDistanceKm,
     normalizeRestaurantLocation,
@@ -32,8 +29,7 @@ import {
 } from '../../orders/helpers/razorpay.helper.js';
 // One rule decides who a restaurant is visible to and who it will accept an
 // order from, so the feed reads it from the same place order pricing does.
-import { checkDeliveryRadius } from '../../orders/services/order-pricing.service.js';
-import { loadRadiusSettings } from '../../shared/deliveryRadius.js';
+import { restaurantsInReach } from '../../shared/deliveryRadius.js';
 import {
     checkSchedule,
     describeConditions,
@@ -1708,7 +1704,7 @@ export const uploadRestaurantMenuImages = async (restaurantId, files = []) => {
 
 /** Restaurant columns the public listing card renders. */
 const PUBLIC_CARD_SELECT = {
-    id: true, restaurantName: true, area: true, city: true, cuisines: true,
+    id: true, restaurantName: true, nameSlug: true, area: true, city: true, cuisines: true,
     profileImage: true, coverImages: true, menuImages: true,
     estimatedDeliveryTime: true, estimatedDeliveryTimeMinutes: true,
     offer: true, featuredDish: true, featuredPrice: true,
@@ -1745,31 +1741,6 @@ const attachRecommendedItems = async (restaurants) => {
     return restaurants.map((r) => ({ ...r, recommendedItems: byRestaurant.get(r.id) || [] }));
 };
 
-/**
- * Open right now, by the restaurant's switch AND its hours (overnight hours
- * included), for what customers see.
- *
- * The apps read `isAcceptingOrders` as "can I order from here now". It used to
- * be only the switch in the restaurant panel, so a restaurant open 4pm-2am
- * showed as open at 11am and the order was then refused. It is now the real
- * answer; the switch itself is still there as `manualAcceptingOrders`.
- * `openingTime`/`closingTime` become today's current (or next) window.
- */
-const withOpenStatus = (r) => {
-    if (!r) return r;
-    const status = getRestaurantOperationalStatus({ ...r, outsideHoursOverride: false });
-    return {
-        ...r,
-        manualAcceptingOrders: r.isAcceptingOrders !== false,
-        isAcceptingOrders: status.isEffectivelyOnline,
-        isOpen: status.isEffectivelyOnline,
-        isOpenNow: status.isEffectivelyOnline,
-        openStatusReason: status.reason,
-        openingTime: status.openingTime || r.openingTime || null,
-        closingTime: status.closingTime || r.closingTime || null,
-    };
-};
-
 /** The card shape the user app reads. */
 const toPublicCard = (r) => ({
     ...toRestaurant(r),
@@ -1792,6 +1763,8 @@ const toPublicCard = (r) => ({
     // Label and colour travel with the key, so a tag added in the admin panel
     // shows in the app without an app update.
     highlightBadgeInfo: badgeInfo(r.highlightBadge),
+    // What /restaurants/:idOrSlug accepts besides the id.
+    slug: r.nameSlug || slugifyRestaurantName(r.restaurantName),
 });
 
 export const listApprovedRestaurants = async (query = {}) => {
@@ -1880,22 +1853,6 @@ export const listApprovedRestaurants = async (query = {}) => {
         }
     }
 
-    // Always limited to one zone: the one asked for, or the one the customer
-    // is standing in. Without a zone this used to list every restaurant on the
-    // platform, so a customer outside every service area saw all of India.
-    const service = await resolveServiceZone(query);
-    if (!service.zoneId) {
-        return {
-            restaurants: [],
-            total: 0,
-            page,
-            limit,
-            outOfService: Boolean(service.outOfService),
-            requiresLocation: Boolean(service.requiresLocation),
-        };
-    }
-    AND.push({ zoneId: service.zoneId });
-
     const where = { status: 'approved', ...(AND.length ? { AND } : {}) };
 
     const lat = toFiniteNumber(query.lat);
@@ -1903,17 +1860,17 @@ export const listApprovedRestaurants = async (query = {}) => {
     // radiusKm is preferred; maxDistance is the legacy frontend param.
     const radiusKm = toFiniteNumber(query.radiusKm) ?? toFiniteNumber(query.maxDistance);
     const sortBy = parseSortBy(query.sortBy);
-
-    // Geo is used only when actually asked for, so a restaurant with no
-    // coordinates yet is not silently dropped from the default listing.
-    const hasPoint = lat !== null && lng !== null;
     // Asked for by the caller: rank by distance.
     const askedForGeo = radiusKm !== null || sortBy === 'nearest';
-    // A located request always respects the delivery radius once one is set,
-    // whatever it sorts by. It used to apply only to "nearest" and explicit
-    // radius requests, so the lists the app actually shows ignored it.
-    const radius = hasPoint ? await loadRadiusSettings() : null;
-    const wantsGeo = askedForGeo || Boolean(radius?.inForce);
+
+    // By distance from the customer, never by zone: a zone (sent by the app or
+    // found from the point) used to hide restaurants a few km away across a
+    // zone line. Without a location there is nothing to measure from, and
+    // listing every restaurant on the platform is not an answer.
+    const reach = await restaurantsInReach({ lat, lng, radiusKm });
+    if (reach.requiresLocation) {
+        return { restaurants: [], total: 0, page, limit, outOfService: false, requiresLocation: true };
+    }
 
     const finish = async (rows, total) => {
         const withRecommended = await attachRecommendedItems(rows);
@@ -1927,117 +1884,43 @@ export const listApprovedRestaurants = async (query = {}) => {
         };
     };
 
-    if (hasPoint && wantsGeo) {
-        // The radius in the query string is a request, not a permission: the app
-        // has always been free to ask for 100 km. A customer may narrow the
-        // search, never widen it past what the admin configured.
-        const { platformRadiusKm, outerBoundKm } = radius;
-        // When the caller did not ask for a distance ranking, this query exists
-        // only to apply the radius. With no platform radius, a restaurant without
-        // its own override has no limit at all, so the neighbourhood must not be
-        // capped -- restaurantsNearPoint's default 100 km would silently drop
-        // every restaurant in another city.
-        const UNBOUNDED_KM = 20_000;
-        const boundKm = !askedForGeo
-            ? (outerBoundKm ?? UNBOUNDED_KM)
-            : outerBoundKm === null ? radiusKm : Math.min(radiusKm ?? outerBoundKm, outerBoundKm);
+    const { distanceById } = reach;
+    if (!distanceById.size) return { restaurants: [], total: 0, page, limit };
 
-        // $geoNear became an indexed ST_DWithin. Postgres cannot order by a
-        // distance this query did not compute, so the neighbourhood is resolved
-        // first and the remaining filters applied to it.
-        const near = await restaurantsNearPoint(lat, lng, boundKm);
+    // ponytail: the reachable set is fetched whole and paginated in memory,
+    // because ordering by distance and by rating together cannot be pushed
+    // down. Bounded by the delivery bands and a 2,000-row cap; if one area
+    // ever holds more than that, this wants a materialised distance column.
+    const inRange = await prisma.foodRestaurant.findMany({
+        where: { ...where, id: { in: [...distanceById.keys()] } },
+        select: PUBLIC_CARD_SELECT,
+    });
+    if (!inRange.length) return { restaurants: [], total: 0, page, limit };
 
-        // A restaurant with no coordinates cannot be found by distance, but an
-        // unknown distance passes the radius rule, so it must not vanish just
-        // because the list is now located. Only when the caller did not ask
-        // for a distance ranking, which such a row could never satisfy.
-        const unplaced = askedForGeo
-            ? []
-            : await prisma.foodRestaurant.findMany({
-                where: { ...where, OR: [{ latitude: null }, { longitude: null }] },
-                select: { ...PUBLIC_CARD_SELECT, deliveryRadiusKm: true },
-            });
-        if (!near.length && !unplaced.length) return { restaurants: [], total: 0, page, limit };
+    const byDistance = (a, b) =>
+        (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
 
-        const distanceById = new Map(near.map((row) => [row.id, row.distanceInKm]));
+    const sorters = {
+        rating: (a, b) => b.rating - a.rating || byDistance(a, b),
+        'rating-high': (a, b) => b.rating - a.rating || byDistance(a, b),
+        'rating-low': (a, b) => a.rating - b.rating || byDistance(a, b),
+        'price-low': (a, b) =>
+            Number(a.featuredPrice) - Number(b.featuredPrice) || byDistance(a, b),
+        'price-high': (a, b) =>
+            Number(b.featuredPrice) - Number(a.featuredPrice) || byDistance(a, b),
+        newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+        deliveryTime: (a, b) =>
+            (a.estimatedDeliveryTimeMinutes ?? Infinity) -
+                (b.estimatedDeliveryTimeMinutes ?? Infinity) || byDistance(a, b),
+    };
 
-        // ponytail: the radius set is fetched whole and paginated in memory,
-        // because ordering by distance and by rating together cannot be pushed
-        // down. Bounded by the radius and a 2,000-row cap; if one radius ever
-        // holds more than that, this wants a materialised distance column.
-        const placed = near.length
-            ? await prisma.foodRestaurant.findMany({
-                where: { ...where, id: { in: [...distanceById.keys()] } },
-                select: { ...PUBLIC_CARD_SELECT, deliveryRadiusKm: true },
-            })
-            : [];
-        const rows = [...placed, ...unplaced];
+    const sorted = inRange
+        .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
+        // Without an explicit sort, newest first as the list has always been,
+        // unless the caller asked for distance.
+        .sort(sorters[sortBy] || (askedForGeo ? byDistance : sorters.newest));
 
-        // The bound above is only as tight as the widest override on the
-        // platform, so every row is still measured against its own limit.
-        // deliveryRadiusKm is destructured away rather than carried into the
-        // card: toPublicCard spreads the row, and a Decimal would reach the app.
-        const inRange = [];
-        for (const { deliveryRadiusKm, ...row } of rows) {
-            const { withinRadius } = checkDeliveryRadius({
-                distanceKm: distanceById.get(row.id),
-                restaurantRadiusKm: deliveryRadiusKm,
-                platformRadiusKm,
-            });
-            if (withinRadius) inRange.push(row);
-        }
-        if (!inRange.length) return { restaurants: [], total: 0, page, limit };
-
-        const byDistance = (a, b) =>
-            (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
-
-        const sorters = {
-            rating: (a, b) => b.rating - a.rating || byDistance(a, b),
-            'rating-high': (a, b) => b.rating - a.rating || byDistance(a, b),
-            'rating-low': (a, b) => a.rating - b.rating || byDistance(a, b),
-            'price-low': (a, b) =>
-                Number(a.featuredPrice) - Number(b.featuredPrice) || byDistance(a, b),
-            'price-high': (a, b) =>
-                Number(b.featuredPrice) - Number(a.featuredPrice) || byDistance(a, b),
-            newest: (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
-            deliveryTime: (a, b) =>
-                (a.estimatedDeliveryTimeMinutes ?? Infinity) -
-                    (b.estimatedDeliveryTimeMinutes ?? Infinity) || byDistance(a, b),
-        };
-
-        const sorted = inRange
-            .map((r) => ({ ...toPublicCard(r), distanceInKm: distanceById.get(r.id) ?? null }))
-            // Without an explicit sort, keep the order the unlocated list uses
-            // (newest first) unless the caller asked for distance -- filtering
-            // by radius must not quietly reorder a screen.
-            .sort(sorters[sortBy] || (askedForGeo ? byDistance : sorters.newest));
-
-        return finish(sorted.slice(skip, skip + limit), sorted.length);
-    }
-
-    // Non-geo path: the database sorts and paginates.
-    const orderBy =
-        {
-            rating: [{ rating: 'desc' }, { createdAt: 'desc' }],
-            'rating-high': [{ rating: 'desc' }, { createdAt: 'desc' }],
-            'rating-low': [{ rating: 'asc' }, { createdAt: 'desc' }],
-            'price-low': [{ featuredPrice: 'asc' }, { createdAt: 'desc' }],
-            'price-high': [{ featuredPrice: 'desc' }, { createdAt: 'desc' }],
-            deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
-        }[sortBy] || [{ createdAt: 'desc' }];
-
-    const [rows, total] = await Promise.all([
-        prisma.foodRestaurant.findMany({
-            where,
-            select: PUBLIC_CARD_SELECT,
-            orderBy,
-            skip,
-            take: limit,
-        }),
-        prisma.foodRestaurant.count({ where }),
-    ]);
-
-    return finish(rows.map(toPublicCard), total);
+    return finish(sorted.slice(skip, skip + limit), sorted.length);
 };
 
 /**
@@ -2080,33 +1963,58 @@ const PUBLIC_RESTAURANT_SELECT = {
 
     // Displayed on the listing, as the licence requires.
     fssaiNumber: true,
+    // Read for the masked GST line below; never returned as stored.
+    gstRegistered: true, gstNumber: true, gstLegalName: true,
 
+    nameSlug: true,
     status: true, createdAt: true,
+};
+
+/**
+ * A GSTIN as a bill may show it: the state code and the last three characters,
+ * the rest hidden ("23ABCDE1234F1ZX" -> "23XXXXXXXXXX1ZX").
+ */
+export const maskGstNumber = (value) => {
+    const gst = String(value || '').trim().toUpperCase();
+    if (gst.length <= 5) return gst ? 'X'.repeat(gst.length) : null;
+    return `${gst.slice(0, 2)}${'X'.repeat(gst.length - 5)}${gst.slice(-3)}`;
+};
+
+/** The public detail from a selected row: GST masked, and only when registered. */
+export const toPublicRestaurantDetail = (doc) => {
+    const { gstRegistered, gstNumber, gstLegalName, nameSlug, ...rest } = doc;
+    return {
+        ...toRestaurant(rest),
+        rating: normalizeRatingValue(doc.rating),
+        totalRatings: normalizeTotalRatingsValue(doc.totalRatings),
+        slug: nameSlug || slugifyRestaurantName(doc.restaurantName),
+        gstNumber: gstRegistered ? maskGstNumber(gstNumber) : null,
+        gstLegalName: gstRegistered ? String(gstLegalName || '').trim() || null : null,
+    };
 };
 
 export const getApprovedRestaurantByIdOrSlug = async (idOrSlug) => {
     const value = String(idOrSlug || '').trim();
     if (!value) return null;
 
-    // Either an id or a slug; the slug matches on the normalised name column,
-    // which is indexed, rather than lowercasing the name at query time.
+    // Either an id or a slug. The slug matches nameSlug, which the database
+    // derives from the name: restaurantNameNormalized kept punctuation and is
+    // empty on restaurants an admin created, so slugs used to miss.
+    const slug = isId(value) ? null : slugifyRestaurantName(value);
+    if (!isId(value) && !slug) return null;
     const where = isId(value)
         ? { id: value, status: 'approved' }
-        : { restaurantNameNormalized: normalizeName(value), status: 'approved' };
+        : { nameSlug: slug, status: 'approved' };
 
-    if (!isId(value) && !where.restaurantNameNormalized) return null;
-
-    const doc = await prisma.foodRestaurant.findFirst({ where, select: PUBLIC_RESTAURANT_SELECT });
+    const doc = await prisma.foodRestaurant.findFirst({
+        where,
+        select: PUBLIC_RESTAURANT_SELECT,
+        orderBy: { createdAt: 'asc' },
+    });
     if (!doc) return null;
 
     const [withTimings] = await attachOutletTimingsToRestaurants([
-        normalizePublicRestaurantGeo(
-            stripPendingLocationFromPublicRestaurant({
-                ...toRestaurant(doc),
-                rating: normalizeRatingValue(doc.rating),
-                totalRatings: normalizeTotalRatingsValue(doc.totalRatings),
-            }),
-        ),
+        normalizePublicRestaurantGeo(stripPendingLocationFromPublicRestaurant(toPublicRestaurantDetail(doc))),
     ]);
     return withOpenStatus(withTimings);
 };

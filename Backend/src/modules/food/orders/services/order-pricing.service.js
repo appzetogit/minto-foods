@@ -225,6 +225,21 @@ function bandFee(range = {}, distanceKm = null) {
   return Math.round((flat + perKm * past) * 100) / 100;
 }
 
+/**
+ * The band behind a fee, for the app's fee explainer: the fee is
+ * baseFee + perKm x (distance - bandMin), plus surgeFee while a surge runs.
+ */
+function bandDetails(band, feeSettings = {}) {
+  if (!band) return null;
+  return {
+    bandMin: Number(band.min),
+    bandMax: Number(band.max),
+    baseFee: Number(band.fee),
+    perKm: Number(band.feePerKm || 0),
+    surgeFee: Number(feeSettings.surgeFee) || 0,
+  };
+}
+
 function widestBandFee(feeSettings = {}, distanceKm = null) {
   const bands = deliveryFeeBands(feeSettings);
   if (bands.length === 0) return null;
@@ -303,7 +318,8 @@ export async function loadPlatformDeliveryRadiusKm() {
   return settings?.discoveryRadiusKm ?? null;
 }
 
-function matchFeeRange(ranges, distanceKm, pickValue) {
+/** The band a distance falls in, or null. The last band includes its upper bound. */
+function findFeeRange(ranges, distanceKm) {
   if (!Array.isArray(ranges) || ranges.length === 0 || !Number.isFinite(distanceKm)) {
     return null;
   }
@@ -320,13 +336,17 @@ function matchFeeRange(ranges, distanceKm, pickValue) {
       ? distanceKm >= min && distanceKm <= max
       : distanceKm >= min && distanceKm < max;
 
-    if (inRange) {
-      const value = pickValue(range);
-      return Number.isFinite(value) ? value : null;
-    }
+    if (inRange) return range;
   }
 
   return null;
+}
+
+function matchFeeRange(ranges, distanceKm, pickValue) {
+  const range = findFeeRange(ranges, distanceKm);
+  if (!range) return null;
+  const value = pickValue(range);
+  return Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -492,12 +512,14 @@ export function resolveUserDeliveryFee(
   }
 
   if (ranges.length > 0 && Number.isFinite(distanceKm)) {
-    const matchedFee = matchFeeRange(ranges, distanceKm, (range) => bandFee(range, distanceKm));
+    const band = findFeeRange(ranges, distanceKm);
+    const matchedFee = band ? bandFee(band, distanceKm) : null;
     if (Number.isFinite(matchedFee)) {
       return {
         deliveryFee: withSurge(matchedFee, feeSettings),
         distanceKm: Number(distanceKm.toFixed(2)),
         source: 'distance',
+        band: bandDetails(band, feeSettings),
       };
     }
   }
@@ -506,10 +528,14 @@ export function resolveUserDeliveryFee(
   if (Number.isFinite(distanceKm)) {
     const overRangeFee = widestBandFee(feeSettings, distanceKm);
     if (overRangeFee != null) {
+      const widest = [...deliveryFeeBands(feeSettings)]
+        .sort((a, b) => Number(a?.max ?? 0) - Number(b?.max ?? 0))
+        .pop();
       return {
         deliveryFee: withSurge(overRangeFee, feeSettings),
         distanceKm: Number(distanceKm.toFixed(2)),
         source: 'distance_over_range',
+        band: bandDetails(widest, feeSettings),
       };
     }
   }
@@ -825,6 +851,14 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         source: deliveryFeeResult.source,
         distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
         deliveryFee,
+        // The band that priced it: deliveryFee = baseFee + perKm x (distanceKm
+        // - bandMin) + surgeFee. Null when no band applied (free delivery, or
+        // the flat fallback).
+        bandMin: deliveryFeeResult.band?.bandMin ?? null,
+        bandMax: deliveryFeeResult.band?.bandMax ?? null,
+        baseFee: deliveryFeeResult.band?.baseFee ?? null,
+        perKm: deliveryFeeResult.band?.perKm ?? null,
+        surgeFee: deliveryFeeResult.band?.surgeFee ?? null,
         message: Number.isFinite(distanceKm)
           ? `Distance: ${Number(distanceKm).toFixed(1)} km`
           : null,
