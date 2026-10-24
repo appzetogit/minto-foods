@@ -39,9 +39,11 @@ export async function listPublicFoods(query = {}) {
     }
 
     let restaurants = await prisma.foodRestaurant.findMany({
+        // By range, not by zone (see listApprovedRestaurants): the radius
+        // below decides; only an explicitly requested zone filters here.
         where: {
             status: 'approved',
-            zoneId: service.zoneId,
+            ...(/^[a-f0-9]{24}$/i.test(zoneIdRaw) ? { zoneId: service.zoneId } : {}),
         },
         select: {
             id: true, restaurantName: true, zoneId: true, profileImage: true,
