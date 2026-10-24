@@ -1,4 +1,5 @@
 import { prisma } from '../../../../config/prisma.js';
+import { codLimitError, quantityLimitError } from "./orderLimits.js";
 import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
 import { reconcileOrderPayment } from './payment-reconcile.service.js';
@@ -414,6 +415,8 @@ export async function updateDispatchSettings(dispatchMode, adminId) {
 
 // ----- Calculate (validation + return pricing from payload) -----
 export async function calculateOrder(userId, dto) {
+  const qtyError = quantityLimitError(dto.items, await loadActiveFeeSettings(dto.zoneId || null));
+  if (qtyError) throw new ValidationError(qtyError);
   const at = dto.scheduledAt ? new Date(dto.scheduledAt) : new Date();
   return calculateOrderPricing(userId, dto, {
     at: Number.isNaN(at.getTime()) ? new Date() : at,
@@ -537,6 +540,12 @@ export async function createOrder(userId, dto) {
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";
 
+    // Admin limits from fee settings: the most of one dish, and the order
+    // total above which cash is refused. The app hides both; this enforces them.
+    const limitFees = await loadActiveFeeSettings(dto.zoneId || restaurant.zoneId || null);
+    const qtyError = quantityLimitError(dto.items, limitFees);
+    if (qtyError) throw new ValidationError(qtyError);
+
     const pricingResult = await calculateOrderPricing(
       userId,
       {
@@ -559,6 +568,9 @@ export async function createOrder(userId, dto) {
       const reason = pricingResult.pricing?.couponError?.message || "This coupon can no longer be applied";
       throw new ValidationError(`${reason}. Remove the coupon or review your cart to continue.`);
     }
+
+    const codError = codLimitError(paymentMethod, pricingResult.pricing?.total, limitFees);
+    if (codError) throw new ValidationError(codError);
 
     const resolvedItems = pricingResult.items || [];
     const normalizedPricing = {

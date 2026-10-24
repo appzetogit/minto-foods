@@ -16,14 +16,22 @@ const toDate = (value, edge) => {
 
 const byOrder = [{ sortOrder: 'asc' }, { createdAt: 'desc' }];
 
+/** "tracking" banners are paid spots on the order tracking page; the rest are Home. */
+const PLACEMENTS = new Set(['home', 'tracking']);
+const toPlacement = (value) => {
+    const v = String(value || '').trim().toLowerCase();
+    return PLACEMENTS.has(v) ? v : 'home';
+};
+
 export const listHomePromotionBanners = () =>
     prisma.homePromotionBanner.findMany({ orderBy: byOrder });
 
-export const getPublicHomePromotionBanners = async (zoneId = null) => {
+export const getPublicHomePromotionBanners = async (zoneId = null, placement = 'home') => {
     const now = new Date();
     return prisma.homePromotionBanner.findMany({
         where: {
             isActive: true,
+            placement: toPlacement(placement),
             // An open-ended window is the common case: most banners set neither
             // date and must still show. The Mongo filter also had to match
             // startDate: "" — a string sitting in a date field. The column is
@@ -53,6 +61,7 @@ export const createHomePromotionBanner = async (file, meta = {}) => {
                 title: meta.title,
                 ctaLink: meta.ctaLink,
                 zoneId: isId(meta.zoneId) ? String(meta.zoneId) : null,
+                placement: toPlacement(meta.placement),
                 startDate: toDate(meta.startDate, 'start'),
                 endDate: toDate(meta.endDate, 'end'),
                 sortOrder: Number(meta.sortOrder) || 0,
@@ -65,7 +74,7 @@ export const createHomePromotionBanner = async (file, meta = {}) => {
 };
 
 export const updateHomePromotionBanner = async (id, data = {}) => {
-    const { startDate, endDate, zoneId, ...rest } = data;
+    const { startDate, endDate, zoneId, placement, ...rest } = data;
     const updates = { ...rest };
 
     // Only touch a field the caller actually sent — a PATCH that changes the
@@ -73,6 +82,7 @@ export const updateHomePromotionBanner = async (id, data = {}) => {
     if (startDate !== undefined) updates.startDate = toDate(startDate, 'start');
     if (endDate !== undefined) updates.endDate = toDate(endDate, 'end');
     if (zoneId !== undefined) updates.zoneId = isId(zoneId) ? String(zoneId) : null;
+    if (placement !== undefined) updates.placement = toPlacement(placement);
 
     return prisma.homePromotionBanner
         .update({ where: { id }, data: updates })

@@ -245,6 +245,7 @@ const emitRealtimeNotifications = (targets = [], broadcast) => {
         title: broadcast.title,
         message: broadcast.message,
         link: broadcast.link || '',
+        imageUrl: broadcast.imageUrl || '',
         targetType: broadcast.targetType,
         createdAt: broadcast.createdAt,
     };
@@ -339,6 +340,12 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
     const title = normalizeText(body?.title, 'title');
     const message = normalizeText(body?.message, 'message');
     const link = normalizeText(body?.link, 'link', false);
+    // An uploaded picture (POST /v1/uploads/image), shown big in the push and
+    // on the inbox card.
+    const imageUrl = String(body?.imageUrl || '').trim();
+    if (imageUrl && !/^https?:\/\//i.test(imageUrl) && !imageUrl.startsWith('/uploads/')) {
+        throw new ValidationError('imageUrl must be an uploaded image URL');
+    }
 
     const targetType = String(body?.targetType || '').trim().toUpperCase();
     if (!TARGET_TYPES.has(targetType)) throw new ValidationError('targetType is invalid');
@@ -368,6 +375,7 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
             title,
             message: finalMessage,
             link,
+            imageUrl,
             targetType,
             couponId: coupon?.id || null,
             couponCode: coupon?.code || '',
@@ -396,6 +404,7 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
                 // So the app can show the code as something tappable rather
                 // than leaving the customer to retype it out of the message.
                 couponCode: coupon?.code || '',
+                ...(imageUrl ? { imageUrl } : {}),
             },
         })),
     });
@@ -410,6 +419,8 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
                 broadcastId: broadcast.id,
                 link,
                 couponCode: coupon?.code || '',
+                // firebase.service turns this into the notification's picture.
+                ...(imageUrl ? { imageUrl } : {}),
             },
         }
     );
