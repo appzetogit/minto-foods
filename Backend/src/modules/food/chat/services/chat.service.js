@@ -296,7 +296,23 @@ export async function sendMessage(sender, dto) {
         body: text
             ? text.slice(0, 120)
             : `Sent ${attachments.length} photo${attachments.length === 1 ? '' : 's'}`,
-        data: { type: 'chat_message', conversationId, orderId: orderId ? String(orderId) : '' },
+        // The message itself rides along, so the app can show it the moment
+        // the push is tapped: a backgrounded app gets its network back only a
+        // moment after it opens, and a fetch-first chat showed it late. All
+        // strings, as FCM data must be. peerRole is who to reply to.
+        data: {
+            type: 'chat_message',
+            conversationId,
+            orderId: orderId ? String(orderId) : '',
+            id: String(payload?.id || ''),
+            messageId: String(payload?.id || ''),
+            text: String(payload?.text || ''),
+            senderRole: String(payload?.senderRole || sender.role || ''),
+            senderId: String(payload?.senderId || sender.id || ''),
+            senderName: String(payload?.senderName || ''),
+            peerRole: String(sender.role || ''),
+            createdAt: new Date(payload?.createdAt || Date.now()).toISOString(),
+        },
     };
     if (peerRole === 'ADMIN') {
         notifyAdminsSafely(pushPayload).catch(() => {});

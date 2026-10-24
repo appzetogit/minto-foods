@@ -2725,3 +2725,53 @@ export async function processRefundAdmin(orderId, amount, adminId) {
 
   return { success: true, order: normalizeOrderForClient(updated) };
 }
+
+/**
+ * What customers said about this restaurant: one row per rated order, newest
+ * first. The restaurant app had no way to see them; ratings sat only on the
+ * individual orders.
+ */
+export async function listRestaurantReviews(restaurantId, query = {}) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
+  const where = { restaurantId: String(restaurantId), restaurantRating: { not: null } };
+
+  const [rows, total, agg] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where,
+      orderBy: [{ restaurantRatedAt: 'desc' }, { createdAt: 'desc' }],
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        order_id: true,
+        customerName: true,
+        restaurantRating: true,
+        restaurantRatingComment: true,
+        restaurantRatedAt: true,
+        createdAt: true,
+      },
+    }),
+    prisma.foodOrder.count({ where }),
+    prisma.foodOrder.aggregate({ where, _avg: { restaurantRating: true } }),
+  ]);
+
+  const average = agg?._avg?.restaurantRating;
+  return {
+    reviews: rows.map((r) => ({
+      orderMongoId: r.id,
+      orderId: r.order_id || r.id,
+      rating: r.restaurantRating,
+      comment: r.restaurantRatingComment || '',
+      customerName: r.customerName || 'Customer',
+      ratedAt: r.restaurantRatedAt || r.createdAt,
+    })),
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      average: average == null ? null : Math.round(Number(average) * 10) / 10,
+    },
+  };
+}
