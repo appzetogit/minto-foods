@@ -269,10 +269,16 @@ const AVG_SPEED_KMPH = 22;
  * paid call here would be billed per refresh. Accuracy is "good enough for a countdown";
  * `source` tells the client what it is looking at.
  */
+/** ponytail: flat kitchen time; swap for per-dish prep times if they get recorded. */
+const PREP_MINUTES = 15;
+
+/** Road minutes for a straight-line distance, with the same factors as the live ETA. */
+const rideMinutes = (km) => Math.max(1, Math.ceil(((km * ROAD_FACTOR) / AVG_SPEED_KMPH) * 60));
+
 export function buildLiveEta(order) {
   const status = String(order?.orderStatus || '');
   if (['delivered', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'].includes(status)) {
-    return { minutes: null, distanceKm: null, source: 'completed', target: null };
+    return { minutes: null, minutesToDoor: null, distanceKm: null, source: 'completed', target: null };
   }
 
   const rider = order?.lastRiderLocation?.coordinates?.length >= 2
@@ -281,30 +287,59 @@ export function buildLiveEta(order) {
 
   const pickedUp = Boolean(order?.deliveryState?.pickedUpAt) || ['picked_up', 'reached_drop'].includes(status);
   // Before pickup the rider is heading to the restaurant; after, to the customer.
-  const dest = pickedUp ? parseGeoPoint(order?.deliveryAddress) : parseGeoPoint(order?.restaurantId);
+  const shop = parseGeoPoint(order?.restaurantId);
+  const door = parseGeoPoint(order?.deliveryAddress);
+  const dest = pickedUp ? door : shop;
   const target = pickedUp ? 'customer' : 'restaurant';
 
+  // Restaurant → customer, for the time to the door before pickup: the trip
+  // estimate taken at order time, else the straight line between the two.
+  const tripMins = Number(order?.tripDurationMins ?? order?.pricing?.roadDurationMins);
+  const ride = Number.isFinite(tripMins) && tripMins > 0
+    ? Math.ceil(tripMins)
+    : shop && door ? rideMinutes(geoHaversineKm(shop.lat, shop.lng, door.lat, door.lng)) : null;
+
+  // Kitchen time still to go: counted from placing the order, gone once the
+  // food is ready.
+  const sincePlacedMin = order?.createdAt ? (Date.now() - new Date(order.createdAt).getTime()) / 60000 : 0;
+  const kitchen = ['ready_for_pickup', 'reached_pickup'].includes(status)
+    ? 0
+    : Math.max(0, Math.ceil(PREP_MINUTES - sincePlacedMin));
+
+  let minutes = null;
+  let distanceKm = null;
   if (rider && dest) {
     const straight = geoHaversineKm(rider.lat, rider.lng, dest.lat, dest.lng);
     if (Number.isFinite(straight)) {
-      const km = Number((straight * ROAD_FACTOR).toFixed(2));
-      const minutes = Math.max(1, Math.ceil((km / AVG_SPEED_KMPH) * 60));
-      return { minutes, distanceKm: km, source: 'live', target };
+      distanceKm = Number((straight * ROAD_FACTOR).toFixed(2));
+      minutes = Math.max(1, Math.ceil((distanceKm / AVG_SPEED_KMPH) * 60));
     }
   }
 
-  // No rider fix yet — fall back to the trip estimate captured at order time.
-  const fallback = Number(order?.tripDurationMins ?? order?.pricing?.roadDurationMins);
-  if (Number.isFinite(fallback) && fallback > 0) {
+  // What the customer wants to know: when it reaches them. Before pickup that
+  // is the later of the kitchen and the rider reaching the shop, plus the
+  // ride. It used to exist only once a rider had a GPS fix, so the app said
+  // "Calculating..." until someone was assigned.
+  const minutesToDoor = pickedUp
+    ? minutes ?? ride
+    : ride == null ? null : Math.max(kitchen, minutes ?? 0, 1) + ride;
+
+  if (minutes != null) {
+    return { minutes, minutesToDoor, distanceKm, source: 'live', target };
+  }
+
+  if (ride != null) {
     return {
-      minutes: Math.ceil(fallback),
+      minutes: pickedUp ? ride : minutesToDoor,
+      minutesToDoor,
       distanceKm: Number(order?.tripDistanceKm ?? order?.pricing?.roadDistanceKm) || null,
       source: 'estimate',
-      target
+      // An estimate is always to the door, whatever the rider is doing.
+      target: 'customer',
     };
   }
 
-  return { minutes: null, distanceKm: null, source: 'unavailable', target };
+  return { minutes: null, minutesToDoor: null, distanceKm: null, source: 'unavailable', target };
 }
 
 /** Tables carrying a running (rating, totalRatings) pair. */
