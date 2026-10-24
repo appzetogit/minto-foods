@@ -25,6 +25,7 @@ import { toast } from "sonner"
 import useRestaurantBackNavigation from "@food/hooks/useRestaurantBackNavigation"
 import { getTimelineStatusLabel, getTimelineRoleLabel } from "@food/utils/orderStatus"
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote"
+import { telHref } from "@/shared/utils/tel";
 
 const formatMoney = (value) => `₹${Number(value || 0).toFixed(2)}`
 const toNumber = (value) => {
@@ -211,7 +212,7 @@ export default function OrderDetailPage({
             </div>
             {customerPhone && customerPhone !== "No phone provided" && (
               <a 
-                href={`tel:${customerPhone}`}
+                href={telHref(customerPhone)}
                 className="w-12 h-12 bg-emerald-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200 active:scale-90 transition-transform"
               >
                 <Phone className="w-5 h-5" />

@@ -11,7 +11,7 @@ import { buildPublicUrl } from '../../../../services/storage.service.js';
 const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
 
 /** The order columns that decide who may talk to whom. */
-const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true };
+const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true, dispatchStatus: true };
 
 /** Stable identifier for a participant. ADMIN carries no id (shared inbox). */
 export const partyToken = (role, id) => (role === 'ADMIN' ? 'ADMIN' : `${role}:${String(id)}`);
@@ -94,6 +94,15 @@ function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
             );
         }
         if (role === sender.role) throw new ValidationError('Cannot message yourself');
+        // A restaurant talks to the rider or to support, never to the customer:
+        // the customer's contact stays with the platform.
+        if ([role, sender.role].sort().join('|') === 'RESTAURANT|USER') {
+            throw new ForbiddenError('Restaurants cannot chat with customers');
+        }
+        // Only once the rider has said yes; an offer can still be turned down.
+        if (role === 'DELIVERY_PARTNER' && sender.role === 'RESTAURANT' && order?.dispatchStatus !== 'accepted') {
+            throw new ValidationError('No delivery partner has accepted this order yet');
+        }
         return { role, id: parties[role] };
     }
 
@@ -287,7 +296,23 @@ export async function sendMessage(sender, dto) {
         body: text
             ? text.slice(0, 120)
             : `Sent ${attachments.length} photo${attachments.length === 1 ? '' : 's'}`,
-        data: { type: 'chat_message', conversationId, orderId: orderId ? String(orderId) : '' },
+        // The message itself rides along, so the app can show it the moment
+        // the push is tapped: a backgrounded app gets its network back only a
+        // moment after it opens, and a fetch-first chat showed it late. All
+        // strings, as FCM data must be. peerRole is who to reply to.
+        data: {
+            type: 'chat_message',
+            conversationId,
+            orderId: orderId ? String(orderId) : '',
+            id: String(payload?.id || ''),
+            messageId: String(payload?.id || ''),
+            text: String(payload?.text || ''),
+            senderRole: String(payload?.senderRole || sender.role || ''),
+            senderId: String(payload?.senderId || sender.id || ''),
+            senderName: String(payload?.senderName || ''),
+            peerRole: String(sender.role || ''),
+            createdAt: new Date(payload?.createdAt || Date.now()).toISOString(),
+        },
     };
     if (peerRole === 'ADMIN') {
         notifyAdminsSafely(pushPayload).catch(() => {});

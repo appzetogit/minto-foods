@@ -185,7 +185,10 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
     where: {
       dispatchDeliveryPartnerId: String(deliveryPartnerId),
       dispatchStatus: 'accepted',
-      orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'] },
+      // Every live stage. reached_pickup and reached_drop used to be missing,
+      // so a trip vanished from the rider's screen on arriving at either end.
+      // Whether the rider is online plays no part: an accepted trip is theirs.
+      orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup', 'picked_up', 'reached_drop'] },
     },
     include: deliveryInclude,
     orderBy: { updatedAt: 'desc' },
@@ -211,20 +214,13 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
         orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       }
     : {
-        OR: [
-          {
-            dispatchStatus: 'unassigned',
-            // The $not/$elemMatch guard becomes a relation filter: no deassign
-            // record for this rider on this order.
-            dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-            orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
-          },
-          {
-            dispatchDeliveryPartnerId: partnerId,
-            dispatchStatus: { in: ['assigned', 'accepted'] },
-            orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-          },
-        ],
+        // Only the order offered to THIS rider. Every unassigned order nearby
+        // used to be listed to every rider, so one order sat on several
+        // screens at once and the others kept it after one rider accepted.
+        // Dispatch now holds an order for one rider at a time (tryAutoAssign).
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: { in: ['assigned', 'accepted'] },
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       };
 
   // For idle partners, pull a wider candidate set then proximity-filter in memory.

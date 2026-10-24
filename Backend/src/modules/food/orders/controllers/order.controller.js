@@ -553,3 +553,12 @@ export async function getOrderInvoiceHtmlController(req, res, next) {
         next(error);
     }
 }
+
+export async function listRestaurantReviewsController(req, res, next) {
+    try {
+        const result = await orderService.listRestaurantReviews(req.user?.userId, req.query);
+        return sendResponse(res, 200, 'Reviews retrieved', result);
+    } catch (err) {
+        next(err);
+    }
+}

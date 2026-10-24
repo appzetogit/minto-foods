@@ -39,6 +39,7 @@ import { useCompanyName } from "@food/hooks/useCompanyName"
 import { useUserNotifications } from "@food/hooks/useUserNotifications"
 import circleIcon from "@food/assets/circleicon.png"
 import { RESTAURANT_PIN_SVG, CUSTOMER_PIN_SVG, RIDER_BIKE_SVG } from "@food/constants/mapIcons"
+import { telHref } from "@/shared/utils/tel";
 
 // Fallback definitions in case imports fail at runtime or are shadowed
 const DEFAULT_CUSTOMER_PIN = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="#10B981"><path d="M12 2C8.13 2 5 5.13 5 9c0 4.17 4.42 9.92 6.24 12.11.4.48 1.08.48 1.52 0C14.58 18.92 19 13.17 19 9c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5 14.5 7.62 14.5 9 13.38 11.5 12 11.5z"/><circle cx="12" cy="9" r="3" fill="#FFFFFF"/></svg>`;
@@ -758,7 +759,7 @@ export default function OrderTracking() {
     // Create a temporary hidden anchor and programmatically click it.
     try {
       const link = document.createElement('a');
-      link.href = `tel:${cleanPhone}`;
+      link.href = telHref(cleanPhone);
       link.setAttribute('target', '_self');
       document.body.appendChild(link);
       link.click();
@@ -766,7 +767,7 @@ export default function OrderTracking() {
     } catch (err) {
       debugError('Call failed via link click:', err);
       // Last-ditch fallback
-      window.location.assign(`tel:${cleanPhone}`);
+      window.location.assign(telHref(cleanPhone));
     }
   };
 
@@ -785,14 +786,14 @@ export default function OrderTracking() {
 
     try {
       const link = document.createElement('a');
-      link.href = `tel:${cleanPhone}`;
+      link.href = telHref(cleanPhone);
       link.setAttribute('target', '_self');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err) {
       debugError('Call failed via link click:', err);
-      window.location.assign(`tel:${cleanPhone}`);
+      window.location.assign(telHref(cleanPhone));
     }
   };
 

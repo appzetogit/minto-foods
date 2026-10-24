@@ -3,6 +3,7 @@ import { useState, useEffect } from "react"
 import { ArrowLeft, Lock, Loader2, Mail, Phone, MessageSquare, Clock, ShieldCheck } from "lucide-react"
 import { motion } from "framer-motion"
 import api from "@food/api"
+import { telHref } from "@/shared/utils/tel";
 
 export default function DeliveryCMSPage({ endpoint, title: defaultTitle, module = "DELIVERY" }) {
   const navigate = useNavigate()
@@ -101,7 +102,7 @@ export default function DeliveryCMSPage({ endpoint, title: defaultTitle, module 
                   </div>
                   <h3 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2">Partner Support</h3>
                   <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">{pageData.mobile || '+91 00000 00000'}</p>
-                  <a href={`tel:${pageData.mobile}`} className="mt-4 text-[10px] font-black text-[#E23744] uppercase tracking-widest hover:underline">Request Call</a>
+                  <a href={telHref(pageData.mobile)} className="mt-4 text-[10px] font-black text-[#E23744] uppercase tracking-widest hover:underline">Request Call</a>
                 </div>
               </div>
             )}

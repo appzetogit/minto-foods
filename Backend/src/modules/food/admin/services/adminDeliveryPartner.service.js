@@ -613,3 +613,62 @@ export async function deleteDeliveryPartner(id) {
 
     return prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
 }
+
+/**
+ * A delivery partner added by an admin rather than signing up in the app.
+ *
+ * Created approved (unless asked otherwise), so they can sign in to the rider
+ * app with an OTP to that number straight away. The phone is the login, so it
+ * must be free -- including on deactivated accounts, which keep theirs.
+ */
+export async function createDeliveryPartnerByAdmin(body = {}) {
+    const text = (v, max = 120) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+
+    const name = text(body.name);
+    if (!name) throw new ValidationError('Name is required');
+
+    const phone = String(body.phone || '').replace(/\D/g, '').slice(-10);
+    if (!/^[6-9]\d{9}$/.test(phone)) throw new ValidationError('Phone must be a valid 10 digit mobile number');
+
+    const clash = await prisma.foodDeliveryPartner.findFirst({
+        where: { phone },
+        select: { name: true, status: true },
+    });
+    if (clash) {
+        throw new ValidationError(
+            `That number already belongs to ${clash.name || 'another delivery partner'}` +
+                (clash.status === 'deactivated' ? ' (a deactivated account)' : ''),
+        );
+    }
+
+    const vehicleNumber = text(body.vehicleNumber, 20)?.toUpperCase() || null;
+    if (vehicleNumber) {
+        const taken = await prisma.foodDeliveryPartner.findFirst({ where: { vehicleNumber }, select: { id: true } });
+        if (taken) throw new ValidationError('That vehicle number is already registered');
+    }
+
+    const approved = body.status !== 'pending';
+    return prisma.foodDeliveryPartner.create({
+        data: {
+            name,
+            phone,
+            email: text(body.email),
+            address: text(body.address, 300),
+            city: text(body.city),
+            state: text(body.state),
+            vehicleType: text(body.vehicleType, 40),
+            vehicleName: text(body.vehicleName, 80),
+            vehicleNumber,
+            drivingLicenseNumber: text(body.drivingLicenseNumber, 40),
+            aadharNumber: text(body.aadharNumber, 20),
+            panNumber: text(body.panNumber, 20),
+            profilePhoto: text(body.profilePhoto, 500),
+            drivingLicensePhoto: text(body.drivingLicensePhoto, 500),
+            aadharPhoto: text(body.aadharPhoto, 500),
+            panPhoto: text(body.panPhoto, 500),
+            status: approved ? 'approved' : 'pending',
+            approvedAt: approved ? new Date() : null,
+        },
+        select: { id: true, name: true, phone: true, status: true, vehicleNumber: true, city: true, createdAt: true },
+    });
+}

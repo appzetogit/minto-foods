@@ -20,6 +20,7 @@ import { toast } from "sonner"
 import { getCompanyNameAsync } from "@food/utils/businessSettings"
 import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/foodVariants"
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
+import { telHref } from "@/shared/utils/tel";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -227,7 +228,7 @@ export default function UserOrderDetails() {
       toast.error("Restaurant phone number not available")
       return
     }
-    window.location.href = `tel:${restaurantPhone}`
+    window.location.href = telHref(restaurantPhone)
   }
 
   const handleDownloadSummary = async () => {

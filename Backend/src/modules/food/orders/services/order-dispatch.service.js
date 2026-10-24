@@ -12,6 +12,8 @@ import {
   haversineKm,
   notifyOwnersActionableAlert,
   notifyOwnersSafely,
+  receiverName,
+  receiverPhone,
 } from './order.helpers.js';
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { parseGeoPoint } from '../../shared/geo.utils.js';
@@ -133,8 +135,9 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
     pickupLng: s(payload?.restaurantLocation?.longitude ?? ''),
     dropLat: s(payload?.customerLocation?.latitude ?? ''),
     dropLng: s(payload?.customerLocation?.longitude ?? ''),
-    customerName: s(payload?.customerName || order?.customerName || ''),
-    customerPhone: s(payload?.customerPhone || order?.customerPhone || ''),
+    customerName: s(payload?.customerName || receiverName(order)),
+    recipientName: s(payload?.customerName || receiverName(order)),
+    customerPhone: s(payload?.customerPhone || receiverPhone(order)),
     itemsCount: s(Array.isArray(order?.items) ? order.items.length : ''),
   };
 }
@@ -364,129 +367,100 @@ export async function tryAutoAssign(orderId, options = {}) {
 
     const io = getIO();
 
-    if (eligible.length === 0) {
-      logger.info(`tryAutoAssign: No NEW eligible partners in ${maxKm}km for order ${id}. Restarting hunt...`);
-
-      const reofferEligible = partners.filter((partner) => {
+    // ONE rider at a time. The order used to go to every nearby rider at once;
+    // whoever accepted first won, and the rest kept a dead offer on screen.
+    // Now the nearest rider who has not been offered it yet gets it; once all
+    // have been tried, the one offered longest ago gets it again. A reject or
+    // the window running out moves it to the next rider.
+    const lastOfferAt = new Map();
+    for (const o of offers) {
+      const key = String(o.partnerId);
+      const at = new Date(o.at || 0).getTime();
+      if (!lastOfferAt.has(key) || at > lastOfferAt.get(key)) lastOfferAt.set(key, at);
+    }
+    const reofferEligible = partners
+      .filter((partner) => {
         const key = String(partner.partnerId);
         if (permanentlyExcludedIds.has(key)) return false;
         if (busyPartnerIds.has(key)) return false;
+        if (cashBlockedIds.has(key)) return false;
         return true;
-      });
+      })
+      .sort((a, b) => (lastOfferAt.get(String(a.partnerId)) || 0) - (lastOfferAt.get(String(b.partnerId)) || 0));
+    const chosen = eligible[0] || reofferEligible[0] || null;
 
-      if (reofferEligible.length > 0) {
-        const basePayload = buildDeliverySocketPayload(order, row.restaurant);
-        const payload = await enrichPayloadWithTripRoadDistance(order, basePayload);
-        const acceptanceDeadlineAt = new Date(Date.now() + DRIVER_ACCEPT_WINDOW_MS);
-
-        if (io) {
-          for (const p of reofferEligible) {
-            io.to(rooms.delivery(p.partnerId)).emit('new_order_available', {
-              ...payload,
-              pickupDistanceKm: p.distanceKm,
-              acceptanceDeadlineAt,
-            });
-          }
-        }
-
-        // This branch previously emitted a socket event only, so a backgrounded or
-        // locked driver was never woken on a re-offer round. Push on every round.
-        try {
-          await notifyOwnersActionableAlert(
-            reofferEligible.map((p) => ({ ownerType: 'DELIVERY_PARTNER', ownerId: p.partnerId })),
-            {
-              title: 'New order available!',
-              body: `Order #${order.order_id || id} is still available. Tap to accept.`,
-              androidTag: `order_${id}`,
-              androidChannelId: 'incoming_orders_channel_v3',
-              data: buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt),
-            },
-          );
-        } catch (err) {
-          logger.warn(`Re-offer push failed for order ${id}: ${err.message}`);
-        }
-      }
-
-      // Re-queue to keep trying, aligned to the client countdown.
+    if (!chosen) {
+      logger.info(`tryAutoAssign: No eligible partner in ${maxKm}km for order ${id}. Hunting again shortly.`);
       await addOrderJob(
         { action: 'DISPATCH_TIMEOUT_CHECK', orderMongoId: id, orderId: id, attempt: attempt + 1 },
         { delay: DRIVER_ACCEPT_WINDOW_MS },
       );
-
       return order;
     }
 
+    const partnerId = String(chosen.partnerId);
     const basePayload = buildDeliverySocketPayload(order, row.restaurant);
     const payload = await enrichPayloadWithTripRoadDistance(order, basePayload);
-
-    // tripDistanceKm = restaurant ↔ customer (road); pickupDistanceKm = rider → restaurant (ranking only)
-    logger.info(`Broadcasting order ${id} to ${eligible.length} riders. tripDistanceKm=${payload.tripDistanceKm}`);
     const acceptanceDeadlineAt = new Date(Date.now() + DRIVER_ACCEPT_WINDOW_MS);
 
-    if (io) {
-      for (const p of eligible) {
-        io.to(rooms.delivery(p.partnerId)).emit('new_order', {
-          ...payload,
-          pickupDistanceKm: p.distanceKm,
-          acceptanceDeadlineAt,
-        });
-      }
-    }
-
-    const pushTargets = eligible.map((p) => ({ ownerType: 'DELIVERY_PARTNER', ownerId: p.partnerId }));
-    if (pushTargets.length > 0) {
-      try {
-        await notifyOwnersActionableAlert(pushTargets, {
-          title: 'New order available!',
-          body: `Order #${order.order_id || id} is available. You have ${Math.round(DRIVER_ACCEPT_WINDOW_MS / 1000)} seconds to accept!`,
-          // Two messages — see notifyOwnersActionableAlert. This alert needs the
-          // app's own full-screen UI (only a data-only message triggers it) AND
-          // delivery on ROMs that refuse to start the app (only a notification
-          // block achieves that). Blending them loses the first.
-          //
-          // The tag is the contract with the app (cancel(0, tag:) in
-          // fcm_service.dart) — change one and you must change the other.
-          androidTag: `order_${id}`,
-          // The app's incoming channel is the _v3 id; the service default is the
-          // stale v1 name, and Android silently downgrades an unknown channel to
-          // low importance — no sound, no heads-up.
-          androidChannelId: 'incoming_orders_channel_v3',
-          data: buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt),
-        });
-      } catch (err) {
-        logger.warn(`Push notifications failed for broadcast on order ${id}: ${err.message}`);
-      }
-    }
-
-    // Conditional update, NOT a blind write. This row was loaded before several
-    // awaits (rider lookup, Directions fetch, FCM batch) — seconds during which a
-    // rider may have accepted. A blind write reverted that accept to unassigned,
-    // so the order was re-broadcast and a second rider could claim the same trip.
-    const { count: reoffered } = await prisma.foodOrder.updateMany({
+    // Held for this rider first, so nobody else can take it while they decide.
+    // Conditional, NOT a blind write: this row was loaded before several awaits
+    // (rider lookup, Directions fetch) during which someone may have accepted.
+    const { count: held } = await prisma.foodOrder.updateMany({
       where: { id, dispatchStatus: { not: 'accepted' }, dispatchAcceptedAt: null },
-      data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },
+      data: {
+        dispatchStatus: 'assigned',
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchAssignedAt: new Date(),
+      },
     });
-
-    if (reoffered === 0) {
-      logger.info(`tryAutoAssign: order ${id} was accepted during broadcast — leaving assignment intact.`);
+    if (held === 0) {
+      logger.info(`tryAutoAssign: order ${id} was accepted meanwhile — leaving assignment intact.`);
       return order;
     }
 
-    // The offeredTo[] array is its own table now, so the offers are appended
-    // rather than pushed onto the document.
-    await prisma.orderDispatchOffer.createMany({
-      data: eligible.map((p) => ({
-        orderId: id,
-        partnerId: String(p.partnerId),
-        at: new Date(),
-        action: 'offered',
-      })),
+    await prisma.orderDispatchOffer.create({
+      data: { orderId: id, partnerId, at: new Date(), action: 'offered' },
     });
 
-    // Re-check when the offer window closes, so the next round starts exactly as
-    // the client countdown hits zero.
+    logger.info(
+      `Offering order ${id} to rider ${partnerId} (${chosen.distanceKm} km away). tripDistanceKm=${payload.tripDistanceKm}`,
+    );
+
+    if (io) {
+      io.to(rooms.delivery(partnerId)).emit('new_order', {
+        ...payload,
+        pickupDistanceKm: chosen.distanceKm,
+        acceptanceDeadlineAt,
+      });
+    }
+
+    try {
+      await notifyOwnersActionableAlert([{ ownerType: 'DELIVERY_PARTNER', ownerId: partnerId }], {
+        title: 'New order available!',
+        body: `Order #${order.order_id || id} is available. You have ${Math.round(DRIVER_ACCEPT_WINDOW_MS / 1000)} seconds to accept!`,
+        // Two messages — see notifyOwnersActionableAlert. This alert needs the
+        // app's own full-screen UI (only a data-only message triggers it) AND
+        // delivery on ROMs that refuse to start the app (only a notification
+        // block achieves that). Blending them loses the first.
+        //
+        // The tag is the contract with the app (cancel(0, tag:) in
+        // fcm_service.dart) — change one and you must change the other.
+        androidTag: `order_${id}`,
+        // The app's incoming channel is the _v3 id; the service default is the
+        // stale v1 name, and Android silently downgrades an unknown channel to
+        // low importance — no sound, no heads-up.
+        androidChannelId: 'incoming_orders_channel_v3',
+        data: buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt),
+      });
+    } catch (err) {
+      logger.warn(`Push notification failed for the offer of order ${id}: ${err.message}`);
+    }
+
+    // When the window closes: still undecided means timed out, and the next
+    // rider gets it.
     await addOrderJob(
-      { action: 'DISPATCH_TIMEOUT_CHECK', orderMongoId: id, orderId: id, attempt: attempt + 1 },
+      { action: 'DISPATCH_TIMEOUT_CHECK', orderMongoId: id, orderId: id, partnerId, attempt: attempt + 1 },
       { delay: DRIVER_ACCEPT_WINDOW_MS },
     );
 
@@ -522,6 +496,20 @@ export async function processDispatchTimeout(orderId, partnerId) {
       where: { id },
       data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },
     });
+
+    // Their countdown is over; take the offer off their screen before the next
+    // rider gets it.
+    try {
+      getIO()?.to(rooms.delivery(String(partnerId))).emit('order_claimed', { orderId: id, orderMongoId: id });
+      await notifyOwnersSafely([{ ownerType: 'DELIVERY_PARTNER', ownerId: String(partnerId) }], {
+        title: 'Order offer expired',
+        body: 'This order has been offered to another partner.',
+        dataOnly: true,
+        data: { type: 'order_taken', orderId: id, orderMongoId: id },
+      });
+    } catch (err) {
+      logger.warn(`order_taken (timeout) failed for order ${id}: ${err.message}`);
+    }
 
     await tryAutoAssign(id, { attempt: offerCount + 1 });
   } else if (row.dispatchStatus === 'unassigned') {

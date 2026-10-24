@@ -14,6 +14,8 @@ const coordSchema = z
 
 const createAddressSchema = z.object({
     label: labelSchema.optional(),
+    // The customer's own name for an "Other" address, e.g. "Mom's place".
+    customLabel: z.string().max(40).optional().or(z.literal('')).transform((s) => String(s || '').trim()),
     street: z.string().min(1, 'Street is required').max(200).transform((s) => s.trim()),
     additionalDetails: z.string().max(500).optional().or(z.literal('')).transform((s) => String(s || '').trim()),
     city: z.string().min(1, 'City is required').max(100).transform((s) => s.trim()),

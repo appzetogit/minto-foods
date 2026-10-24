@@ -4,6 +4,7 @@ import { ArrowLeft, Lock, Loader2, Mail, Phone, MessageSquare, Clock, ShieldChec
 import { motion } from "framer-motion"
 import { Button } from "@food/components/ui/button"
 import api from "@food/api"
+import { telHref } from "@/shared/utils/tel";
 
 export default function RestaurantCMSPage({ endpoint, title: defaultTitle, module = "RESTAURANT" }) {
   const navigate = useNavigate()
@@ -115,7 +116,7 @@ export default function RestaurantCMSPage({ endpoint, title: defaultTitle, modul
                 </div>
                 <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">Merchant Helpline</h3>
                 <p className="text-gray-500 text-sm font-medium">{pageData.mobile || '+91 00000 00000'}</p>
-                <a href={`tel:${pageData.mobile}`} className="mt-4 text-[10px] font-black text-[#008078] uppercase tracking-widest hover:underline">Instant Call</a>
+                <a href={telHref(pageData.mobile)} className="mt-4 text-[10px] font-black text-[#008078] uppercase tracking-widest hover:underline">Instant Call</a>
               </div>
             </div>
           )}

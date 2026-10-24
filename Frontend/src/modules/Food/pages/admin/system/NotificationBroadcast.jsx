@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BellRing, Loader2, Search, Send, Trash2 } from "lucide-react";
-import { adminAPI } from "@food/api";
+import { adminAPI, uploadAPI } from "@food/api";
+import { toast } from "sonner";
 
 const TARGET_OPTIONS = [
   { value: "ALL", label: "All" },
@@ -45,10 +46,13 @@ const toDateLabel = (value) => {
 };
 
 export default function NotificationBroadcast() {
+  const [imageUploading, setImageUploading] = useState(false);
   const [form, setForm] = useState({
     title: "",
     message: "",
     targetType: "ALL",
+    // Optional picture for the push and the inbox card.
+    imageUrl: "",
     // Only read for the LAPSED audience.
     lapsedDays: 30,
     lapsedIncludeNeverOrdered: false,
@@ -223,6 +227,7 @@ export default function NotificationBroadcast() {
         title: form.title.trim(),
         message: form.message.trim(),
         targetType: form.targetType,
+        ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
         ...(form.couponId ? { couponId: form.couponId } : {}),
         ...(form.targetType === "LAPSED"
           ? {
@@ -244,7 +249,7 @@ export default function NotificationBroadcast() {
               }))
             : [],
       });
-      setForm({ title: "", message: "", targetType: "ALL" });
+      setForm((prev) => ({ ...prev, title: "", message: "", targetType: "ALL", imageUrl: "" }));
       setSelectedRecipients([]);
       setSearch("");
       window.dispatchEvent(new Event("adminBroadcastUpdated"));
@@ -421,6 +426,51 @@ export default function NotificationBroadcast() {
               className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-y"
             />
           </label>
+
+          <div className="block">
+            <span className="text-sm font-semibold text-slate-700">Image (optional)</span>
+            <div className="mt-2 flex items-center gap-4">
+              {form.imageUrl ? (
+                <img src={form.imageUrl} alt="" className="h-20 w-32 rounded-xl object-cover border border-slate-200" />
+              ) : null}
+              <label className="cursor-pointer rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm text-slate-600 hover:border-blue-400">
+                {imageUploading ? "Uploading…" : form.imageUrl ? "Change image" : "Upload image"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={imageUploading}
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      setImageUploading(true);
+                      const res = await uploadAPI.uploadMedia(file, { folder: "food/notifications" });
+                      const url = res?.data?.data?.url || res?.url;
+                      if (url) setForm((prev) => ({ ...prev, imageUrl: url }));
+                    } catch (error) {
+                      toast.error(error?.response?.data?.message || "Image upload failed");
+                    } finally {
+                      setImageUploading(false);
+                      event.target.value = "";
+                    }
+                  }}
+                />
+              </label>
+              {form.imageUrl ? (
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, imageUrl: "" }))}
+                  className="text-sm text-red-500"
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Shown as a large picture in the phone's notification and in the app's Notifications list.
+            </p>
+          </div>
 
           {form.targetType === "CUSTOM" && (
             <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">

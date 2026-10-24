@@ -13,6 +13,8 @@ import { calculateDistanceKm } from './geo.utils.js';
  * radius at checkout, on a restaurant they had already chosen.
  */
 
+export const DEFAULT_DISCOVERY_RADIUS_KM = 15;
+
 const positiveKm = (value) => {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -37,7 +39,11 @@ export async function loadRadiusSettings() {
             _max: { deliveryRadiusKm: true },
         }),
     ]);
-    const platformRadiusKm = positiveKm(settings?.discoveryRadiusKm);
+    // Lists go by range, not by zone, so a range must always exist: with no
+    // platform radius configured the zone used to be the only bound, and
+    // without one every city's restaurants would appear.
+    // ponytail: 15 km default; set the discovery radius in business settings.
+    const platformRadiusKm = positiveKm(settings?.discoveryRadiusKm) ?? DEFAULT_DISCOVERY_RADIUS_KM;
     const widestOverrideKm = positiveKm(widest?._max?.deliveryRadiusKm);
     return {
         platformRadiusKm,

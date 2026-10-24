@@ -1,0 +1,1 @@
+ALTER TABLE "food_offers" ADD COLUMN IF NOT EXISTS "category" VARCHAR(30);

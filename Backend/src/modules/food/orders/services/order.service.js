@@ -1,9 +1,10 @@
 import { prisma } from '../../../../config/prisma.js';
+import { codLimitError, quantityLimitError } from "./orderLimits.js";
 import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
 import { reconcileOrderPayment } from './payment-reconcile.service.js';
 import { logger } from '../../../../utils/logger.js';
-import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
+import { ValidationError, ForbiddenError, NotFoundError, ConflictError } from '../../../../core/auth/errors.js';
 import { buildPaginationOptions, buildPaginatedResult, isId } from '../../../../utils/helpers.js';
 import {
     createRazorpayOrder,
@@ -33,6 +34,7 @@ import * as paymentService from './order-payment.service.js';
 import {
   enqueueOrderEvent,
   sanitizeOrderForExternal,
+  withoutCustomerContact,
   sanitizeOrderForDeliveryPartner,
   notifyOwnersSafely,
   buildOrderIdentityFilter,
@@ -414,6 +416,8 @@ export async function updateDispatchSettings(dispatchMode, adminId) {
 
 // ----- Calculate (validation + return pricing from payload) -----
 export async function calculateOrder(userId, dto) {
+  const qtyError = quantityLimitError(dto.items, await loadActiveFeeSettings(dto.zoneId || null));
+  if (qtyError) throw new ValidationError(qtyError);
   const at = dto.scheduledAt ? new Date(dto.scheduledAt) : new Date();
   return calculateOrderPricing(userId, dto, {
     at: Number.isNaN(at.getTime()) ? new Date() : at,
@@ -537,6 +541,12 @@ export async function createOrder(userId, dto) {
     const isCash = paymentMethod === "cash";
     const isWallet = paymentMethod === "wallet";
 
+    // Admin limits from fee settings: the most of one dish, and the order
+    // total above which cash is refused. The app hides both; this enforces them.
+    const limitFees = await loadActiveFeeSettings(dto.zoneId || restaurant.zoneId || null);
+    const qtyError = quantityLimitError(dto.items, limitFees);
+    if (qtyError) throw new ValidationError(qtyError);
+
     const pricingResult = await calculateOrderPricing(
       userId,
       {
@@ -559,6 +569,9 @@ export async function createOrder(userId, dto) {
       const reason = pricingResult.pricing?.couponError?.message || "This coupon can no longer be applied";
       throw new ValidationError(`${reason}. Remove the coupon or review your cart to continue.`);
     }
+
+    const codError = codLimitError(paymentMethod, pricingResult.pricing?.total, limitFees);
+    if (codError) throw new ValidationError(codError);
 
     const resolvedItems = pricingResult.items || [];
     const normalizedPricing = {
@@ -1137,7 +1150,7 @@ export async function getOrderById(
   }
 
   if (restaurantId) {
-    const out = sanitizeOrderForExternal(order);
+    const out = withoutCustomerContact(sanitizeOrderForExternal(order));
     out.finance = await buildRestaurantFinanceView(order);
     return out;
   }
@@ -1755,7 +1768,7 @@ export async function listOrdersRestaurant(restaurantId, query) {
   const txByOrderId = new Map(transactions.map((tx) => [tx.orderId, tx]));
 
   const normalizedOrders = toOrders(rows).map((order) => {
-    const out = normalizeOrderForClient(order);
+    const out = withoutCustomerContact(normalizeOrderForClient(order));
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,
@@ -1835,8 +1848,11 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     normalizedPaymentMethod === "cash" &&
     prevPaymentStatus === "cod_pending";
 
-  let updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
+  // Conditional on the status read above: a restaurant can be logged in on
+  // several phones, and two of them tapping Accept (or Accept and Reject) at
+  // once must not both go through.
+  const { count: claimed } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
     data: {
       orderStatus,
       // The acceptance window exists only to auto-cancel orders the restaurant
@@ -1845,6 +1861,12 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       acceptanceDeadlineAt: null,
       ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
     },
+  });
+  if (claimed === 0) {
+    throw new ConflictError("This order was already updated on another device");
+  }
+  let updated = toOrder(await prisma.foodOrder.findUnique({
+    where: { id: order.id },
     include: orderInclude,
   }));
 
@@ -1904,6 +1926,22 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       title,
       message: body,
     };
+
+    // Every phone the restaurant is logged in on: the ones that did not tap
+    // must stop ringing for an order that has now been answered.
+    if (["confirmed", "cancelled_by_restaurant"].includes(String(orderStatus))) {
+      notifyOwnersSafely([{ ownerType: "RESTAURANT", ownerId: restaurantId }], {
+        title: "Order updated",
+        body: "",
+        dataOnly: true,
+        data: {
+          type: "order_status_update",
+          orderId: String(updated.id),
+          orderMongoId: String(updated.id),
+          orderStatus: String(updated.orderStatus),
+        },
+      }).catch(() => {});
+    }
 
     if (io) {
       io.to(rooms.restaurant(restaurantId)).emit("order_status_update", payload);
@@ -2686,4 +2724,54 @@ export async function processRefundAdmin(orderId, amount, adminId) {
   }
 
   return { success: true, order: normalizeOrderForClient(updated) };
+}
+
+/**
+ * What customers said about this restaurant: one row per rated order, newest
+ * first. The restaurant app had no way to see them; ratings sat only on the
+ * individual orders.
+ */
+export async function listRestaurantReviews(restaurantId, query = {}) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
+  const where = { restaurantId: String(restaurantId), restaurantRating: { not: null } };
+
+  const [rows, total, agg] = await Promise.all([
+    prisma.foodOrder.findMany({
+      where,
+      orderBy: [{ restaurantRatedAt: 'desc' }, { createdAt: 'desc' }],
+      skip: (page - 1) * limit,
+      take: limit,
+      select: {
+        id: true,
+        order_id: true,
+        customerName: true,
+        restaurantRating: true,
+        restaurantRatingComment: true,
+        restaurantRatedAt: true,
+        createdAt: true,
+      },
+    }),
+    prisma.foodOrder.count({ where }),
+    prisma.foodOrder.aggregate({ where, _avg: { restaurantRating: true } }),
+  ]);
+
+  const average = agg?._avg?.restaurantRating;
+  return {
+    reviews: rows.map((r) => ({
+      orderMongoId: r.id,
+      orderId: r.order_id || r.id,
+      rating: r.restaurantRating,
+      comment: r.restaurantRatingComment || '',
+      customerName: r.customerName || 'Customer',
+      ratedAt: r.restaurantRatedAt || r.createdAt,
+    })),
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      average: average == null ? null : Math.round(Number(average) * 10) / 10,
+    },
+  };
 }

@@ -10,6 +10,7 @@ import { uploadAPI } from '@food/api';
 import { toast } from 'sonner';
 import { openCamera } from "@food/utils/imageUploadUtils";
 import { resolveRestaurantAddress } from '@/modules/DeliveryV2/utils/orderAddress';
+import { telHref } from "@/shared/utils/tel";
 
 /**
  * PickupActionModal - Unified White/Green Theme with Slider Actions.
@@ -152,7 +153,7 @@ export const PickupActionModal = ({
               <div className="flex gap-2.5">
                 {restaurantPhone && (
                   <button
-                    onClick={() => window.location.href = `tel:${restaurantPhone}`}
+                    onClick={() => window.location.href = telHref(restaurantPhone)}
                     className="w-11 h-11 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 border border-emerald-100 hover:bg-emerald-100 transition-colors active:scale-90"
                   >
                     <Phone className="w-5 h-5" />

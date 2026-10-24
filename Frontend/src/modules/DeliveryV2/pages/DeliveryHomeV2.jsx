@@ -35,6 +35,7 @@ import { getHaversineDistance, calculateETA, calculateHeading } from '@/modules/
 import { useCompanyName } from "@food/hooks/useCompanyName";
 import { useNavigate } from 'react-router-dom';
 import useNotificationInbox from "@food/hooks/useNotificationInbox";
+import { telHref } from "@/shared/utils/tel";
 
 const getStoredDeliveryPartnerId = () => {
   if (typeof localStorage === 'undefined') return '';
@@ -1013,7 +1014,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                                 const customerPhone = activeOrder?.userPhone || activeOrder?.user?.phone || activeOrder?.deliveryAddress?.phone || activeOrder?.deliveryAddress?.contactNumber || '';
                                 return customerPhone ? (
                                   <button
-                                    onClick={() => window.location.href = `tel:${customerPhone}`}
+                                    onClick={() => window.location.href = telHref(customerPhone)}
                                     className="w-11 h-11 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 border border-emerald-100 hover:bg-emerald-100 transition-colors active:scale-90 shrink-0"
                                   >
                                     <Phone className="w-5 h-5" />
@@ -1118,7 +1119,7 @@ export default function DeliveryHomeV2({ tab = 'feed' }) {
                 const rawNum = opt.phone || "";
                 const num = String(rawNum).replace(/[^\d+]/g, '');
                 if (num.length >= 3) {
-                  window.location.href = `tel:${num}`;
+                  window.location.href = telHref(num);
                 } else {
                   toast.error(`${opt.title} number not configured`);
                 }

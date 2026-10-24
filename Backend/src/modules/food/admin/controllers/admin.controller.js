@@ -2064,3 +2064,12 @@ export async function deleteRestaurantVideoAdmin(req, res, next) {
         next(error);
     }
 }
+
+export async function createDeliveryPartner(req, res, next) {
+    try {
+        const data = await adminService.createDeliveryPartnerByAdmin(req.body || {});
+        res.status(201).json({ success: true, message: 'Delivery partner added', data });
+    } catch (error) {
+        next(error);
+    }
+}

@@ -485,6 +485,9 @@ export const adminAPI = {
     apiClient.delete(`/food/admin/sub-admins/${String(id)}`, { contextModule: "admin" }),
   getSubAdminPermissionCatalog: () =>
     apiClient.get("/food/admin/sub-admins/permission-catalog", { contextModule: "admin" }),
+  /** Add a delivery partner from the admin panel (approved unless status: "pending"). */
+  createDeliveryPartner: (payload) =>
+    apiClient.post("/food/admin/delivery/partners", payload, { contextModule: "admin" }),
   /** List approved delivery partners (Deliveryman List page) */
   getDeliveryPartners: (params) =>
     apiClient.get("/food/admin/delivery/partners", {
