@@ -177,6 +177,7 @@ export const adminSidebarMenu = [
         icon: "Package",
         subItems: [
           { label: "New Join Request", path: "/admin/food/delivery-partners/join-request" },
+          { label: "Add Deliveryman", path: "/admin/food/delivery-partners/add" },
           { label: "Deliveryman List", path: "/admin/food/delivery-partners" },
           { label: "Live Tracking", path: "/admin/food/delivery-partners/live-tracking" },
           { label: "Duty Log", path: "/admin/food/delivery-partners/duty-log" },

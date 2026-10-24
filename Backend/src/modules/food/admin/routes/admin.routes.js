@@ -520,6 +520,11 @@ router.patch(
     adminController.deassignAndResendOrderEmergencyRequest
 );
 router.get('/delivery/partners', adminController.getDeliveryPartners);
+router.post(
+    '/delivery/partners',
+    requireAdminPermission('delivery_management', 'create'),
+    adminController.createDeliveryPartner
+);
 router.get('/delivery/:id/sessions', adminController.getDeliveryPartnerSessions);
 router.get('/delivery/:id', adminController.getDeliveryPartnerById);
 router.patch('/delivery/:id/approve', adminController.approveDeliveryPartner);
