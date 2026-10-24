@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { deliveryAPI } from "@food/api";
 import { useCompanyName } from "@food/hooks/useCompanyName";
 import { getCachedSettings, getModuleLogoUrl, loadBusinessSettings } from "@food/utils/businessSettings";
+import { telHref } from "@/shared/utils/tel";
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -322,7 +323,7 @@ export default function FeedNavbar({ className = "" }) {
       onClick: () => {
         const phoneToDial = normalizePhoneForDial(emergencyNumbers.medicalEmergency);
         if (phoneToDial.length >= 3) {
-          window.location.href = `tel:${phoneToDial}`;
+          window.location.href = telHref(phoneToDial);
         } else {
           toast.error("Medical emergency number not configured");
         }
@@ -337,7 +338,7 @@ export default function FeedNavbar({ className = "" }) {
       onClick: () => {
         const phoneToDial = normalizePhoneForDial(emergencyNumbers.accidentHelpline);
         if (phoneToDial.length >= 3) {
-          window.location.href = `tel:${phoneToDial}`;
+          window.location.href = telHref(phoneToDial);
         } else {
           toast.error("Accident helpline number not configured");
         }
@@ -352,7 +353,7 @@ export default function FeedNavbar({ className = "" }) {
       onClick: () => {
         const phoneToDial = normalizePhoneForDial(emergencyNumbers.contactPolice);
         if (phoneToDial.length >= 3) {
-          window.location.href = `tel:${phoneToDial}`;
+          window.location.href = telHref(phoneToDial);
         } else {
           toast.error("Police emergency number not configured");
         }
@@ -367,7 +368,7 @@ export default function FeedNavbar({ className = "" }) {
       onClick: () => {
         const phoneToDial = normalizePhoneForDial(emergencyNumbers.insurance);
         if (phoneToDial.length >= 3) {
-          window.location.href = `tel:${phoneToDial}`;
+          window.location.href = telHref(phoneToDial);
         } else {
           toast.error("Insurance helpline number not configured");
         }

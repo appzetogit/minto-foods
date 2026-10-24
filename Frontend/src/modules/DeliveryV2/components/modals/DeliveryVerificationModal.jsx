@@ -7,6 +7,7 @@ import {
 import { deliveryAPI } from '@food/api';
 import { toast } from 'sonner';
 import { ActionSlider } from '@/modules/DeliveryV2/components/ui/ActionSlider';
+import { telHref } from "@/shared/utils/tel";
 
 const Backdrop = ({ onClose }) => (
   <motion.div 
@@ -129,7 +130,7 @@ const OtpModal = ({ order, onVerified, onClose }) => {
                  const customerPhone = order?.userPhone || order?.user?.phone || order?.deliveryAddress?.phone || order?.deliveryAddress?.contactNumber || '';
                  return customerPhone ? (
                    <button
-                     onClick={() => window.location.href = `tel:${customerPhone}`}
+                     onClick={() => window.location.href = telHref(customerPhone)}
                      className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 border border-emerald-100 hover:bg-emerald-100 transition-colors active:scale-90 shrink-0"
                    >
                      <Phone className="w-5 h-5" />
@@ -325,7 +326,7 @@ const PaymentModal = ({ order, otpString, onComplete, onClose }) => {
                    const customerPhone = order?.userPhone || order?.user?.phone || order?.deliveryAddress?.phone || order?.deliveryAddress?.contactNumber || '';
                    return customerPhone ? (
                      <button
-                       onClick={() => window.location.href = `tel:${customerPhone}`}
+                       onClick={() => window.location.href = telHref(customerPhone)}
                        className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 border border-emerald-100 hover:bg-emerald-100 transition-colors active:scale-90 shrink-0"
                      >
                        <Phone className="w-5 h-5" />

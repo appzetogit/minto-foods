@@ -24,6 +24,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@food
 import { Button } from "@food/components/ui/button"
 import { Badge } from "@food/components/ui/badge"
 import { useOrders } from "@food/context/OrdersContext"
+import SupportPhoneLinks from "@food/components/shared/SupportPhoneLinks"
 
 const commonIssues = [
   {
@@ -434,12 +435,7 @@ export default function OrderHelp() {
                     <p className="text-sm text-muted-foreground mb-2">
                       Mention order {order.id}
                     </p>
-                    <a
-                      href="tel:+1-800-123-4567"
-                      className="text-sm text-primary hover:underline font-medium"
-                    >
-                      +1 (800) 123-4567
-                    </a>
+                    <SupportPhoneLinks />
                   </div>
                 </div>
                 <div className="flex items-start gap-3 p-4 bg-muted/50 rounded-lg">

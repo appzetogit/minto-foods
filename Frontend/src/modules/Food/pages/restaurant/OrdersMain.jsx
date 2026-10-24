@@ -28,7 +28,8 @@ import {
 import { toast } from "sonner";
 import { getRestaurantCookingNote } from "@food/utils/orderCookingNote";
 import BottomNavOrders from "@food/components/restaurant/BottomNavOrders";
-import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
+import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar";
+
 import FssaiExpiryBanner from "@food/components/restaurant/FssaiExpiryBanner";
 import NewOrderAcceptCard from "@food/components/restaurant/NewOrderAcceptCard";
 import { restaurantAPI, diningAPI } from "@food/api";
@@ -40,6 +41,7 @@ import {
   stopRestaurantAlert,
   unlockRestaurantAlertAudio,
 } from "@food/utils/restaurantAlertSession";
+import { telHref } from "@/shared/utils/tel";
 const debugLog = (...args) => { };
 const debugWarn = (...args) => { };
 const debugError = (...args) => { };
@@ -2351,7 +2353,7 @@ export default function OrdersMain() {
                             </div>
                           </div>
                           <a
-                            href={`tel:${selectedOrder.deliveryPartnerId.phone}`}
+                            href={telHref(selectedOrder.deliveryPartnerId.phone)}
                             className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-green-600 text-white text-[11px] font-bold rounded-lg shadow-sm hover:bg-green-700 transition-colors shrink-0"
                           >
                             <Phone className="w-3 h-3" />

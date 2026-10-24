@@ -2445,6 +2445,10 @@ model FoodBusinessSettings {
   email            String @default("admin@mintofood.com")
   phoneCountryCode String @default("+91") @db.VarChar(8)
   phoneNumber      String @default("") @db.VarChar(20)
+  /// Customer support lines on the app's Help page, each stored as +91XXXXXXXXXX.
+  supportPhones    String[] @default([])
+  /// WhatsApp support number (+91XXXXXXXXXX); blank hides WhatsApp chat.
+  whatsappNumber   String   @default("") @db.VarChar(20)
 
   address String @default("")
   state   String @default("")
