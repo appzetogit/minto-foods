@@ -1064,6 +1064,26 @@ export default function OrdersPage({ statusKey = "all" }) {
     }
   }
 
+  /**
+   * The reason is required: the restaurant's phone rings with it until the
+   * owner reads it, so "cancelled by admin" alone tells them nothing.
+   * Returns the trimmed reason, or null when the admin backs out.
+   */
+  const askCancelReason = (order, verb) => {
+    for (;;) {
+      const raw = prompt(
+        `${verb} order ${order.orderId}
+
+Reason (required, shown to the restaurant and the customer):`,
+        "",
+      )
+      if (raw === null) return null
+      const reason = raw.trim()
+      if (reason) return reason.slice(0, 300)
+      toast.error("Enter a reason for cancelling the order")
+    }
+  }
+
   const handleRejectOrder = async (order) => {
     const orderIdToUse = order.id || order._id || order.orderId
     if (!orderIdToUse) {
@@ -1071,11 +1091,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       return
     }
 
-    const reason = prompt(
-      `Enter rejection reason for order ${order.orderId}:`,
-      "Order rejected by admin",
-    )
-
+    const reason = askCancelReason(order, "Reject")
     if (reason === null) return
 
     try {
@@ -1102,11 +1118,7 @@ export default function OrdersPage({ statusKey = "all" }) {
       return
     }
 
-    const reason = prompt(
-      `Enter cancellation reason for order ${order.orderId}:`,
-      "Order cancelled by admin",
-    )
-
+    const reason = askCancelReason(order, "Cancel")
     if (reason === null) return
 
     try {

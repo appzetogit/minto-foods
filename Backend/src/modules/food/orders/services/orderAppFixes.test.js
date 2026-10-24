@@ -230,3 +230,38 @@ test('a reject after another phone rejected gets 409, and an accept after it too
         (err) => err.statusCode === 409 && /already rejected on another device/.test(err.message),
     );
 });
+
+// ---- admin cancels: the restaurant's alert carries the reason ------------------------
+
+test('admin cancel needs a reason, and the restaurant alert carries it as strings', async () => {
+    const { adminCancelFields } = await import('./order.service.js');
+    const { rejectOrderAdminController } = await import('../controllers/order.controller.js');
+
+    assert.deepEqual(adminCancelFields({ id: 'abc', order_id: 'MFB24102610001' }, ' Restaurant closed early '), {
+        orderStatus: 'cancelled_by_admin',
+        orderId: 'abc',
+        orderDisplayId: 'MFB24102610001',
+        cancellationReason: 'Restaurant closed early',
+    });
+
+    const call = (orderId, body) => new Promise((resolve, reject) => {
+        const res = {
+            statusCode: 200,
+            status(code) { this.statusCode = code; return this; },
+            json(payload) { resolve({ status: this.statusCode, payload }); return this; },
+        };
+        rejectOrderAdminController({ params: { orderId }, body, user: { userId: null } }, res, reject);
+    });
+
+    const id = await placeOrder();
+    const blank = await call(id, { reason: '   ' });
+    assert.equal(blank.status, 400);
+    assert.match(blank.payload.message, /Enter a reason/);
+    assert.equal((await prisma.foodOrder.findUnique({ where: { id } })).orderStatus, 'created', 'nothing cancelled');
+
+    const done = await call(id, { reason: 'Customer called support to cancel' });
+    assert.equal(done.status, 200);
+    assert.equal((await prisma.foodOrder.findUnique({ where: { id } })).orderStatus, 'cancelled_by_admin');
+    const history = await prisma.orderStatusHistory.findFirst({ where: { orderId: id, to: 'cancelled_by_admin' } });
+    assert.equal(history.note, 'Customer called support to cancel');
+});

@@ -1,4 +1,4 @@
-import { sendResponse } from '../../../../utils/response.js';
+import { sendError, sendResponse } from '../../../../utils/response.js';
 import { getOrderInvoice, renderInvoiceHtml } from '../services/invoice.service.js';
 import { tipAfterDelivery } from '../services/orderTip.service.js';
 import * as orderService from '../services/order.service.js';
@@ -443,8 +443,12 @@ export async function rejectOrderAdminController(req, res, next) {
     try {
         const adminId = req.user?.userId;
         const orderId = req.params.orderId;
-        const { reason } = req.body;
-        const order = await orderService.updateOrderStatusAdmin(orderId, 'cancelled_by_admin', reason || 'Order rejected by admin', adminId);
+        // Required: it is shown to the restaurant, whose phone rings until the
+        // owner reads it.
+        const reason = String(req.body?.reason ?? '').trim();
+        if (!reason) return sendError(res, 400, 'Enter a reason for cancelling the order');
+        if (reason.length > 300) return sendError(res, 400, 'Keep the reason under 300 characters');
+        const order = await orderService.updateOrderStatusAdmin(orderId, 'cancelled_by_admin', reason, adminId);
         return sendResponse(res, 200, 'Order rejected by admin', { order });
     } catch (err) {
         next(err);

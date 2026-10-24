@@ -47,6 +47,7 @@ import {
   toRestaurantView,
   sanitizeOrderForDeliveryPartner,
   notifyOwnersSafely,
+  notifyOwnersActionableAlert,
   buildOrderIdentityFilter,
   pushStatusHistory,
   normalizeOrderForClient,
@@ -2649,6 +2650,16 @@ export async function deleteOrderAdmin(orderId, adminId) {
 
 // `byRole` exists for the expiry watchdog: the same cancellation, but recorded
 // against SYSTEM so the history does not claim a person did it.
+/** What the restaurant's cancellation alert carries, all as strings. */
+export function adminCancelFields(order, reason) {
+  return {
+    orderStatus: "cancelled_by_admin",
+    orderId: String(order?.id || ""),
+    orderDisplayId: String(order?.order_id || order?.orderId || order?.id || ""),
+    cancellationReason: String(reason || "").trim() || "Cancelled by support",
+  };
+}
+
 export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", adminId, { byRole = "ADMIN" } = {}) {
   const identity = buildOrderIdentityFilter(orderId);
   const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
@@ -2714,9 +2725,11 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
   // The customer hears about a support change the same way as any other: the
   // fixed customer events, or the cancellation push below.
   const isAdminCancel = String(orderStatus).includes("cancel");
+  // On a cancellation the restaurant gets its own alarm (below) instead of
+  // the ordinary notice.
   const notifyList = [
     ...(isAdminCancel ? [{ ownerType: "USER", ownerId: updated.userId }] : []),
-    { ownerType: "RESTAURANT", ownerId: updated.restaurantId },
+    ...(isAdminCancel ? [] : [{ ownerType: "RESTAURANT", ownerId: updated.restaurantId }]),
   ];
   if (row.dispatchDeliveryPartnerId) {
     notifyList.push({ ownerType: "DELIVERY_PARTNER", ownerId: row.dispatchDeliveryPartnerId });
@@ -2746,6 +2759,26 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     data: { type: "order_status_update", orderId: updated.id, orderStatus: String(orderStatus || "") },
   });
 
+  // The restaurant must not miss a cancellation: it may be cooking the order.
+  // Every signed-in phone gets a high-priority push carrying the reason, which
+  // the app turns into a ringing "Order cancelled by admin" screen. Sent as
+  // the visible + data-only pair (see notifyOwnersActionableAlert): the data
+  // leg is what lets the app ring in a loop, the visible leg still shows on
+  // phones that will not start the app in the background.
+  if (isAdminCancel) {
+    const fields = adminCancelFields(updated, note);
+    void notifyOwnersActionableAlert(
+      [{ ownerType: "RESTAURANT", ownerId: updated.restaurantId }],
+      {
+        title: "Order cancelled by admin",
+        body: `Order #${fields.orderDisplayId} was cancelled. Reason: ${fields.cancellationReason}`,
+        androidTag: `order_cancel_${updated.id}`,
+        androidChannelId: "new_order_channel",
+        data: { type: "order_status_update", orderMongoId: updated.id, ...fields },
+      },
+    ).catch((err) => logger.warn(`Admin-cancel alert to restaurant failed for ${updated.id}: ${err?.message || err}`));
+  }
+
   try {
     const io = getIO();
     if (io) {
@@ -2759,7 +2792,10 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
         statusNote: note || "",
       };
       io.to(rooms.user(updated.userId)).emit("order_status_update", payload);
-      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", payload);
+      io.to(rooms.restaurant(updated.restaurantId)).emit("order_status_update", {
+        ...payload,
+        ...(isAdminCancel ? adminCancelFields(updated, note) : {}),
+      });
       if (row.dispatchDeliveryPartnerId) {
         io.to(rooms.delivery(row.dispatchDeliveryPartnerId)).emit("order_status_update", payload);
       }
