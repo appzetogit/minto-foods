@@ -186,8 +186,12 @@ const constantBlock = (src, ident) => {
 
 const problems = [];
 
-const report = (file, line, modelName, key) =>
+// `_count` and the other aggregate keys are Prisma's own, valid in a select,
+// include or orderBy on any model; they are never a column.
+const report = (file, line, modelName, key) => {
+    if (/^_(count|relevance|avg|sum|min|max)$/.test(key)) return;
     problems.push(`${path.relative(root, file)}:${line}  ${modelName} has no field "${key}"`);
+};
 
 /**
  * Enum values a `where` filters on must be members of that enum.
@@ -329,9 +333,7 @@ const checkBlock = (block, modelName, file, line, seen = 0, src = '') => {
 
     for (const { key, block: nested, ident } of entries(block)) {
         if (!def.fields.has(key)) {
-            problems.push(
-                `${path.relative(root, file)}:${line}  ${modelName} has no field "${key}"`,
-            );
+            report(file, line, modelName, key);
             continue;
         }
 
