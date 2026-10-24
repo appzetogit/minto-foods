@@ -4,7 +4,7 @@ import { BRAND_IMAGE_URL } from '../../../../config/brand.js';
 import { toOrder, toOrders, fromOrder, orderInclude } from '../order.mapper.js';
 import { reconcileOrderPayment } from './payment-reconcile.service.js';
 import { logger } from '../../../../utils/logger.js';
-import { ValidationError, ForbiddenError, NotFoundError } from '../../../../core/auth/errors.js';
+import { ValidationError, ForbiddenError, NotFoundError, ConflictError } from '../../../../core/auth/errors.js';
 import { buildPaginationOptions, buildPaginatedResult, isId } from '../../../../utils/helpers.js';
 import {
     createRazorpayOrder,
@@ -34,6 +34,7 @@ import * as paymentService from './order-payment.service.js';
 import {
   enqueueOrderEvent,
   sanitizeOrderForExternal,
+  withoutCustomerContact,
   sanitizeOrderForDeliveryPartner,
   notifyOwnersSafely,
   buildOrderIdentityFilter,
@@ -1149,7 +1150,7 @@ export async function getOrderById(
   }
 
   if (restaurantId) {
-    const out = sanitizeOrderForExternal(order);
+    const out = withoutCustomerContact(sanitizeOrderForExternal(order));
     out.finance = await buildRestaurantFinanceView(order);
     return out;
   }
@@ -1767,7 +1768,7 @@ export async function listOrdersRestaurant(restaurantId, query) {
   const txByOrderId = new Map(transactions.map((tx) => [tx.orderId, tx]));
 
   const normalizedOrders = toOrders(rows).map((order) => {
-    const out = normalizeOrderForClient(order);
+    const out = withoutCustomerContact(normalizeOrderForClient(order));
     const tx = txByOrderId.get(order.id);
     out.finance = buildRestaurantFinanceViewSync(
       order,
@@ -1847,8 +1848,11 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     normalizedPaymentMethod === "cash" &&
     prevPaymentStatus === "cod_pending";
 
-  let updated = toOrder(await prisma.foodOrder.update({
-    where: { id: order.id },
+  // Conditional on the status read above: a restaurant can be logged in on
+  // several phones, and two of them tapping Accept (or Accept and Reject) at
+  // once must not both go through.
+  const { count: claimed } = await prisma.foodOrder.updateMany({
+    where: { id: order.id, orderStatus: from },
     data: {
       orderStatus,
       // The acceptance window exists only to auto-cancel orders the restaurant
@@ -1857,6 +1861,12 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       acceptanceDeadlineAt: null,
       ...(codBecomesPaid ? { paymentStatus: 'paid' } : {}),
     },
+  });
+  if (claimed === 0) {
+    throw new ConflictError("This order was already updated on another device");
+  }
+  let updated = toOrder(await prisma.foodOrder.findUnique({
+    where: { id: order.id },
     include: orderInclude,
   }));
 
@@ -1916,6 +1926,22 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
       title,
       message: body,
     };
+
+    // Every phone the restaurant is logged in on: the ones that did not tap
+    // must stop ringing for an order that has now been answered.
+    if (["confirmed", "cancelled_by_restaurant"].includes(String(orderStatus))) {
+      notifyOwnersSafely([{ ownerType: "RESTAURANT", ownerId: restaurantId }], {
+        title: "Order updated",
+        body: "",
+        dataOnly: true,
+        data: {
+          type: "order_status_update",
+          orderId: String(updated.id),
+          orderMongoId: String(updated.id),
+          orderStatus: String(updated.orderStatus),
+        },
+      }).catch(() => {});
+    }
 
     if (io) {
       io.to(rooms.restaurant(restaurantId)).emit("order_status_update", payload);

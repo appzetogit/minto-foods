@@ -59,6 +59,27 @@ export function sanitizeOrderForExternal(orderDoc) {
   return o;
 }
 
+/**
+ * An order as a restaurant may see it: no way to reach the customer directly.
+ * The rider carries the call; the restaurant talks to support or the rider.
+ */
+export function withoutCustomerContact(orderDoc) {
+  const o = { ...(orderDoc || {}) };
+  delete o.customerPhone;
+  if (o.deliveryAddress && typeof o.deliveryAddress === "object") {
+    o.deliveryAddress = { ...o.deliveryAddress, phone: "" };
+  }
+  if (o.userId && typeof o.userId === "object") {
+    const { phone, email, ...user } = o.userId;
+    o.userId = user;
+  }
+  if (o.user && typeof o.user === "object") {
+    const { phone, email, ...user } = o.user;
+    o.user = user;
+  }
+  return o;
+}
+
 export function sanitizeOrderForDeliveryPartner(orderDoc) {
   const o = sanitizeOrderForExternal(orderDoc);
   const cookingNote = String(o.note || "").trim();
@@ -517,7 +538,10 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       ? orderDoc.items.reduce((sum, it) => sum + (Number(it?.quantity) || 0), 0)
       : 0;
     const itemsList = Array.isArray(orderDoc.items)
-      ? orderDoc.items.map((it) => `${it.quantity}x ${it.name}`).join(", ")
+      ? orderDoc.items
+          // The size too ("Half"): the kitchen cooks from this line.
+          .map((it) => `${it.quantity}x ${it.name}${it.variantName ? ` (${it.variantName})` : ""}`)
+          .join(", ")
       : "";
     // deliveryAddressSchema has street/additionalDetails/city — there is no `address`
     // or `area` field on it, so reading those yielded undefined and the restaurant

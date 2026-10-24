@@ -32,9 +32,12 @@ const ROLES = {
  * excluded there because the panel is used across several tabs and machines, and
  * evicting those would be a regression rather than a safeguard.
  */
+//
+// Restaurants are not on this list: an outlet runs its partner app on several
+// phones at once (owner, manager, kitchen tablet), and every one of them must
+// ring for a new order.
 const SINGLE_DEVICE_ROLES = new Set([
   ROLES.USER,
-  ROLES.RESTAURANT,
   ROLES.DELIVERY_PARTNER,
 ]);
 
@@ -85,6 +88,19 @@ const bumpTokenVersion = async (delegate, id) => {
     select: { tokenVersion: true },
   });
   return Number(updated?.tokenVersion) || 0;
+};
+
+/**
+ * The account's current session version, without bumping it: a new login that
+ * should sit alongside the account's other devices rather than evict them.
+ * Bumping it (a "log out everywhere") still signs every device out.
+ */
+const currentTokenVersion = async (delegate, id) => {
+  const row = await delegate.findUnique({
+    where: { id: String(id) },
+    select: { tokenVersion: true },
+  });
+  return Number(row?.tokenVersion) || 0;
 };
 
 export const requestUserOtp = async (phone) => {
@@ -416,7 +432,8 @@ export const verifyRestaurantOtpAndLogin = async (phone, otp, fcmToken, platform
   const payload = {
     userId: restaurant.id,
     role: ROLES.RESTAURANT,
-    tokenVersion: await bumpTokenVersion(prisma.foodRestaurant, restaurant.id),
+    // Multi-device: joins the restaurant's other logged-in phones.
+    tokenVersion: await currentTokenVersion(prisma.foodRestaurant, restaurant.id),
   };
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);

@@ -11,7 +11,7 @@ import { buildPublicUrl } from '../../../../services/storage.service.js';
 const ROLES = ['USER', 'RESTAURANT', 'DELIVERY_PARTNER', 'ADMIN'];
 
 /** The order columns that decide who may talk to whom. */
-const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true };
+const ORDER_PARTIES = { userId: true, restaurantId: true, dispatchDeliveryPartnerId: true, dispatchStatus: true };
 
 /** Stable identifier for a participant. ADMIN carries no id (shared inbox). */
 export const partyToken = (role, id) => (role === 'ADMIN' ? 'ADMIN' : `${role}:${String(id)}`);
@@ -94,6 +94,15 @@ function resolveOrderRecipient(sender, order, requestedPeerRole = '') {
             );
         }
         if (role === sender.role) throw new ValidationError('Cannot message yourself');
+        // A restaurant talks to the rider or to support, never to the customer:
+        // the customer's contact stays with the platform.
+        if ([role, sender.role].sort().join('|') === 'RESTAURANT|USER') {
+            throw new ForbiddenError('Restaurants cannot chat with customers');
+        }
+        // Only once the rider has said yes; an offer can still be turned down.
+        if (role === 'DELIVERY_PARTNER' && sender.role === 'RESTAURANT' && order?.dispatchStatus !== 'accepted') {
+            throw new ValidationError('No delivery partner has accepted this order yet');
+        }
         return { role, id: parties[role] };
     }
 
