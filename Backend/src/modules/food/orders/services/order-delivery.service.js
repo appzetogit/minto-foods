@@ -252,7 +252,14 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
       ...order,
       pickupDistanceKm,
       ...(offer
-        ? { offerId: offer.id, offerExpiresAt: offer.expiresAt, acceptanceDeadlineAt: offer.expiresAt }
+        ? {
+            offerId: offer.id,
+            offerExpiresAt: offer.expiresAt,
+            acceptanceDeadlineAt: offer.expiresAt,
+            acceptTimeoutSeconds: offer.expiresAt
+              ? Math.round((new Date(offer.expiresAt) - new Date(offer.at)) / 1000)
+              : null,
+          }
         : {}),
     };
   });

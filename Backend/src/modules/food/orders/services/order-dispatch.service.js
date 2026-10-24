@@ -538,7 +538,12 @@ export async function tryAutoAssign(orderId, options = {}) {
       `Offering order ${id} to rider ${next.partnerId} (${next.distanceKm.toFixed(2)} km, round ${round}) for ${riderAcceptWindowSeconds}s.`,
     );
 
-    const offerFields = { offerId: offer.id, offerExpiresAt: expiresAt, acceptanceDeadlineAt: expiresAt };
+    const offerFields = {
+      offerId: offer.id,
+      offerExpiresAt: expiresAt,
+      acceptanceDeadlineAt: expiresAt,
+      acceptTimeoutSeconds: riderAcceptWindowSeconds,
+    };
     const io = getIO();
     if (io) {
       io.to(rooms.delivery(next.partnerId)).emit('new_order', {
