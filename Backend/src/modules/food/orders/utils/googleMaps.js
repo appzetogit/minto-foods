@@ -2,96 +2,12 @@ import { config } from '../../../../config/env.js';
 import { logger } from '../../../../utils/logger.js';
 
 /**
- * Fetches driving route metrics from Google Directions API.
+ * Fetches driving route metrics from the Google Routes API.
  * Call sparingly (e.g. once per order) — billed per request.
  * @param {Object} origin - { lat, lng }
  * @param {Object} destination - { lat, lng }
  * @returns {Promise<{ polyline: string, distanceMeters: number|null, durationSeconds: number|null, distanceKm: number|null }>}
  */
-
-/* ── Encoded-polyline codec (Google's algorithm) ──────────────────────────────
-   Kept inline rather than adding a dependency; it is ~30 lines and stable.      */
-
-/** Decode an encoded polyline into [[lat, lng], ...]. */
-export function decodePolyline(encoded) {
-  const str = String(encoded || '');
-  const points = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < str.length) {
-    let result = 0;
-    let shift = 0;
-    let b;
-    do {
-      b = str.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-
-    result = 0;
-    shift = 0;
-    do {
-      b = str.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
-
-    points.push([lat / 1e5, lng / 1e5]);
-  }
-  return points;
-}
-
-const encodeSigned = (value) => {
-  let v = value < 0 ? ~(value << 1) : value << 1;
-  let out = '';
-  while (v >= 0x20) {
-    out += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
-    v >>= 5;
-  }
-  out += String.fromCharCode(v + 63);
-  return out;
-};
-
-/** Encode [[lat, lng], ...] back into an encoded polyline. */
-export function encodePolyline(points) {
-  let lastLat = 0;
-  let lastLng = 0;
-  let out = '';
-  for (const [lat, lng] of points) {
-    const iLat = Math.round(lat * 1e5);
-    const iLng = Math.round(lng * 1e5);
-    out += encodeSigned(iLat - lastLat) + encodeSigned(iLng - lastLng);
-    lastLat = iLat;
-    lastLng = iLng;
-  }
-  return out;
-}
-
-/**
- * Stitch every step's polyline into one full-detail route.
- * Consecutive steps share an endpoint, so the duplicate is dropped at each join.
- * Returns '' when there are no usable steps, so the caller can fall back.
- */
-export function buildDetailedPolyline(legs = []) {
-  const points = [];
-  for (const leg of legs) {
-    for (const step of leg?.steps || []) {
-      const encoded = step?.polyline?.points;
-      if (!encoded) continue;
-      const decoded = decodePolyline(encoded);
-      if (decoded.length === 0) continue;
-      const last = points[points.length - 1];
-      const start = last && last[0] === decoded[0][0] && last[1] === decoded[0][1] ? 1 : 0;
-      for (let i = start; i < decoded.length; i += 1) points.push(decoded[i]);
-    }
-  }
-  return points.length >= 2 ? encodePolyline(points) : '';
-}
-
 export async function fetchDrivingRoute(origin, destination) {
   const empty = {
     polyline: '',
@@ -120,32 +36,35 @@ export async function fetchDrivingRoute(origin, destination) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const originStr = `${origin.lat},${origin.lng}`;
-    const destStr = `${destination.lat},${destination.lng}`;
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}&mode=driving&key=${apiKey}`;
-
-    const res = await fetch(url, { signal: controller.signal });
+    // Routes API, not the legacy Directions API: the production key's project
+    // has the legacy Maps APIs switched off (REQUEST_DENIED "legacy API").
+    // Its polyline already follows the road at full detail.
+    const latLng = (p) => ({ location: { latLng: { latitude: Number(p.lat), longitude: Number(p.lng) } } });
+    const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
+      },
+      body: JSON.stringify({
+        origin: latLng(origin),
+        destination: latLng(destination),
+        travelMode: 'DRIVE',
+        polylineQuality: 'HIGH_QUALITY',
+      }),
+    });
     clearTimeout(timeout);
     const data = await res.json();
 
-    if (data.status === 'OK' && data.routes?.length > 0) {
-      const route = data.routes[0];
-      const legs = route.legs || [];
-      let distanceMeters = 0;
-      let durationSeconds = 0;
-      for (const leg of legs) {
-        distanceMeters += leg.distance?.value || 0;
-        durationSeconds += leg.duration?.value || 0;
-      }
-
-      // overview_polyline is Google's SIMPLIFIED geometry — decimated for drawing a whole
-      // route zoomed out. On a street-level tracking map it visibly cuts corners and drifts
-      // off the road. Stitching the per-step polylines gives full road-following detail,
-      // which is what makes the line look right while following a rider.
-      const detailed = buildDetailedPolyline(legs);
-
+    const route = data.routes?.[0];
+    if (res.ok && route) {
+      const distanceMeters = Number(route.distanceMeters) || 0;
+      // "946s"
+      const durationSeconds = parseInt(String(route.duration || '0'), 10) || 0;
       return {
-        polyline: detailed || route.overview_polyline?.points || '',
+        polyline: route.polyline?.encodedPolyline || '',
         distanceMeters: distanceMeters > 0 ? distanceMeters : null,
         durationSeconds: durationSeconds > 0 ? durationSeconds : null,
         distanceKm:
@@ -154,7 +73,7 @@ export async function fetchDrivingRoute(origin, destination) {
     }
 
     logger.warn(
-      `Google Directions API returned status: ${data.status}. Message: ${data.error_message || 'No routes found'}`,
+      `Google Routes API returned ${res.status}. Message: ${data.error?.message || 'No routes found'}`,
     );
   } catch (err) {
     logger.error(`Error fetching driving route from Google: ${err.message}`);
@@ -164,7 +83,7 @@ export async function fetchDrivingRoute(origin, destination) {
 }
 
 /**
- * Fetches an encoded polyline from Google Directions API.
+ * Fetches an encoded polyline from the Google Routes API.
  * This should be called ONLY ONCE per order assignment to save costs.
  * @param {Object} origin - { lat, lng }
  * @param {Object} destination - { lat, lng }

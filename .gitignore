@@ -5,3 +5,5 @@ temp_interactive_push.bat
 
 # Local copy of the deployed nginx site config — not part of the app.
 suvio-api.conf
+config.bat
+node_modules
