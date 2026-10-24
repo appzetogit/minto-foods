@@ -89,6 +89,9 @@ export function sanitizeOrderForDeliveryPartner(orderDoc) {
     cookingNote,
     deliveryInstructions,
     note: deliveryInstructions,
+    // Same person at every stage, before pickup and after.
+    recipientName: receiverName(o),
+    recipientPhone: receiverPhone(o),
   };
 }
 
@@ -340,6 +343,14 @@ export async function applyAggregateRating(entity, entityId, newRating) {
   );
 }
 
+/** Who receives the order: the delivery address's name, else the account's. */
+export const receiverName = (order) =>
+  order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.customerName || order?.userId?.name || "";
+
+/** The receiver's phone: the delivery address's, else the account's. */
+export const receiverPhone = (order) =>
+  order?.deliveryAddress?.phone || order?.customerPhone || order?.userId?.phone || "";
+
 export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
   const order = orderDoc || {};
   const restaurant = restaurantDoc || order?.restaurantId || null;
@@ -473,13 +484,17 @@ export function buildDeliverySocketPayload(orderDoc, restaurantDoc = null) {
     tripDurationMins,
     distanceKm: tripDistanceKm,
     customerAddress: customerAddressParts.length ? customerAddressParts.join(', ') : "",
-    customerName: order?.customerName || order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.userId?.name || "",
-    customerPhone: order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone || "",
+    // The person at the door. For an order placed for someone else that is
+    // the address's name and phone, not the account holder's — the rider app
+    // switched from the receiver to the account holder after pickup.
+    customerName: receiverName(order),
+    recipientName: receiverName(order),
+    customerPhone: receiverPhone(order) || "",
     customerCallUri: buildTelUri(
-      order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone,
+      receiverPhone(order),
     ),
-    userName: order?.customerName || order?.deliveryAddress?.fullName || order?.deliveryAddress?.name || order?.userId?.name || "",
-    userPhone: order?.customerPhone || order?.deliveryAddress?.phone || order?.userId?.phone || "",
+    userName: receiverName(order),
+    userPhone: receiverPhone(order) || "",
     note: order?.deliveryInstructions || "",
     cookingNote: order?.note || "",
     deliveryInstructions: order?.deliveryInstructions || "",
