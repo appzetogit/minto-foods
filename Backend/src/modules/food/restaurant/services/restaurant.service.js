@@ -2203,6 +2203,7 @@ export const listPublicOffers = async (query = {}) => {
             perUserLimit: o.perUserLimit ?? null,
             customerScope: o.customerScope,
             isFirstOrderOnly: !!o.isFirstOrderOnly,
+            category: o.category || null,
             restaurantScope: o.restaurantScope,
             restaurantId:
                 restaurant?.id || (o.restaurantScope === 'selected' ? o.restaurantId : null),

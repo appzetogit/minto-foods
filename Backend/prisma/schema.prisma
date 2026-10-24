@@ -2218,6 +2218,9 @@ model FoodOffer {
   startDate        DateTime?
   endDate          DateTime?
   isFirstOrderOnly Boolean   @default(false)
+  /// The customer app's "Top Coupon Categories": bank | free_delivery |
+  /// new_user | top_brands | combo. Null: shown under All only.
+  category         String?   @db.VarChar(30)
   /// Days the code works on, 0 = Sunday .. 6 = Saturday, in India time.
   /// Empty means every day.
   activeDays      Int[]     @default([])

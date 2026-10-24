@@ -128,6 +128,7 @@ export async function createAdminOffer(body = {}) {
                 startDate: body.startDate ? new Date(body.startDate) : null,
                 endDate: body.endDate ? new Date(body.endDate) : null,
                 isFirstOrderOnly: body.isFirstOrderOnly ?? false,
+                category: body.category ?? null,
                 // Created already expired: start inactive rather than appearing
                 // live until a sweep notices.
                 status:
