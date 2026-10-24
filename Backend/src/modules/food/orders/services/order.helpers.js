@@ -610,6 +610,8 @@ export async function notifyRestaurantNewOrder(orderDoc) {
     // Construct rich body for the custom notification layout in Flutter
     let bodyText = `Order #${orderDoc.order_id || orderDoc._id} is waiting for review.`;
     if (itemsList) bodyText += `\nItems: ${itemsList}`;
+    // The customer's note to the kitchen ("less spicy") changes how it is cooked.
+    if (orderDoc.note) bodyText += `\nNote: ${orderDoc.note}`;
     if (total > 0) bodyText += `\nTotal: ₹${total}`;
     if (orderDoc.customerName) bodyText += `\nCustomer: ${orderDoc.customerName}`;
     if (addressStr) bodyText += `\nAddress: ${addressStr}`;
@@ -644,6 +646,7 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           customerName: str(orderDoc.customerName),
           itemCount: str(itemCount),
           itemsList: str(itemsList),
+          note: str(orderDoc.note),
           address: str(addressStr),
           total: str(total),
           paymentMethod: str(orderDoc.payment?.method),
