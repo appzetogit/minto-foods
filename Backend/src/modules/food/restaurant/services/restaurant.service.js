@@ -2035,6 +2035,9 @@ export const listApprovedRestaurants = async (query = {}) => {
  */
 const PUBLIC_RESTAURANT_SELECT = {
     id: true, restaurantName: true, restaurantNameNormalized: true,
+    // The owner's name only, shown on the restaurant's info page. Their phone
+    // and email stay private.
+    ownerName: true,
     profileImage: true, coverImage: true, coverImages: true,
     galleryImages: true, menuImages: true, videos: true,
     cuisines: true, pureVegRestaurant: true, rating: true, totalRatings: true,
