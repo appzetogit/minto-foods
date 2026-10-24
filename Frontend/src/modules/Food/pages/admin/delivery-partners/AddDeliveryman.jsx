@@ -33,6 +33,7 @@ const empty = {
   phone: "",
   email: "",
   city: "",
+  zoneId: "",
   state: "",
   address: "",
   vehicleType: "bike",
@@ -73,6 +74,8 @@ export default function AddDeliveryman() {
   const [added, setAdded] = useState(null)
   const [cities, setCities] = useState([])
   const [signupOpen, setSignupOpen] = useState(true)
+  const [zones, setZones] = useState([])
+  const [approveNow, setApproveNow] = useState(true)
 
   useEffect(() => {
     adminAPI
@@ -82,6 +85,13 @@ export default function AddDeliveryman() {
         setCities(Array.isArray(data.cities) ? data.cities : Array.isArray(data) ? data : [])
       })
       .catch(() => setCities([]))
+    adminAPI
+      .getZones()
+      .then((res) => {
+        const data = res?.data?.data ?? res?.data ?? {}
+        setZones((Array.isArray(data.zones) ? data.zones : Array.isArray(data) ? data : []).filter((z) => z.isActive !== false))
+      })
+      .catch(() => setZones([]))
     adminAPI
       .getOnboardingStatus()
       .then((res) => setSignupOpen(res?.data?.data?.delivery !== false))
@@ -99,6 +109,7 @@ export default function AddDeliveryman() {
     if (!form.name.trim()) e.name = "Name is required"
     if (!/^[6-9]\d{9}$/.test(phone)) e.phone = "Enter a valid 10-digit mobile number"
     if (!form.city.trim()) e.city = "City is required"
+    if (zones.length && !form.zoneId) e.zoneId = "Choose a zone"
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Invalid email"
     if (form.panNumber && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.panNumber.toUpperCase())) e.panNumber = "Invalid PAN (e.g. ABCDE1234F)"
     if (form.aadharNumber && !/^\d{12}$/.test(form.aadharNumber)) e.aadharNumber = "Aadhaar must be 12 digits"
@@ -120,10 +131,11 @@ export default function AddDeliveryman() {
       if (value) fd.append(k, k === "phone" ? value.replace(/\D/g, "").slice(-10) : value)
     }
     for (const [k, file] of Object.entries(files)) if (file) fd.append(k, file)
+    fd.append("approveNow", approveNow ? "true" : "false")
     try {
       setSaving(true)
       const res = await adminAPI.createDeliveryPartner(fd)
-      setAdded(res?.data?.data || { name: form.name, phone: form.phone })
+      setAdded({ ...(res?.data?.data || { name: form.name, phone: form.phone }), message: res?.data?.message })
       setForm(empty)
       setFiles({})
     } catch (e) {
@@ -139,7 +151,7 @@ export default function AddDeliveryman() {
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <h1 className="text-2xl font-bold text-slate-900">Add Deliveryman</h1>
           <p className="text-sm text-slate-500 mt-1">
-            The rider is approved immediately and logs in to the delivery app with an OTP on this phone number.
+            Approved riders log in to the delivery app with an OTP on this phone number.
           </p>
         </div>
 
@@ -154,7 +166,7 @@ export default function AddDeliveryman() {
           <div className="flex gap-2 items-start bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-3 text-sm">
             <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
             <div>
-              <b>{added.name}</b> added. They can log in with OTP on {added.phone}.{" "}
+              <b>{added.name}</b>: {added.status === "pending" ? "added as pending -- approve them from Join requests." : `added. They can log in with OTP on ${added.phone}.`}{" "}
               <Link to="/admin/food/delivery-partners" className="underline">View riders</Link>
             </div>
           </div>
@@ -197,6 +209,14 @@ export default function AddDeliveryman() {
                 ) : (
                   <input className={input} value={form.city} onChange={(e) => set("city", e.target.value)} />
                 )}
+              </Field>
+              <Field label="Zone" required={zones.length > 0} error={errors.zoneId} hint="For the admin list; orders still go to the nearest rider">
+                <select className={input} value={form.zoneId} onChange={(e) => set("zoneId", e.target.value)}>
+                  <option value="">Choose a zone…</option>
+                  {zones.map((z) => (
+                    <option key={z.id || z._id} value={z.id || z._id}>{z.name || z.zoneName}</option>
+                  ))}
+                </select>
               </Field>
               <Field label="State">
                 <input className={input} value={form.state} onChange={(e) => set("state", e.target.value)} />
@@ -280,6 +300,14 @@ export default function AddDeliveryman() {
               </Field>
             </div>
           </section>
+
+          <label className="flex items-start gap-2 bg-white rounded-xl border border-slate-200 p-4 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={approveNow} onChange={(e) => setApproveNow(e.target.checked)} />
+            <span>
+              <b>Approve now</b>
+              <span className="block text-xs text-slate-500">Ticked: the rider can log in and take orders right away. Unticked: they are added as pending and wait in Join requests.</span>
+            </span>
+          </label>
 
           <div className="flex justify-end gap-2">
             <button

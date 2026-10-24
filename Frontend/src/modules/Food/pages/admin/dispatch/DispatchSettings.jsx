@@ -20,7 +20,7 @@ const MANUAL_WARNING = (where) =>
 
 export default function DispatchSettings() {
   const [data, setData] = useState(null)
-  const [form, setForm] = useState({ dispatchMode: "auto", manualAcceptWindowSeconds: 120, manualQueueAlertMinutes: 5 })
+  const [form, setForm] = useState({ dispatchMode: "auto", riderAcceptWindowSeconds: 45, manualAcceptWindowSeconds: 120, manualQueueAlertMinutes: 5 })
   const [saving, setSaving] = useState("")
 
   const load = async () => {
@@ -29,6 +29,7 @@ export default function DispatchSettings() {
       setData(d)
       setForm({
         dispatchMode: d.dispatchMode || "auto",
+        riderAcceptWindowSeconds: d.riderAcceptWindowSeconds || 45,
         manualAcceptWindowSeconds: d.manualAcceptWindowSeconds || 120,
         manualQueueAlertMinutes: d.manualQueueAlertMinutes || 5,
       })
@@ -46,6 +47,7 @@ export default function DispatchSettings() {
       setSaving("global")
       setData(dataOf(await adminAPI.updateDispatchSettings({
         dispatchMode: form.dispatchMode,
+        riderAcceptWindowSeconds: Number(form.riderAcceptWindowSeconds),
         manualAcceptWindowSeconds: Number(form.manualAcceptWindowSeconds),
         manualQueueAlertMinutes: Number(form.manualQueueAlertMinutes),
       })))
@@ -108,6 +110,18 @@ export default function DispatchSettings() {
             ))}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-sm text-slate-700">
+              Rider must accept an automatic offer within (seconds)
+              <input
+                type="number"
+                min="15"
+                max="300"
+                value={form.riderAcceptWindowSeconds}
+                onChange={(e) => setForm((f) => ({ ...f, riderAcceptWindowSeconds: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
+              <span className="block text-xs text-slate-400 mt-1">Each order goes to one rider at a time, nearest first. No answer in this time and it moves to the next rider.</span>
+            </label>
             <label className="text-sm text-slate-700">
               Rider must accept an admin assignment within (seconds)
               <input

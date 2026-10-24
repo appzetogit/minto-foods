@@ -166,6 +166,8 @@ const serializeDocuments = (doc) => {
     return { ...present, ...(custom.length ? { custom } : {}) };
 };
 
+const partnerZone = { zone: { select: { name: true } } };
+
 const serializePartner = (doc, stats = {}, sl = 0) => {
     const lastLat = toFiniteNumber(doc.lastLat);
     const lastLng = toFiniteNumber(doc.lastLng);
@@ -178,9 +180,20 @@ const serializePartner = (doc, stats = {}, sl = 0) => {
         email: doc.email || '',
         phone: doc.phone || '',
         deliveryId: doc.id ? `DP-${doc.id.slice(-8).toUpperCase()}` : null,
-        zone: doc.city || doc.state || doc.address || '',
+        zone: doc.zone?.name || doc.city || doc.state || doc.address || '',
+        zoneId: doc.zoneId || null,
+        zoneName: doc.zone?.name || '',
+        city: doc.city || '',
         vehicleType: doc.vehicleType || '',
+        vehicleName: doc.vehicleName || '',
+        vehicleNumber: doc.vehicleNumber || '',
+        bankAccountHolderName: doc.bankAccountHolderName || '',
+        bankAccountNumber: doc.bankAccountNumber || '',
+        bankIfscCode: doc.bankIfscCode || '',
+        bankName: doc.bankName || '',
+        upiId: doc.upiId || '',
         status: doc.status,
+        isBlocked: doc.status === 'deactivated',
         availabilityStatus: doc.availabilityStatus || 'offline',
         isOnline: doc.availabilityStatus === 'online',
         lastLocation:
@@ -234,11 +247,18 @@ export async function getDeliveryPartners(query = {}) {
     const page = Math.max(1, Number(query.page) || 1);
     const skip = (page - 1) * limit;
 
-    const where = { status: 'approved', ...searchWhere(query.search) };
+    // Blocked riders stay in the list (with a badge) so they can be unblocked.
+    const statusFilter = { active: 'approved', blocked: 'deactivated' }[String(query.status || '')];
+    const where = {
+        status: statusFilter || { in: ['approved', 'deactivated'] },
+        ...(isId(query.zoneId) ? { zoneId: String(query.zoneId) } : {}),
+        ...searchWhere(query.search),
+    };
 
     const [list, total] = await Promise.all([
         prisma.foodDeliveryPartner.findMany({
             where,
+            include: partnerZone,
             orderBy: { createdAt: 'desc' },
             skip,
             take: limit,
@@ -259,7 +279,7 @@ export async function getDeliveryPartners(query = {}) {
 export async function getDeliveryPartnerById(id) {
     if (!isId(id)) return null;
 
-    const doc = await prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
+    const doc = await prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) }, include: partnerZone });
     if (!doc) return null;
 
     const stats = (await getBulkDeliveryPartnerStats([doc.id])).get(doc.id) || {};
@@ -536,7 +556,7 @@ export async function rejectDeliveryPartner(id, reason) {
  *    sessions are invalidated: the old handset must not keep acting on an
  *    identity that has moved.
  */
-export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
+export async function updateDeliveryPartnerProfile(id, { name, phone, ...more } = {}) {
     if (!isId(id)) throw new NotFoundError('Delivery partner not found');
 
     const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) } });
@@ -575,6 +595,8 @@ export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
         data.tokenVersion = { increment: 1 };
     }
 
+    Object.assign(data, await editableRiderFields(partner, more));
+
     if (!Object.keys(data).length) return partner;
 
     try {
@@ -587,6 +609,122 @@ export async function updateDeliveryPartnerProfile(id, { name, phone } = {}) {
         }
         throw error;
     }
+}
+
+const VEHICLE_TYPES = ['bike', 'scooter', 'electric', 'bicycle'];
+
+/**
+ * The rest of the admin's Edit rider form: zone, city, vehicle and bank/UPI.
+ * Only keys that were sent are touched; an empty string clears an optional one.
+ */
+async function editableRiderFields(partner, body = {}) {
+    const data = {};
+    const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+    const text = (key) => String(body[key] ?? '').trim();
+
+    if (has('zoneId')) {
+        const zoneId = text('zoneId');
+        if (zoneId) {
+            if (!isId(zoneId)) throw new ValidationError('Choose a valid zone');
+            const zone = await prisma.foodZone.findUnique({ where: { id: zoneId }, select: { id: true } });
+            if (!zone) throw new ValidationError('Choose a valid zone');
+        }
+        data.zoneId = zoneId || null;
+    }
+    if (has('city')) {
+        if (!text('city')) throw new ValidationError('City cannot be empty');
+        data.city = text('city');
+    }
+    if (has('vehicleType')) {
+        const type = text('vehicleType').toLowerCase();
+        if (type && !VEHICLE_TYPES.includes(type)) throw new ValidationError('Choose bike, scooter, electric or bicycle');
+        data.vehicleType = type || null;
+    }
+    if (has('vehicleName')) data.vehicleName = text('vehicleName') || null;
+    if (has('vehicleNumber')) {
+        const number = text('vehicleNumber').replace(/[\s-]/g, '').toUpperCase();
+        if (number && number !== partner.vehicleNumber) {
+            const clash = await prisma.foodDeliveryPartner.findFirst({
+                where: { vehicleNumber: number, id: { not: partner.id }, status: { not: 'rejected' } },
+                select: { name: true },
+            });
+            if (clash) throw new ValidationError(`Vehicle ${number} already belongs to ${clash.name || 'another rider'}`);
+        }
+        data.vehicleNumber = number || null;
+    }
+    if (has('bankAccountHolderName')) data.bankAccountHolderName = text('bankAccountHolderName') || null;
+    if (has('bankName')) data.bankName = text('bankName') || null;
+    if (has('bankAccountNumber')) {
+        const acc = text('bankAccountNumber');
+        if (acc && !/^\d{9,18}$/.test(acc)) throw new ValidationError('Account number must be 9 to 18 digits');
+        data.bankAccountNumber = acc || null;
+    }
+    if (has('bankIfscCode')) {
+        const ifsc = text('bankIfscCode').toUpperCase();
+        if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) throw new ValidationError('Invalid IFSC code');
+        data.bankIfscCode = ifsc || null;
+    }
+    if (has('upiId')) {
+        const upi = text('upiId');
+        if (upi && !/^[\w.\-]{2,}@[a-zA-Z]{2,}$/.test(upi)) throw new ValidationError('Invalid UPI id');
+        data.upiId = upi || null;
+    }
+    return data;
+}
+
+/**
+ * Block or unblock a rider. Blocking signs them out and takes them offline
+ * (no more offers); unblocking lets them log in again with OTP.
+ */
+export async function setDeliveryPartnerBlocked(id, blocked) {
+    if (!isId(id)) throw new NotFoundError('Delivery partner not found');
+    if (blocked) return deleteDeliveryPartner(id);
+
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: String(id) }, select: { status: true } });
+    if (!partner) throw new NotFoundError('Delivery partner not found');
+    if (partner.status !== 'deactivated') throw new ValidationError('This delivery partner is not blocked');
+    return prisma.foodDeliveryPartner.update({
+        where: { id: String(id) },
+        data: { status: 'approved', approvedAt: new Date() },
+    });
+}
+
+/**
+ * Delete a rider for good. Only one who never carried an order: orders,
+ * earnings and cash settlements point at the rider, so anyone with history
+ * is blocked instead.
+ */
+export async function deleteDeliveryPartnerPermanently(id) {
+    if (!isId(id)) throw new NotFoundError('Delivery partner not found');
+    const partnerId = String(id);
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: partnerId }, select: { id: true } });
+    if (!partner) throw new NotFoundError('Delivery partner not found');
+
+    const [orders, transactions] = await Promise.all([
+        prisma.foodOrder.count({ where: { dispatchDeliveryPartnerId: partnerId } }),
+        prisma.foodTransaction.count({ where: { deliveryPartnerId: partnerId } }),
+    ]);
+    if (orders || transactions) {
+        throw new ValidationError(
+            `This delivery partner has ${orders} order${orders === 1 ? '' : 's'} on record, so they can only be blocked, not deleted.`,
+        );
+    }
+
+    const { deleteDeliveryPartnerAccount } = await import('../../delivery/services/delivery.service.js');
+    try {
+        await prisma.$transaction([
+            prisma.foodDeliveryPartner.updateMany({ where: { referredById: partnerId }, data: { referredById: null } }),
+            prisma.foodRefreshToken.deleteMany({ where: { userId: partnerId } }),
+            prisma.foodDeliveryPartnerSession.deleteMany({ where: { deliveryPartnerId: partnerId } }),
+        ]);
+        await deleteDeliveryPartnerAccount(partnerId);
+    } catch (error) {
+        if (error?.code === 'P2003') {
+            throw new ValidationError('This delivery partner has records that need them, so they can only be blocked.');
+        }
+        throw error;
+    }
+    return { success: true };
 }
 
 /**

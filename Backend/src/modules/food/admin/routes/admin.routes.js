@@ -591,6 +591,7 @@ router.post('/orders/:id/unassign-rider', manualDispatchController.unassignRider
 router.get('/delivery/partners', adminController.getDeliveryPartners);
 // Add Deliveryman: an admin-created rider, approved at once.
 router.post('/delivery/partners', upload.any(), createDeliveryPartnerByAdmin);
+router.post('/delivery-partners', upload.any(), createDeliveryPartnerByAdmin);
 router.get('/delivery/:id/sessions', adminController.getDeliveryPartnerSessions);
 router.get('/delivery/:id', adminController.getDeliveryPartnerById);
 router.patch('/delivery/:id/approve', adminController.approveDeliveryPartner);
@@ -599,6 +600,16 @@ router.patch(
     '/delivery/:id',
     requireAdminPermission('delivery_management', 'edit'),
     adminController.updateDeliveryPartnerProfile
+);
+router.patch(
+    '/delivery/:id/block',
+    requireAdminPermission('delivery_management', 'edit'),
+    adminController.setDeliveryPartnerBlocked
+);
+router.delete(
+    '/delivery/:id/permanent',
+    requireAdminPermission('delivery_management', 'delete'),
+    adminController.deleteDeliveryPartnerPermanently
 );
 router.delete('/delivery/:id', adminController.deleteDeliveryPartner);
 

@@ -1,5 +1,5 @@
 import { notifyCustomer } from './customerNotify.service.js';
-import { isManualForOrder, manualOrderFilter } from './manualDispatch.service.js';
+import { isManualForOrder } from './manualDispatch.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { toOrder, toOrders, orderInclude } from '../order.mapper.js';
 import {
@@ -180,7 +180,10 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
     where: {
       dispatchDeliveryPartnerId: String(deliveryPartnerId),
       dispatchStatus: 'accepted',
-      orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'] },
+      // Every open status: a list of the "active" ones missed reached_pickup and
+      // reached_drop, and the trip vanished from the rider's screen mid-delivery.
+      // Online or offline does not matter -- an accepted trip stays theirs.
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
     },
     include: deliveryInclude,
     orderBy: { updatedAt: 'desc' },
@@ -194,130 +197,68 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
   );
 }
 
+/**
+ * What the rider's "available orders" screen shows: only orders offered to
+ * this rider right now (dispatch asks one rider at a time), plus the trip
+ * they already accepted. Unassigned orders nearby are no longer listed --
+ * every rider used to see them, and tapping one raced the rider it was
+ * actually offered to.
+ */
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const partnerId = String(deliveryPartnerId);
   const hasActiveDelivery = await partnerHasActiveDelivery(partnerId);
-  const manualFilter = hasActiveDelivery ? { kind: 'none' } : await manualOrderFilter();
-
-  const where = hasActiveDelivery
-    ? {
-        dispatchDeliveryPartnerId: partnerId,
-        dispatchStatus: 'accepted',
-        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-      }
-    : {
-        OR: [
-          // Open orders anyone nearby can take -- except in manual-dispatch
-          // zones, where only the rider an admin assigned sees the order.
-          ...(manualFilter.kind === 'all'
-            ? []
-            : [{
-                dispatchStatus: 'unassigned',
-                // The $not/$elemMatch guard becomes a relation filter: no deassign
-                // record for this rider on this order.
-                dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-                orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
-                ...(manualFilter.kind === 'some' ? { NOT: manualFilter.where } : {}),
-              }]),
-          {
-            dispatchDeliveryPartnerId: partnerId,
-            dispatchStatus: { in: ['assigned', 'accepted'] },
-            orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-          },
-        ],
-      };
-
-  // For idle partners, pull a wider candidate set then proximity-filter in memory.
-  // Avoids returning another city's orders that the poll hydrate could lock into the modal.
-  const queryLimit = hasActiveDelivery ? limit : Math.max(limit * 5, 50);
 
   const rows = await prisma.foodOrder.findMany({
-    where,
+    where: {
+      dispatchDeliveryPartnerId: partnerId,
+      dispatchStatus: hasActiveDelivery ? 'accepted' : { in: ['assigned', 'accepted'] },
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
     include: deliveryInclude,
     orderBy: { createdAt: 'desc' },
-    take: queryLimit,
+    take: Math.max(limit, 20),
   });
 
   const txByOrder = await loadTransactionsByOrder(rows.map((r) => r.id));
+  const partner = hasActiveDelivery
+    ? null
+    : await prisma.foodDeliveryPartner.findUnique({
+        where: { id: partnerId },
+        select: { lastLat: true, lastLng: true },
+      });
 
-  let enriched = toOrders(rows).map((order) =>
-    sanitizeOrderForDeliveryPartner(
-      mergeTransactionIntoOrder(order, txByOrder.get(order.id) || null),
-    ),
-  );
+  const enriched = rows.map((row) => {
+    const order = sanitizeOrderForDeliveryPartner(
+      mergeTransactionIntoOrder(toOrder(row), txByOrder.get(row.id) || null),
+    );
+    // The live offer's id and expiry, so the popup counts down from the server.
+    const offer = row.dispatchStatus === 'assigned'
+      ? [...(row.dispatchOffers || [])]
+          .reverse()
+          .find((o) => String(o.partnerId) === partnerId && o.action === 'offered')
+      : null;
 
-  if (!hasActiveDelivery) {
-    const partner = await prisma.foodDeliveryPartner.findUnique({
-      where: { id: partnerId },
-      select: { lastLat: true, lastLng: true, lastLocationAt: true },
-    });
+    // The socket offer carries pickupDistanceKm, so REST must too -- otherwise
+    // a rider polling sees the earning without the travel distance.
+    let pickupDistanceKm = null;
+    const restaurant = order?.restaurantId;
+    if (partner?.lastLat != null && partner?.lastLng != null && restaurant?.latitude != null && restaurant?.longitude != null) {
+      const d = haversineKm(Number(partner.lastLat), Number(partner.lastLng), Number(restaurant.latitude), Number(restaurant.longitude));
+      if (Number.isFinite(d)) pickupDistanceKm = Number(d.toFixed(2));
+    }
 
-    const MAX_OFFER_KM = 20; // slightly wider than the dispatch radius (15km)
-    const partnerLat = partner?.lastLat;
-    const partnerLng = partner?.lastLng;
-    const hasPartnerGps =
-      partnerLat != null && partnerLng != null &&
-      Number.isFinite(Number(partnerLat)) && Number.isFinite(Number(partnerLng));
-
-    const withMeta = enriched.map((order) => {
-      const assignedTo = order?.dispatch?.deliveryPartnerId;
-      const assignedToMe = Boolean(
-        assignedTo && String(assignedTo?.id ?? assignedTo) === partnerId,
-      );
-
-      const offeredToMe = Array.isArray(order?.dispatch?.offeredTo)
-        ? order.dispatch.offeredTo.some((entry) => String(entry?.partnerId) === partnerId)
-        : false;
-
-      let distanceKm = null;
-      const restaurant = order?.restaurantId;
-      if (hasPartnerGps && restaurant?.latitude != null && restaurant?.longitude != null) {
-        const d = haversineKm(
-          Number(partnerLat), Number(partnerLng),
-          Number(restaurant.latitude), Number(restaurant.longitude),
-        );
-        if (Number.isFinite(d)) distanceKm = d;
-      }
-
-      return { order, assignedToMe, offeredToMe, distanceKm };
-    });
-
-    const kept = withMeta.filter(({ assignedToMe, offeredToMe, distanceKm }) => {
-      if (assignedToMe) return true;
-      // No partner GPS: only show orders already offered to this rider (safe vs a global leak).
-      if (!hasPartnerGps) return offeredToMe;
-      // Missing/unresolvable restaurant coords: same offered-only rule.
-      if (distanceKm == null) return offeredToMe;
-      if (distanceKm <= MAX_OFFER_KM) return true;
-      // Already offered to this rider: allow a small GPS-drift buffer, else drop.
-      return offeredToMe && distanceKm <= MAX_OFFER_KM * 1.5;
-    });
-
-    // Rank so consumers that take the head (reconnect recovery, poll hydrate)
-    // surface the order this rider was actually offered — not just the newest in
-    // range, which could sit somewhere else entirely.
-    kept.sort((a, b) => {
-      if (a.assignedToMe !== b.assignedToMe) return a.assignedToMe ? -1 : 1;
-      if (a.offeredToMe !== b.offeredToMe) return a.offeredToMe ? -1 : 1;
-      const da = a.distanceKm == null ? Infinity : a.distanceKm;
-      const db = b.distanceKm == null ? Infinity : b.distanceKm;
-      return da - db;
-    });
-
-    // Surface the rider → restaurant distance already computed for filtering. The
-    // socket offer carries pickupDistanceKm, so REST must too — otherwise a rider
-    // polling sees the earning without the travel distance.
-    enriched = kept.map(({ order, distanceKm }) => ({
+    return {
       ...order,
-      pickupDistanceKm: distanceKm == null ? null : Number(Number(distanceKm).toFixed(2)),
-    }));
-  }
+      pickupDistanceKm,
+      ...(offer
+        ? { offerId: offer.id, offerExpiresAt: offer.expiresAt, acceptanceDeadlineAt: offer.expiresAt }
+        : {}),
+    };
+  });
 
   const total = enriched.length;
-  const paged = hasActiveDelivery ? enriched.slice(0, limit) : enriched.slice(skip, skip + limit);
-
-  return buildPaginatedResult({ docs: paged, total, page, limit });
+  return buildPaginatedResult({ docs: enriched.slice(skip, skip + limit), total, page, limit });
 }
 
 /**
@@ -413,8 +354,11 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
         ...(manualOnly
           ? []
           : [{
+              // Between offers (the last one ran out, nobody else free yet) a
+              // rider who was offered it may still take it -- including one
+              // who declined earlier. Never one an admin took it off.
               dispatchStatus: 'unassigned',
-              dispatchOffers: { none: { partnerId, action: 'deassigned' } },
+              dispatchOffers: { some: { partnerId }, none: { partnerId, action: 'deassigned' } },
             }]),
         { dispatchStatus: 'assigned', dispatchDeliveryPartnerId: partnerId },
       ],
@@ -654,6 +598,10 @@ export async function rejectOrderDelivery(orderId, deliveryPartnerId) {
         orderId: row.id,
         deliveryPartnerId,
       });
+      return order;
+    }
+    // Their offer already ran out and went to the next rider: nothing to undo.
+    if ((row.dispatchOffers || []).some((item) => String(item.partnerId) === String(deliveryPartnerId))) {
       return order;
     }
   }

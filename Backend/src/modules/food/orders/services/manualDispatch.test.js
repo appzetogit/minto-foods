@@ -223,6 +223,12 @@ test('an admin can take an assignment back', async () => {
 
 test('switching the zone back to automatic offers the waiting orders to riders', async () => {
     const id = await confirmedOrder();
+    // A rider is offered one order at a time, so earlier waiting orders would
+    // take the riders first. Close them; this one is the order under test.
+    await prisma.foodOrder.updateMany({
+        where: { restaurantId, id: { not: id }, orderStatus: { notIn: ['delivered', 'cancelled_by_admin'] } },
+        data: { orderStatus: 'cancelled_by_admin', awaitingManualAt: null },
+    });
     await setZoneDispatchMode(zoneId, 'auto');
     await new Promise((r) => setTimeout(r, 1500));
     const row = await orderRow(id);

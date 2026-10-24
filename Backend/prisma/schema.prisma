@@ -960,6 +960,9 @@ model FoodDeliveryPartner {
   address String?
   city    String?
   state   String?
+  /// The zone the admin put the rider in. For the admin list only: dispatch
+  /// goes by distance, not zone.
+  zoneId  String? @db.VarChar(24)
 
   vehicleType   String?
   vehicleName   String?
@@ -1022,6 +1025,7 @@ model FoodDeliveryPartner {
 
   referredBy FoodDeliveryPartner?  @relation("PartnerReferral", fields: [referredById], references: [id])
   referrals  FoodDeliveryPartner[] @relation("PartnerReferral")
+  zone       FoodZone?             @relation(fields: [zoneId], references: [id], onDelete: SetNull)
 
   dispatchedOrders  FoodOrder[]
   dispatchOffers    OrderDispatchOffer[]
@@ -1037,6 +1041,7 @@ model FoodDeliveryPartner {
   @@index([referralCode])
   @@index([referredById])
   @@index([availabilityStatus, status])
+  @@index([zoneId])
   @@map("food_delivery_partners")
 }
 
@@ -1671,6 +1676,10 @@ model OrderDispatchOffer {
   partnerId String              @db.VarChar(24)
   at        DateTime            @default(now())
   action    DispatchOfferAction @default(offered)
+  /// When this offer runs out (automatic dispatch). Null on older rows.
+  expiresAt DateTime?
+  /// The dispatch round. A rider is asked at most once per round.
+  round     Int                 @default(1)
 
   order   FoodOrder           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   partner FoodDeliveryPartner @relation(fields: [partnerId], references: [id])
@@ -1788,6 +1797,8 @@ model FoodSettings {
   manualAcceptWindowSeconds Int @default(120)
   /// Re-alert admins when an order has waited this long for a rider.
   manualQueueAlertMinutes   Int @default(5)
+  /// How long a rider has to accept an automatic offer before it moves on.
+  riderAcceptWindowSeconds  Int @default(45)
   updatedByRole    String?
   updatedByAdminId String?   @db.VarChar(24)
   updatedAtBy      DateTime?
@@ -2275,6 +2286,7 @@ model FoodZone {
   foodFeeSettings         FoodFeeSettings[]
   topBanners              TopBanner[]
   foodLandingZoneSettings FoodLandingZoneSettings?
+  deliveryPartners        FoodDeliveryPartner[]
 
   @@index([isActive, name])
   @@index([city, name])

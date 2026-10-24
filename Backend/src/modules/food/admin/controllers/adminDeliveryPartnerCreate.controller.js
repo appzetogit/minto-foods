@@ -3,6 +3,11 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { validateDeliveryRegisterDto } from '../../delivery/validators/delivery.validator.js';
 import { registerDeliveryPartner } from '../../delivery/services/delivery.service.js';
 import { findDeliveryPartnerByPhone } from '../../../../core/auth/onboardingGate.js';
+import { prisma } from '../../../../config/prisma.js';
+import { isId } from '../../../../utils/helpers.js';
+
+/** Multipart sends booleans as strings. Missing means yes: approved at once. */
+const wantsApproved = (value) => !['false', '0', 'no', 'off'].includes(String(value ?? 'true').trim().toLowerCase());
 
 /**
  * Admin panel: Add Deliveryman.
@@ -66,6 +71,15 @@ export async function createDeliveryPartnerByAdmin(req, res, next) {
             throw new ValidationError('A delivery partner with this phone already exists');
         }
 
+        let zoneId = null;
+        if (body.zoneId) {
+            if (!isId(body.zoneId)) throw new ValidationError('Choose a valid zone');
+            const zone = await prisma.foodZone.findUnique({ where: { id: String(body.zoneId) }, select: { id: true } });
+            if (!zone) throw new ValidationError('Choose a valid zone');
+            zoneId = zone.id;
+        }
+        const approve = wantsApproved(body.approveNow);
+
         const filesByField = {};
         for (const f of Array.isArray(req.files) ? req.files : []) {
             (filesByField[f.fieldname] ||= []).push(f);
@@ -75,11 +89,13 @@ export async function createDeliveryPartnerByAdmin(req, res, next) {
             { ...validated, ...extras.data, ref: '' },
             filesByField,
             body,
-            { createdByAdmin: true, adminId: req.user?.userId || null },
+            { createdByAdmin: true, adminId: req.user?.userId || null, approve, zoneId },
         );
         res.status(201).json({
             success: true,
-            message: 'Delivery partner added. They can log in with OTP on their phone.',
+            message: approve
+                ? 'Delivery partner added. They can log in with OTP on their phone.'
+                : 'Delivery partner added as pending. Approve them from Join requests.',
             data: { id: partner.id, name: partner.name, phone: partner.phone, status: partner.status },
         });
     } catch (err) {

@@ -155,9 +155,12 @@ export function toOrder(row) {
             acceptedAt: row.dispatchAcceptedAt,
             dispatchingAt: row.dispatchingAt,
             offeredTo: (row.dispatchOffers || []).map((offer) => ({
+                offerId: offer.id,
                 partnerId: offer.partnerId,
                 at: offer.at,
-                action: offer.action
+                action: offer.action,
+                expiresAt: offer.expiresAt ?? null,
+                round: offer.round ?? 1
             }))
         },
 

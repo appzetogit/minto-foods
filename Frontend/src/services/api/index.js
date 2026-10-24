@@ -573,6 +573,16 @@ export const adminAPI = {
     apiClient.delete(`/food/admin/delivery/${String(id)}`, {
       contextModule: "admin",
     }),
+  /** Block (signs out, no offers) or unblock a rider. */
+  setDeliveryPartnerBlocked: (id, blocked) =>
+    apiClient.patch(`/food/admin/delivery/${String(id)}/block`, { blocked: Boolean(blocked) }, {
+      contextModule: "admin",
+    }),
+  /** Delete a rider for good -- refused for one with orders on record. */
+  deleteDeliveryPartnerPermanently: (id) =>
+    apiClient.delete(`/food/admin/delivery/${String(id)}/permanent`, {
+      contextModule: "admin",
+    }),
   /** GET /food/admin/delivery/support-tickets - list all delivery support tickets (query: status, priority, search, page, limit). */
   getDeliverySupportTickets: (params) =>
     apiClient.get("/food/admin/delivery/support-tickets", {
@@ -1313,7 +1323,7 @@ export const adminAPI = {
     apiClient.post(`/food/admin/orders/${String(orderId)}/unassign-rider`, {}, { contextModule: "admin" }),
   /** Add Deliveryman: creates an approved rider (multipart: fields + document photos). */
   createDeliveryPartner: (formData) =>
-    apiClient.post("/food/admin/delivery/partners", formData, { contextModule: "admin" }),
+    apiClient.post("/food/admin/delivery-partners", formData, { contextModule: "admin" }),
   getOnboardingStatus: () =>
     apiClient.get("/food/restaurant/onboarding-status"),
   getCities: (params = {}) =>

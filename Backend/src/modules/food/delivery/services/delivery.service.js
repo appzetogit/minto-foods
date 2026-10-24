@@ -7,6 +7,7 @@ import { upsertFirebaseDeviceToken } from '../../../../core/notifications/fireba
 import { logger } from '../../../../utils/logger.js';
 import { collectDynamicRegistration } from './driverRegistrationField.service.js';
 import { saveRiderActiveOrdersPosition } from './riderPosition.service.js';
+import { TERMINAL_ORDER_STATUSES } from '../../orders/services/order.helpers.js';
 
 const num = (v) => Number(v) || 0;
 
@@ -142,8 +143,10 @@ export const registerDeliveryPartner = async (payload, files, rawBody = {}, opts
             drivingLicenseNumber,
             panNumber,
             aadharNumber,
-            status: createdByAdmin ? 'approved' : 'pending',
-            ...(createdByAdmin ? { approvedAt: new Date() } : {}),
+            // An admin may add a rider as pending (checkbox) to review later.
+            status: createdByAdmin && opts.approve !== false ? 'approved' : 'pending',
+            ...(createdByAdmin && opts.approve !== false ? { approvedAt: new Date() } : {}),
+            ...(createdByAdmin && opts.zoneId ? { zoneId: String(opts.zoneId) } : {}),
             ...(createdByAdmin ? bankFieldsOf(payload) : {}),
             referredById,
             ...images,
@@ -440,6 +443,22 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     let validStatus = 'offline';
     if (rawStatus === 'online' || rawStatus === true || rawStatus === 'true') validStatus = 'online';
     else if (rawStatus === 'offline' || rawStatus === false || rawStatus === 'false') validStatus = 'offline';
+
+    // Going offline must not strand a customer's food: a rider on a trip
+    // finishes it first. Only an explicit "offline" is refused -- the heartbeat
+    // still goes through.
+    const wantsOffline = rawStatus === 'offline' || rawStatus === false || rawStatus === 'false';
+    if (wantsOffline && partner.availabilityStatus === 'online') {
+        const onTrip = await prisma.foodOrder.findFirst({
+            where: {
+                dispatchDeliveryPartnerId: partner.id,
+                dispatchStatus: 'accepted',
+                orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+            },
+            select: { id: true },
+        });
+        if (onTrip) throw new ValidationError('Finish your current delivery before going offline');
+    }
 
     const data = { availabilityStatus: validStatus };
     const hasFix = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react"
-import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, AlertTriangle } from "lucide-react"
+import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, AlertTriangle, Ban, ShieldCheck } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
@@ -27,6 +27,11 @@ export default function DeliverymanList() {
   const [editValues, setEditValues] = useState({ pocketBalance: "", cashInHand: "" })
   const [savingDeliveryId, setSavingDeliveryId] = useState(null)
   const [deletingDeliveryId, setDeletingDeliveryId] = useState(null)
+  const [statusFilter, setStatusFilter] = useState("")
+  const [zones, setZones] = useState([])
+  const [detailsFor, setDetailsFor] = useState(null)
+  const [detailsForm, setDetailsForm] = useState({})
+  const [savingDetails, setSavingDetails] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState({
     si: true,
     name: true,
@@ -82,6 +87,7 @@ export default function DeliverymanList() {
       if (searchQuery.trim()) {
         params.search = searchQuery.trim()
       }
+      if (statusFilter) params.status = statusFilter
 
       const [partnersResponse, walletRowsResult] = await Promise.allSettled([
         adminAPI.getDeliveryPartners(params),
@@ -154,7 +160,17 @@ availableCashLimit: wallet?.availableCashLimit || 0,
 
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery])
+  }, [searchQuery, statusFilter])
+
+  useEffect(() => {
+    adminAPI
+      .getZones()
+      .then((res) => {
+        const data = res?.data?.data ?? res?.data ?? {}
+        setZones(Array.isArray(data.zones) ? data.zones : [])
+      })
+      .catch(() => setZones([]))
+  }, [])
 
   const filteredDeliverymen = useMemo(() => {
     // Backend already handles search, but we can do client-side filtering if needed
@@ -427,44 +443,87 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
     }
   }
 
-  const handleDelete = async (deliveryman) => {
-    const deliverymanId = String(deliveryman?._id || "")
-    if (!deliverymanId) {
-      toast.error("Delivery partner not found")
-      return
-    }
+  const patchRow = (id, fields) => {
+    setDeliverymen((prev) => prev.map((item) => (String(item._id) === id ? { ...item, ...fields } : item)))
+    setViewDetails((prev) => (prev && String(prev._id) === id ? { ...prev, ...fields } : prev))
+  }
 
-    const confirmed = window.confirm(
-      `Deactivate ${deliveryman?.name || "this delivery partner"}?\n\nThis will block the account and log them out, while preserving profile, wallet, and history.`,
-    )
-
-    if (!confirmed) {
-      return
-    }
-
-    try {
-      setDeletingDeliveryId(deliverymanId)
-      const response = await adminAPI.deleteDeliveryPartner(deliverymanId)
-
-      if (!response?.data?.success) {
-        toast.error(response?.data?.message || "Failed to deactivate delivery partner")
-        return
-      }
-
-      const wasViewingDeletedPartner = Boolean(
-        viewDetails && String(viewDetails._id) === deliverymanId,
+  /** Block signs the rider out and stops offers; unblock lets them back in. */
+  const handleBlockToggle = async (deliveryman) => {
+    const id = String(deliveryman?._id || "")
+    if (!id) return
+    const block = !deliveryman.isBlocked
+    if (
+      block &&
+      !window.confirm(
+        `Block ${deliveryman?.name || "this delivery partner"}?\n\nThey are logged out and get no more orders. Profile, wallet and history are kept, and you can unblock them later.`,
       )
-      setDeliverymen((prev) => prev.filter((item) => String(item._id) !== deliverymanId))
-      setViewDetails((prev) => (prev && String(prev._id) === deliverymanId ? null : prev))
-      if (wasViewingDeletedPartner) {
-        setIsViewOpen(false)
-      }
-      toast.success(response?.data?.message || "Delivery partner deactivated successfully")
+    ) {
+      return
+    }
+    try {
+      setDeletingDeliveryId(id)
+      const response = await adminAPI.setDeliveryPartnerBlocked(id, block)
+      patchRow(id, { isBlocked: block, status: block ? "deactivated" : "approved" })
+      toast.success(response?.data?.message || (block ? "Delivery partner blocked" : "Delivery partner unblocked"))
     } catch (err) {
-      debugError("Error deleting delivery partner:", err)
-      toast.error(err?.response?.data?.message || "Failed to deactivate delivery partner")
+      toast.error(err?.response?.data?.message || "Could not update the delivery partner")
     } finally {
       setDeletingDeliveryId(null)
+    }
+  }
+
+  /** Gone for good. The server refuses a rider who has orders on record. */
+  const handlePermanentDelete = async (deliveryman) => {
+    const id = String(deliveryman?._id || "")
+    if (!id) return
+    if (
+      !window.confirm(
+        `Delete ${deliveryman?.name || "this delivery partner"} permanently?\n\nThis cannot be undone. A rider who has delivered orders can only be blocked.`,
+      )
+    ) {
+      return
+    }
+    try {
+      setDeletingDeliveryId(id)
+      const response = await adminAPI.deleteDeliveryPartnerPermanently(id)
+      setDeliverymen((prev) => prev.filter((item) => String(item._id) !== id))
+      if (viewDetails && String(viewDetails._id) === id) {
+        setViewDetails(null)
+        setIsViewOpen(false)
+      }
+      toast.success(response?.data?.message || "Delivery partner deleted")
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not delete the delivery partner")
+    } finally {
+      setDeletingDeliveryId(null)
+    }
+  }
+
+  const DETAIL_FIELDS = [
+    "zoneId", "city", "vehicleType", "vehicleName", "vehicleNumber",
+    "bankAccountHolderName", "bankAccountNumber", "bankIfscCode", "bankName", "upiId",
+  ]
+
+  const openDetails = (deliveryman) => {
+    setDetailsFor(deliveryman)
+    setDetailsForm(Object.fromEntries(DETAIL_FIELDS.map((k) => [k, deliveryman?.[k] ?? ""])))
+  }
+
+  const saveDetails = async () => {
+    const id = String(detailsFor?._id || "")
+    if (!id) return
+    try {
+      setSavingDetails(true)
+      const response = await adminAPI.updateDeliveryPartnerProfile(id, detailsForm)
+      const zone = zones.find((z) => String(z.id || z._id) === String(detailsForm.zoneId))
+      patchRow(id, { ...detailsForm, zoneName: zone?.name || "", zone: zone?.name || detailsForm.city || "" })
+      toast.success(response?.data?.message || "Delivery partner updated")
+      setDetailsFor(null)
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not save the details")
+    } finally {
+      setSavingDetails(false)
     }
   }
 
@@ -489,6 +548,17 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                 />
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               </div>
+
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white text-slate-700"
+                title="Show riders"
+              >
+                <option value="">All riders</option>
+                <option value="active">Active</option>
+                <option value="blocked">Blocked</option>
+              </select>
 
               <button
                 onClick={handleExportPDF}
@@ -676,6 +746,9 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                     {dm.name}
                                   </span>
                                 )}
+                                {dm.isBlocked ? (
+                                  <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">Blocked</span>
+                                ) : null}
                                 {dm.rating > 0 && editingDeliveryId !== String(dm._id) && (
                                   <div className="flex items-center gap-1">
                                     <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
@@ -820,16 +893,33 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                 <Eye className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => handleDelete(dm)}
+                                onClick={() => openDetails(dm)}
+                                className="p-1.5 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                                title="Edit zone, vehicle and bank details"
+                              >
+                                <Bike className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleBlockToggle(dm)}
                                 disabled={deletingDeliveryId === String(dm._id)}
-                                className="p-1.5 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
-                                title="Delete Delivery Partner"
+                                className={`p-1.5 rounded transition-colors disabled:opacity-50 ${dm.isBlocked ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100" : "bg-orange-50 text-orange-600 hover:bg-orange-100"}`}
+                                title={dm.isBlocked ? "Unblock" : "Block"}
                               >
                                 {deletingDeliveryId === String(dm._id) ? (
                                   <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : dm.isBlocked ? (
+                                  <ShieldCheck className="w-4 h-4" />
                                 ) : (
-                                  <Trash2 className="w-4 h-4" />
+                                  <Ban className="w-4 h-4" />
                                 )}
+                              </button>
+                              <button
+                                onClick={() => handlePermanentDelete(dm)}
+                                disabled={deletingDeliveryId === String(dm._id)}
+                                className="p-1.5 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-50"
+                                title="Delete permanently"
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           </td>
@@ -1236,6 +1326,131 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
               className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
             >
               Close
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit details: zone, vehicle, bank / UPI (name and phone edit in the row) */}
+      <Dialog open={Boolean(detailsFor)} onOpenChange={(open) => { if (!open) setDetailsFor(null) }}>
+        <DialogContent className="max-w-2xl bg-white max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit {detailsFor?.name || "delivery partner"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-medium text-slate-600">
+                Zone
+                <select
+                  value={detailsForm.zoneId ?? ""}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, zoneId: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="">No zone</option>
+                  {zones.map((z) => (
+                    <option key={z.id || z._id} value={z.id || z._id}>{z.name}</option>
+                  ))}
+                </select>
+              </label>
+                <label className="text-xs font-medium text-slate-600">
+                  City
+                  <input
+                    value={detailsForm.city ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, city: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+              <label className="text-xs font-medium text-slate-600">
+                Vehicle type
+                <select
+                  value={detailsForm.vehicleType ?? ""}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, vehicleType: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white"
+                >
+                  <option value="">Not set</option>
+                  <option value="bike">Bike</option>
+                  <option value="scooter">Scooter</option>
+                  <option value="electric">Electric bike / scooter</option>
+                  <option value="bicycle">Bicycle</option>
+                </select>
+              </label>
+                <label className="text-xs font-medium text-slate-600">
+                  Vehicle model
+                  <input
+                    value={detailsForm.vehicleName ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, vehicleName: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600">
+                  Vehicle number
+                  <input
+                    value={detailsForm.vehicleNumber ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, vehicleNumber: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+            </div>
+            <p className="text-sm font-semibold text-slate-800">Bank / UPI (optional)</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-medium text-slate-600">
+                  Account holder name
+                  <input
+                    value={detailsForm.bankAccountHolderName ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, bankAccountHolderName: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600">
+                  Account number
+                  <input
+                    value={detailsForm.bankAccountNumber ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, bankAccountNumber: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                    inputMode="numeric"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600">
+                  IFSC
+                  <input
+                    value={detailsForm.bankIfscCode ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, bankIfscCode: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600">
+                  Bank name
+                  <input
+                    value={detailsForm.bankName ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, bankName: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+                <label className="text-xs font-medium text-slate-600">
+                  UPI id
+                  <input
+                    value={detailsForm.upiId ?? ""}
+                    onChange={(e) => setDetailsForm((f) => ({ ...f, upiId: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                  />
+                </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setDetailsFor(null)}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={saveDetails}
+              disabled={savingDetails}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium inline-flex items-center gap-2 disabled:opacity-60"
+            >
+              {savingDetails ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
             </button>
           </DialogFooter>
         </DialogContent>

@@ -1901,13 +1901,34 @@ export async function updateDeliveryBoyWallet(req, res, next) {
 export async function updateDeliveryPartnerProfile(req, res, next) {
     try {
         const { id } = req.params;
-        const { name, phone } = req.body || {};
-        const data = await adminService.updateDeliveryPartnerProfile(id, { name, phone });
+        const data = await adminService.updateDeliveryPartnerProfile(id, req.body || {});
         res.status(200).json({
             success: true,
             message: 'Delivery partner updated successfully',
             data,
         });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function setDeliveryPartnerBlocked(req, res, next) {
+    try {
+        const blocked = req.body?.blocked !== false && req.body?.blocked !== 'false';
+        await adminService.setDeliveryPartnerBlocked(req.params.id, blocked);
+        res.status(200).json({
+            success: true,
+            message: blocked ? 'Delivery partner blocked' : 'Delivery partner unblocked',
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function deleteDeliveryPartnerPermanently(req, res, next) {
+    try {
+        await adminService.deleteDeliveryPartnerPermanently(req.params.id);
+        res.status(200).json({ success: true, message: 'Delivery partner deleted' });
     } catch (error) {
         next(error);
     }

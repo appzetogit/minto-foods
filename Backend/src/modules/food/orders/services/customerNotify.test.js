@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { tryAutoAssign } from './order-dispatch.service.js';
 import assert from 'node:assert/strict';
 
 import { prisma } from '../../../../config/prisma.js';
@@ -106,6 +107,9 @@ test('placed -> accepted -> rider assigned -> ready, from the real paths, once e
     await notifyCustomer(id, 'accepted');
     assert.deepEqual(await sent(id), ['placed', 'accepted']);
 
+    // Dispatch offers the order to one rider at a time (on the server it starts
+    // from the socket-enabled accept path; there is no socket here).
+    await tryAutoAssign(id);
     await acceptOrderDelivery(id, rider.id);
     await settle();
     assert.deepEqual(await sent(id), ['placed', 'accepted', 'rider_assigned']);

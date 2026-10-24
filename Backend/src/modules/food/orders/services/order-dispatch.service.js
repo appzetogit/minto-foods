@@ -13,6 +13,7 @@ import {
   haversineKm,
   notifyOwnersActionableAlert,
   notifyOwnersSafely,
+  TERMINAL_ORDER_STATUSES,
 } from './order.helpers.js';
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { parseGeoPoint } from '../../shared/geo.utils.js';
@@ -70,9 +71,9 @@ export async function enrichPayloadWithTripRoadDistance(order, payload) {
 }
 
 /**
- * Driver acceptance window. Single source of truth — the client countdown, the
- * re-queue delay and acceptanceDeadlineAt all derive from this, so they cannot
- * drift apart.
+ * Default rider accept window. The admin sets the real one
+ * (FoodSettings.riderAcceptWindowSeconds); the client countdown, the offer
+ * expiry and the timeout job all come from that one value.
  */
 const DRIVER_ACCEPT_WINDOW_MS = 45000;
 
@@ -252,6 +253,8 @@ export async function getDispatchSettings() {
     dispatchMode: row?.dispatchMode === 'manual' ? 'manual' : 'auto',
     manualAcceptWindowSeconds: Number(row?.manualAcceptWindowSeconds) || 120,
     manualQueueAlertMinutes: Number(row?.manualQueueAlertMinutes) || 5,
+    riderAcceptWindowSeconds: Math.min(300, Math.max(15,
+      Number(row?.riderAcceptWindowSeconds) || DRIVER_ACCEPT_WINDOW_MS / 1000)),
   };
 }
 
@@ -277,6 +280,11 @@ export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) 
     if (alertMin < 1 || alertMin > 120) throw new ValidationError('Alert time must be 1 to 120 minutes');
     data.manualQueueAlertMinutes = Math.round(alertMin);
   }
+  const riderWindow = Number(extra.riderAcceptWindowSeconds);
+  if (Number.isFinite(riderWindow)) {
+    if (riderWindow < 15 || riderWindow > 300) throw new ValidationError('Rider accept time must be 15 to 300 seconds');
+    data.riderAcceptWindowSeconds = Math.round(riderWindow);
+  }
   const before = await getDispatchSettings();
   await prisma.foodSettings.upsert({
     where: { key: 'dispatch' },
@@ -292,9 +300,84 @@ export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) 
   return getDispatchSettings();
 }
 
+/**
+ * Riders holding a live offer on some other order. A rider gets one offer at
+ * a time; an offer stuck past its window (a lost timeout job) stops counting.
+ */
+async function getRidersHoldingAnOffer(exceptOrderId, windowMs) {
+  const rows = await prisma.foodOrder.findMany({
+    where: {
+      id: { not: exceptOrderId },
+      dispatchStatus: 'assigned',
+      dispatchAcceptedAt: null,
+      dispatchDeliveryPartnerId: { not: null },
+      dispatchAssignedAt: { gt: new Date(Date.now() - windowMs - 5000) },
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
+    select: { dispatchDeliveryPartnerId: true },
+    distinct: ['dispatchDeliveryPartnerId'],
+  });
+  return new Set(rows.map((r) => r.dispatchDeliveryPartnerId));
+}
+
+/**
+ * Closes the popup on a rider's phone: their offer ran out or went elsewhere.
+ * Socket for an open app, data-only push for one in the background -- the
+ * offer arrived the same two ways. The worker has no socket, so from a
+ * timeout job only the push goes.
+ */
+async function withdrawOfferFromRider(orderId, partnerId) {
+  const io = getIO();
+  if (io) {
+    io.to(rooms.delivery(partnerId)).emit('order_claimed', { orderId, orderMongoId: orderId });
+  }
+  await notifyOwnersSafely([{ ownerType: 'DELIVERY_PARTNER', ownerId: partnerId }], {
+    title: 'Order taken',
+    body: 'This order was offered to another partner.',
+    dataOnly: true,
+    data: { type: 'order_taken', orderId, orderMongoId: orderId },
+  });
+}
+
+/**
+ * Ends a rider's offer that was not answered in time: the offer row becomes
+ * 'timeout', the order is free again and the rider's popup is closed.
+ * @returns {Promise<boolean>} false when the rider accepted in the meantime
+ */
+async function expireRiderOffer(row, partnerId, offerId = null) {
+  const pid = String(partnerId);
+  const { count } = await prisma.foodOrder.updateMany({
+    where: { id: row.id, dispatchStatus: 'assigned', dispatchDeliveryPartnerId: pid, dispatchAcceptedAt: null },
+    data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null, dispatchAssignedAt: null },
+  });
+  if (count === 0) return false;
+
+  await prisma.orderDispatchOffer.updateMany({
+    where: { orderId: row.id, partnerId: pid, action: 'offered', ...(offerId ? { id: offerId } : {}) },
+    data: { action: 'timeout' },
+  });
+  await withdrawOfferFromRider(row.id, pid).catch((err) =>
+    logger.warn(`order_taken push after timeout failed for order ${row.id}: ${err?.message || err}`),
+  );
+  return true;
+}
+
+/**
+ * Offers the order to ONE rider -- the nearest free one not yet asked in this
+ * round -- and waits for their answer. Accept ends dispatch; reject or the
+ * window running out (processDispatchTimeout) brings the next rider.
+ *
+ * A round ends when every free rider in range has been asked. After a pause
+ * of one window the next round starts, and riders who said no may be asked
+ * again (with a fresh offer). Riders an admin took the order off
+ * ('deassigned') are never asked again.
+ *
+ * Options: attempt (the job counter; the radius widens with time),
+ * newRound (start the next round), fromJob (called by the timeout job),
+ * reason / partnerId (for the manual-dispatch queue).
+ */
 export async function tryAutoAssign(orderId, options = {}) {
   const id = String(orderId);
-  const attempt = options.attempt || 1;
 
   // Manual dispatch: in a zone set to manual nothing is offered to riders; the
   // order waits for an admin to assign it. Every caller (restaurant confirm,
@@ -303,10 +386,14 @@ export async function tryAutoAssign(orderId, options = {}) {
   if (await isManualForOrder(id)) {
     return enterManualQueue(id, options);
   }
-  // Small buffer above the accept window so an in-flight offer isn't reclaimed early.
-  const lockTimeout = DRIVER_ACCEPT_WINDOW_MS + 5000; // 50s
 
-  // Claim the dispatch lock atomically; only the winner proceeds.
+  const { riderAcceptWindowSeconds } = await getDispatchSettings();
+  const windowMs = riderAcceptWindowSeconds * 1000;
+  // Small buffer above the accept window so an in-flight offer isn't reclaimed early.
+  const lockTimeout = windowMs + 5000;
+
+  // Claim the dispatch lock atomically; only the winner proceeds. An order
+  // still 'assigned' past its window is a lost timeout and may be taken over.
   const { count: claimed } = await prisma.foodOrder.updateMany({
     where: {
       id,
@@ -324,13 +411,11 @@ export async function tryAutoAssign(orderId, options = {}) {
   });
 
   if (claimed === 0) {
-    logger.info(
-      `tryAutoAssign: Skip for ${id} (already dispatching, accepted, or multi-attempt lock active).`,
-    );
+    logger.info(`tryAutoAssign: Skip for ${id} (already dispatching, offered, or accepted).`);
     return null;
   }
 
-  const row = await prisma.foodOrder.findUnique({ where: { id }, include: dispatchInclude });
+  let row = await prisma.foodOrder.findUnique({ where: { id }, include: dispatchInclude });
   const order = toOrder(row);
 
   try {
@@ -343,29 +428,38 @@ export async function tryAutoAssign(orderId, options = {}) {
       return order;
     }
 
-    const offers = order.dispatch?.offeredTo || [];
-    const offeredIds = offers.map((o) => String(o.partnerId));
-    const permanentlyExcludedIds = new Set(
+    // A stale offer (its timeout job was lost): close it like a timeout first.
+    if (row.dispatchStatus === 'assigned' && row.dispatchDeliveryPartnerId) {
+      await expireRiderOffer(row, row.dispatchDeliveryPartnerId);
+      row = await prisma.foodOrder.findUnique({ where: { id }, include: dispatchInclude });
+    }
+
+    const offers = row.dispatchOffers || [];
+    const neverAgain = new Set(
       offers.filter((o) => o.action === 'deassigned').map((o) => String(o.partnerId)),
     );
-    // Riders who said no to this order. Left out of re-offer rounds while
-    // anyone else nearby can still take it.
-    const declinedIds = new Set(
-      offers.filter((o) => o.action === 'rejected').map((o) => String(o.partnerId)),
+    const lastRound = offers.reduce((max, o) => Math.max(max, Number(o.round) || 1), 0);
+    const round = options.newRound && lastRound > 0 ? lastRound + 1 : Math.max(lastRound, 1);
+    const askedThisRound = new Set(
+      offers.filter((o) => (Number(o.round) || 1) === round).map((o) => String(o.partnerId)),
     );
 
-    // Radius expansion: attempt 1 → 15km, 2 → 25km, 3 → 40km, 4+ → 60km.
+    // The radius widens with the time spent looking, whoever calls: 15 km for
+    // the first window, then 25, 40 and 60 km.
+    const firstOfferAt = offers.length ? Math.min(...offers.map((o) => new Date(o.at).getTime())) : Date.now();
+    const attempt = Math.max(
+      Number(options.attempt) || 1,
+      Math.floor((Date.now() - firstOfferAt) / windowMs) + 1,
+    );
     let maxKm = 15;
     if (attempt === 2) maxKm = 25;
     if (attempt === 3) maxKm = 40;
     if (attempt >= 4) maxKm = 60;
 
-    const { partners } = await listNearbyOnlineDeliveryPartners(row.restaurant, { maxKm, limit: 15 });
-    const busyPartnerIds = await getBusyDeliveryPartnerIds();
-
-    // Phase 3: admin alert at attempt 5+ (~6 minutes).
-    if (attempt >= 6) {
-      logger.error(`[CRITICAL] Order ${id} unassigned for ${attempt} mins. Triggering Admin Alert (Phase 3).`);
+    // Admin alert after ~6 windows with nobody on it. Only from the timeout
+    // job, so a run of quick rejects does not repeat it.
+    if (attempt >= 6 && options.fromJob) {
+      logger.error(`[CRITICAL] Order ${id} unassigned after ${attempt} offer windows. Alerting admin.`);
       try {
         await notifyOwnersSafely([{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }], {
           title: 'Unassigned Order Crisis!',
@@ -377,159 +471,121 @@ export async function tryAutoAssign(orderId, options = {}) {
       }
     }
 
+    const { partners } = await listNearbyOnlineDeliveryPartners(row.restaurant, { maxKm, limit: 25 });
+    const [busy, holdingOffer] = await Promise.all([
+      getBusyDeliveryPartnerIds(),
+      getRidersHoldingAnOffer(id, windowMs),
+    ]);
     // Riders at their cash ceiling are skipped for cash-collect orders only.
-    const cashBlockedIds = orderCollectsCash(order)
+    const cashBlocked = orderCollectsCash(order)
       ? await getCashBlockedPartnerIds(partners.map((p) => p.partnerId))
       : new Set();
-
-    const eligible = partners.filter((partner) => {
-      const key = String(partner.partnerId);
-      if (offeredIds.includes(key)) return false;
-      if (busyPartnerIds.has(key)) return false;
-      if (cashBlockedIds.has(key)) return false;
-      return true;
-    });
-
-    // Without this, a cash order finding nobody looks identical to no riders being
-    // online, and the real reason stays invisible.
-    if (cashBlockedIds.size > 0) {
+    if (cashBlocked.size > 0) {
       logger.warn(
-        `[Dispatch] ${cashBlockedIds.size} rider(s) skipped for order ${id}: ` +
-          `cash-in-hand at or above the configured limit.`,
+        `[Dispatch] ${cashBlocked.size} rider(s) skipped for order ${id}: cash-in-hand at or above the configured limit.`,
       );
     }
 
-    const io = getIO();
+    // Nearest first (listNearbyOnlineDeliveryPartners sorts by distance).
+    const free = partners.filter((p) => {
+      const key = String(p.partnerId);
+      return !neverAgain.has(key) && !busy.has(key) && !holdingOffer.has(key) && !cashBlocked.has(key);
+    });
+    const next = free.find((p) => !askedThisRound.has(String(p.partnerId)));
 
-    if (eligible.length === 0) {
-      logger.info(`tryAutoAssign: No NEW eligible partners in ${maxKm}km for order ${id}. Restarting hunt...`);
-
-      const reofferPool = partners.filter((partner) => {
-        const key = String(partner.partnerId);
-        if (permanentlyExcludedIds.has(key)) return false;
-        if (busyPartnerIds.has(key)) return false;
-        if (cashBlockedIds.has(key)) return false;
-        return true;
-      });
-      // Those who declined only come back when nobody else is left, so the
-      // order is never stranded but a "no" is respected while there's a choice.
-      const notDeclined = reofferPool.filter((p) => !declinedIds.has(String(p.partnerId)));
-      const reofferEligible = notDeclined.length ? notDeclined : reofferPool;
-
-      if (reofferEligible.length > 0) {
-        const basePayload = buildDeliverySocketPayload(order, row.restaurant);
-        const payload = await enrichPayloadWithTripRoadDistance(order, basePayload);
-        const acceptanceDeadlineAt = new Date(Date.now() + DRIVER_ACCEPT_WINDOW_MS);
-
-        if (io) {
-          for (const p of reofferEligible) {
-            io.to(rooms.delivery(p.partnerId)).emit('new_order_available', {
-              ...payload,
-              pickupDistanceKm: p.distanceKm,
-              acceptanceDeadlineAt,
-            });
-          }
-        }
-
-        // This branch previously emitted a socket event only, so a backgrounded or
-        // locked driver was never woken on a re-offer round. Push on every round.
-        try {
-          await notifyOwnersActionableAlert(
-            reofferEligible.map((p) => ({ ownerType: 'DELIVERY_PARTNER', ownerId: p.partnerId })),
-            {
-              title: 'New order available!',
-              body: `Order #${order.order_id || id} is still available. Tap to accept.`,
-              androidTag: `order_${id}`,
-              androidChannelId: 'incoming_orders_channel_v3',
-              data: buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt),
-            },
-          );
-        } catch (err) {
-          logger.warn(`Re-offer push failed for order ${id}: ${err.message}`);
-        }
-      }
-
-      // Re-queue to keep trying, aligned to the client countdown.
-      await addOrderJob(
-        { action: 'DISPATCH_TIMEOUT_CHECK', orderMongoId: id, orderId: id, attempt: attempt + 1 },
-        { delay: DRIVER_ACCEPT_WINDOW_MS },
+    if (!next) {
+      // Nobody left to ask this round. Look again in one window; if free riders
+      // are around and all said no, that look starts the next round.
+      const roundOver = free.length > 0;
+      logger.info(
+        `tryAutoAssign: no rider to ask for ${id} in ${maxKm}km (round ${round}${roundOver ? ', everyone asked' : ''}).`,
       );
-
+      await addOrderJob(
+        { action: 'DISPATCH_TIMEOUT_CHECK', orderMongoId: id, orderId: id, attempt: attempt + 1, newRound: roundOver },
+        { delay: windowMs },
+      );
       return order;
     }
 
     const basePayload = buildDeliverySocketPayload(order, row.restaurant);
     const payload = await enrichPayloadWithTripRoadDistance(order, basePayload);
 
-    // tripDistanceKm = restaurant ↔ customer (road); pickupDistanceKm = rider → restaurant (ranking only)
-    logger.info(`Broadcasting order ${id} to ${eligible.length} riders. tripDistanceKm=${payload.tripDistanceKm}`);
-    const acceptanceDeadlineAt = new Date(Date.now() + DRIVER_ACCEPT_WINDOW_MS);
-
-    if (io) {
-      for (const p of eligible) {
-        io.to(rooms.delivery(p.partnerId)).emit('new_order', {
-          ...payload,
-          pickupDistanceKm: p.distanceKm,
-          acceptanceDeadlineAt,
-        });
-      }
-    }
-
-    const pushTargets = eligible.map((p) => ({ ownerType: 'DELIVERY_PARTNER', ownerId: p.partnerId }));
-    if (pushTargets.length > 0) {
-      try {
-        await notifyOwnersActionableAlert(pushTargets, {
-          title: 'New order available!',
-          body: `Order #${order.order_id || id} is available. You have ${Math.round(DRIVER_ACCEPT_WINDOW_MS / 1000)} seconds to accept!`,
-          // Two messages — see notifyOwnersActionableAlert. This alert needs the
-          // app's own full-screen UI (only a data-only message triggers it) AND
-          // delivery on ROMs that refuse to start the app (only a notification
-          // block achieves that). Blending them loses the first.
-          //
-          // The tag is the contract with the app (cancel(0, tag:) in
-          // fcm_service.dart) — change one and you must change the other.
-          androidTag: `order_${id}`,
-          // The app's incoming channel is the _v3 id; the service default is the
-          // stale v1 name, and Android silently downgrades an unknown channel to
-          // low importance — no sound, no heads-up.
-          androidChannelId: 'incoming_orders_channel_v3',
-          data: buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt),
-        });
-      } catch (err) {
-        logger.warn(`Push notifications failed for broadcast on order ${id}: ${err.message}`);
-      }
-    }
-
-    // Conditional update, NOT a blind write. This row was loaded before several
-    // awaits (rider lookup, Directions fetch, FCM batch) — seconds during which a
-    // rider may have accepted. A blind write reverted that accept to unassigned,
-    // so the order was re-broadcast and a second rider could claim the same trip.
-    const { count: reoffered } = await prisma.foodOrder.updateMany({
-      where: { id, dispatchStatus: { not: 'accepted' }, dispatchAcceptedAt: null },
-      data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },
+    // The order becomes this rider's offer, and only theirs: acceptOrderDelivery
+    // lets the assigned rider claim it. Conditional, NOT a blind write -- a
+    // rider may have accepted during the awaits above.
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + windowMs);
+    const offer = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.foodOrder.updateMany({
+        where: { id, dispatchStatus: 'unassigned', dispatchAcceptedAt: null },
+        data: {
+          dispatchStatus: 'assigned',
+          dispatchDeliveryPartnerId: String(next.partnerId),
+          dispatchAssignedAt: now,
+        },
+      });
+      if (count === 0) return null;
+      return tx.orderDispatchOffer.create({
+        data: { orderId: id, partnerId: String(next.partnerId), at: now, action: 'offered', expiresAt, round },
+      });
     });
-
-    if (reoffered === 0) {
-      logger.info(`tryAutoAssign: order ${id} was accepted during broadcast — leaving assignment intact.`);
+    if (!offer) {
+      logger.info(`tryAutoAssign: order ${id} was taken during dispatch -- leaving it.`);
       return order;
     }
 
-    // The offeredTo[] array is its own table now, so the offers are appended
-    // rather than pushed onto the document.
-    await prisma.orderDispatchOffer.createMany({
-      data: eligible.map((p) => ({
-        orderId: id,
-        partnerId: String(p.partnerId),
-        at: new Date(),
-        action: 'offered',
-      })),
-    });
+    logger.info(
+      `Offering order ${id} to rider ${next.partnerId} (${next.distanceKm.toFixed(2)} km, round ${round}) for ${riderAcceptWindowSeconds}s.`,
+    );
 
-    // Re-check when the offer window closes, so the next round starts exactly as
-    // the client countdown hits zero.
+    const offerFields = { offerId: offer.id, offerExpiresAt: expiresAt, acceptanceDeadlineAt: expiresAt };
+    const io = getIO();
+    if (io) {
+      io.to(rooms.delivery(next.partnerId)).emit('new_order', {
+        ...payload,
+        ...offerFields,
+        pickupDistanceKm: next.distanceKm,
+      });
+    }
+
+    try {
+      await notifyOwnersActionableAlert([{ ownerType: 'DELIVERY_PARTNER', ownerId: next.partnerId }], {
+        title: 'New order available!',
+        body: `Order #${order.order_id || id} is available. You have ${riderAcceptWindowSeconds} seconds to accept!`,
+        // Two messages — see notifyOwnersActionableAlert. This alert needs the
+        // app's own full-screen UI (only a data-only message triggers it) AND
+        // delivery on ROMs that refuse to start the app (only a notification
+        // block achieves that). Blending them loses the first.
+        //
+        // The tag is the contract with the app (cancel(0, tag:) in
+        // fcm_service.dart) — change one and you must change the other.
+        androidTag: `order_${id}`,
+        // The app's incoming channel is the _v3 id; the service default is the
+        // stale v1 name, and Android silently downgrades an unknown channel to
+        // low importance — no sound, no heads-up.
+        androidChannelId: 'incoming_orders_channel_v3',
+        data: {
+          ...buildIncomingOrderPushData(order, payload, expiresAt, windowMs),
+          offerId: offer.id,
+          offerExpiresAt: expiresAt.toISOString(),
+          pickupDistanceKm: String(Number(next.distanceKm.toFixed(2))),
+        },
+      });
+    } catch (err) {
+      logger.warn(`Offer push failed for order ${id}: ${err.message}`);
+    }
+
+    // When the window closes with no answer, the next rider is asked.
     await addOrderJob(
-      { action: 'DISPATCH_TIMEOUT_CHECK', orderMongoId: id, orderId: id, attempt: attempt + 1 },
-      { delay: DRIVER_ACCEPT_WINDOW_MS },
+      {
+        action: 'DISPATCH_TIMEOUT_CHECK',
+        orderMongoId: id,
+        orderId: id,
+        partnerId: String(next.partnerId),
+        offerId: offer.id,
+        attempt: attempt + 1,
+      },
+      { delay: windowMs },
     );
 
     return order;
@@ -538,39 +594,42 @@ export async function tryAutoAssign(orderId, options = {}) {
   }
 }
 
-export async function processDispatchTimeout(orderId, partnerId) {
+/**
+ * The DISPATCH_TIMEOUT_CHECK job. With a partnerId: that rider's offer window
+ * closed -- if they still have not answered, the offer times out, their popup
+ * is closed and the next rider is asked. Without one: a scheduled look for a
+ * rider while nobody was available.
+ */
+export async function processDispatchTimeout(orderId, partnerId, options = {}) {
   const id = String(orderId);
   const row = await prisma.foodOrder.findUnique({ where: { id }, include: orderInclude });
   if (!row) return;
+  if (row.dispatchStatus === 'accepted' || TERMINAL_ORDER_STATUSES.includes(row.orderStatus)) return;
 
-  const offerCount = row.dispatchOffers?.length || 0;
+  const attempt = Number(options.attempt) || (row.dispatchOffers?.length || 0) + 1;
 
-  const stillAssigned =
-    row.dispatchStatus === 'assigned' &&
-    String(row.dispatchDeliveryPartnerId) === String(partnerId) &&
-    !row.dispatchAcceptedAt;
+  if (partnerId) {
+    const stillTheirs =
+      row.dispatchStatus === 'assigned' &&
+      String(row.dispatchDeliveryPartnerId) === String(partnerId) &&
+      !row.dispatchAcceptedAt;
+    if (!stillTheirs) return; // answered already, or the order moved on
 
-  if (stillAssigned) {
-    logger.info(`Dispatch timeout for partner ${partnerId} on order ${id}. Re-trying hunt...`);
-
-    const offer = row.dispatchOffers.find(
-      (o) => String(o.partnerId) === String(partnerId) && o.action === 'offered',
-    );
-    if (offer) {
-      await prisma.orderDispatchOffer.update({ where: { id: offer.id }, data: { action: 'timeout' } });
+    // A job from an older offer to the same rider (asked again in a later round).
+    if (options.offerId) {
+      const offer = (row.dispatchOffers || []).find((o) => o.id === options.offerId);
+      if (!offer || offer.action !== 'offered') return;
     }
 
-    await prisma.foodOrder.update({
-      where: { id },
-      data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },
-    });
+    logger.info(`Offer to rider ${partnerId} on order ${id} timed out. Asking the next rider.`);
+    const expired = await expireRiderOffer(row, partnerId, options.offerId || null);
+    if (!expired) return; // accepted at the last moment
 
     // reason/partnerId only matter in a manual zone: they tell the admins who
     // let the order time out.
-    await tryAutoAssign(id, { attempt: offerCount + 1, reason: 'timeout', partnerId });
+    await tryAutoAssign(id, { attempt, reason: 'timeout', partnerId, fromJob: true });
   } else if (row.dispatchStatus === 'unassigned') {
-    // Already unassigned (e.g. from a previous timeout) — just keep hunting.
-    await tryAutoAssign(id, { attempt: offerCount + 1 });
+    await tryAutoAssign(id, { attempt, newRound: Boolean(options.newRound), fromJob: true });
   }
 }
 
