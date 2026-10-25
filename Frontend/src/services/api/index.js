@@ -1372,6 +1372,9 @@ export const adminAPI = {
     }),
 
   /** Delivery Cash Limit (admin) */
+  /** Record cash a rider paid at the office: { full: true } or { amount }, plus a note. */
+  recordRiderCashDeposit: (deliveryId, body) =>
+    apiClient.post(`/food/admin/delivery/${deliveryId}/cash-deposit`, body ?? {}, { contextModule: "admin" }),
   getDeliveryCashLimit: () =>
     apiClient.get("/food/admin/delivery-cash-limit", {
       contextModule: "admin",

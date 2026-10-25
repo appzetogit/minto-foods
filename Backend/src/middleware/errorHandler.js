@@ -59,7 +59,10 @@ const errorHandler = (err, req, res, next) => {
         error: message, // retained for clients already reading this key
         // A reference the person can quote, which finds the full error in the log.
         ...(internal ? { requestId } : {}),
-        ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {})
+        ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
+        // A machine-readable reason the app acts on (e.g. CASH_LIMIT opens the
+        // deposit screen), only when the code that threw set one on purpose.
+        ...(err.publicCode ? { code: err.publicCode, details: err.details ?? null } : {})
     });
 };
 

@@ -5,6 +5,7 @@ import { logger } from '../../../../utils/logger.js';
 import { config } from '../../../../config/env.js';
 import { getIO, rooms } from '../../../../config/socket.js';
 import { addOrderJob } from '../../../../queues/producers/order.producer.js';
+import { cashBlockedPartnerIds } from '../../shared/riderCash.js';
 import {
   buildDeliverySocketPayload,
   buildOrderIdentityFilter,
@@ -152,35 +153,6 @@ function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt) {
  *
  * @returns {Promise<Set<string>>} partner ids to skip
  */
-async function getCashBlockedPartnerIds(partnerIds) {
-  if (!partnerIds.length) return new Set();
-
-  const settings = await prisma.foodDeliveryCashLimit.findFirst({
-    where: { isActive: true },
-    select: { deliveryCashLimit: true },
-  });
-  const limit = Number(settings?.deliveryCashLimit) || 0;
-  if (limit <= 0) return new Set();
-
-  // Wallets are one table now, keyed by (entityType, entityId).
-  const wallets = await prisma.wallet.findMany({
-    where: {
-      entityType: 'deliveryBoy',
-      entityId: { in: partnerIds.map(String) },
-      cashInHand: { gte: limit },
-    },
-    select: { entityId: true },
-  });
-
-  return new Set(wallets.map((w) => w.entityId));
-}
-
-/** Cash the rider has to physically collect, so it counts against their float. */
-function orderCollectsCash(order) {
-  const method = String(order?.payment?.method || order?.paymentMethod || '').toLowerCase();
-  return method === 'cash' || method === 'razorpay_qr';
-}
-
 async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit = 25 } = {}) {
   const rLat = Number(restaurant?.latitude);
   const rLng = Number(restaurant?.longitude);
@@ -343,10 +315,9 @@ export async function tryAutoAssign(orderId, options = {}) {
       }
     }
 
-    // Riders at their cash ceiling are skipped for cash-collect orders only.
-    const cashBlockedIds = orderCollectsCash(order)
-      ? await getCashBlockedPartnerIds(partners.map((p) => p.partnerId))
-      : new Set();
+    // Riders at their cash limit get no orders at all until they deposit
+    // (online or at the office) -- not only no cash orders.
+    const cashBlockedIds = await cashBlockedPartnerIds(partners.map((p) => p.partnerId));
 
     const eligible = partners.filter((partner) => {
       const key = String(partner.partnerId);

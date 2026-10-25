@@ -25,6 +25,69 @@ export default function DeliverymanList() {
   const [viewDetails, setViewDetails] = useState(null)
   const [editingDeliveryId, setEditingDeliveryId] = useState(null)
   const [editValues, setEditValues] = useState({ pocketBalance: "", cashInHand: "" })
+  // "Collect cash": cash a rider paid in at the office.
+  const [collectFor, setCollectFor] = useState(null)
+  const [collectFull, setCollectFull] = useState(true)
+  const [collectAmount, setCollectAmount] = useState("")
+  const [collectNote, setCollectNote] = useState("")
+  const [collecting, setCollecting] = useState(false)
+
+  // The rider cash limit: at or over it a rider gets no orders until they deposit.
+  const [cashLimit, setCashLimit] = useState("")
+  const [savingLimit, setSavingLimit] = useState(false)
+  useEffect(() => {
+    adminAPI
+      .getDeliveryCashLimit()
+      .then((res) => {
+        const v = res?.data?.data?.deliveryCashLimit ?? res?.data?.deliveryCashLimit
+        if (v !== undefined && v !== null) setCashLimit(String(v))
+      })
+      .catch(() => {})
+  }, [])
+  const saveCashLimit = async () => {
+    const value = Number(cashLimit)
+    if (!Number.isFinite(value) || value < 0) {
+      toast.error("Enter a cash limit of 0 or more")
+      return
+    }
+    try {
+      setSavingLimit(true)
+      await adminAPI.updateDeliveryCashLimit({ deliveryCashLimit: value })
+      toast.success(value > 0 ? `Cash limit set to ₹${value}` : "Cash limit turned off")
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not save the cash limit")
+    } finally {
+      setSavingLimit(false)
+    }
+  }
+
+  const saveCollectedCash = async () => {
+    if (!collectFor) return
+    if (!collectFull && !(Number(collectAmount) > 0)) {
+      toast.error("Enter the amount received")
+      return
+    }
+    try {
+      setCollecting(true)
+      const res = await adminAPI.recordRiderCashDeposit(String(collectFor._id), {
+        full: collectFull,
+        ...(collectFull ? {} : { amount: Number(collectAmount) }),
+        note: collectNote,
+      })
+      const after = res?.data?.data?.after
+      toast.success(
+        after?.blocked
+          ? `Recorded. Still ₹${after.cashInHand} in hand — over the limit, so no orders yet.`
+          : `Recorded. ${collectFor.name || "The rider"} can take orders again.`,
+      )
+      setCollectFor(null)
+      fetchDeliverymen()
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Could not record the payment")
+    } finally {
+      setCollecting(false)
+    }
+  }
   const [savingDeliveryId, setSavingDeliveryId] = useState(null)
   const [deletingDeliveryId, setDeletingDeliveryId] = useState(null)
   const [visibleColumns, setVisibleColumns] = useState({
@@ -506,6 +569,25 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                 <FileSpreadsheet className="w-4 h-4" />
                 <span className="text-black font-bold">Excel</span>
               </button>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5" title="Riders holding this much cash get no orders until they deposit. 0 = no limit.">
+                <span className="text-xs font-semibold text-slate-600 whitespace-nowrap">Cash limit ₹</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={cashLimit}
+                  onChange={(e) => setCashLimit(e.target.value)}
+                  className="w-20 text-sm outline-none"
+                  placeholder="1500"
+                />
+                <button
+                  onClick={saveCashLimit}
+                  disabled={savingLimit}
+                  className="text-xs font-semibold text-blue-600 disabled:opacity-50"
+                >
+                  {savingLimit ? "…" : "Save"}
+                </button>
+              </div>
               <button 
                 onClick={() => setIsSettingsOpen(true)}
                 className="p-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all"
@@ -812,6 +894,18 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                   <Pencil className="w-4 h-4" />
                                 </button>
                               )}
+                              <button
+                                onClick={() => {
+                                  setCollectFor(dm)
+                                  setCollectFull(true)
+                                  setCollectAmount("")
+                                  setCollectNote("")
+                                }}
+                                className="p-1.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                                title="Collect cash paid at office"
+                              >
+                                <CreditCard className="w-4 h-4" />
+                              </button>
                               <button 
                                 onClick={() => handleView(dm)}
                                 className="p-1.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors" 
@@ -1236,6 +1330,63 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
               className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-all"
             >
               Close
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Collect cash paid at the office */}
+      <Dialog open={Boolean(collectFor)} onOpenChange={(open) => !open && setCollectFor(null)}>
+        <DialogContent className="max-w-md bg-white p-0">
+          <DialogHeader className="px-6 pt-6 pb-2">
+            <DialogTitle>Collect cash — {collectFor?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="px-6 pb-4 space-y-4">
+            <p className="text-sm text-slate-600">
+              Cash in hand: <b>₹{Number(collectFor?.cashInHand || 0).toFixed(2)}</b>. Once it is below the
+              cash limit the rider's app starts getting orders again.
+            </p>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input type="radio" checked={collectFull} onChange={() => setCollectFull(true)} />
+                Paid in full
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" checked={!collectFull} onChange={() => setCollectFull(false)} />
+                Partly paid
+              </label>
+            </div>
+            {!collectFull && (
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={collectAmount}
+                onChange={(e) => setCollectAmount(e.target.value)}
+                placeholder="Amount received (₹)"
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+              />
+            )}
+            <input
+              value={collectNote}
+              onChange={(e) => setCollectNote(e.target.value)}
+              placeholder="Note (optional), e.g. receipt no."
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+            />
+          </div>
+          <DialogFooter className="px-6 pb-6">
+            <button
+              onClick={() => setCollectFor(null)}
+              className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveCollectedCash}
+              disabled={collecting}
+              className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white disabled:opacity-60"
+            >
+              {collecting ? "Saving…" : "Record payment"}
             </button>
           </DialogFooter>
         </DialogContent>

@@ -2073,3 +2073,21 @@ export async function createDeliveryPartner(req, res, next) {
         next(error);
     }
 }
+
+export async function recordOfficeCashDeposit(req, res, next) {
+    try {
+        const data = await adminService.recordOfficeCashDeposit(req.params.id, req.body || {}, req.user?.userId);
+        res.status(201).json({ success: true, message: 'Cash deposit recorded', data });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getRiderCashStatus(req, res, next) {
+    try {
+        const { riderCashStatus } = await import('../../shared/riderCash.js');
+        res.status(200).json({ success: true, data: await riderCashStatus(req.params.id) });
+    } catch (error) {
+        next(error);
+    }
+}
