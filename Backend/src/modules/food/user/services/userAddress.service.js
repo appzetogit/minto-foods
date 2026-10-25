@@ -49,6 +49,14 @@ export const addAddress = async (userId, dto) => {
     });
     if (!user) throw new ValidationError('User not found');
 
+    // A cap on saved addresses: past ten the list is unusable, and test
+    // runs left some customers with dozens of identical rows.
+    const MAX_ADDRESSES = 10;
+    const saved = await prisma.userAddress.count({ where: { userId: user.id } });
+    if (saved >= MAX_ADDRESSES) {
+        throw new ValidationError(`You can save up to ${MAX_ADDRESSES} addresses. Delete one to add another.`);
+    }
+
     const existingDefault = await prisma.userAddress.count({
         where: { userId: user.id, isDefault: true },
     });
