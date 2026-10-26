@@ -1,3 +1,4 @@
+import { riderCashStatus } from '../../shared/riderCash.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -181,4 +182,40 @@ export async function getCashLimitSettlements(query = {}) {
     }));
 
     return { transactions, pagination: { total, page, limit, pages: Math.ceil(total / limit) || 1 } };
+}
+
+/**
+ * Cash a rider paid in at the office, recorded by an admin: all of what they
+ * hold (`full: true`) or part of it. It counts exactly like an online deposit,
+ * so once the rider is back under the limit their app takes orders again with
+ * nothing else to switch on.
+ */
+export async function recordOfficeCashDeposit(partnerId, { amount, full = false, note = '' } = {}, adminId = null) {
+    if (!isId(partnerId)) throw new ValidationError('Delivery partner ID required');
+    const partner = await prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(partnerId) },
+        select: { id: true, name: true },
+    });
+    if (!partner) throw new ValidationError('Delivery partner not found');
+
+    const before = await riderCashStatus(partner.id);
+    const paid = full ? before.cashInHand : Math.round(Number(amount) * 100) / 100;
+    if (!Number.isFinite(paid) || paid <= 0) throw new ValidationError('Enter the amount received');
+    if (paid > before.cashInHand + 0.009) {
+        throw new ValidationError(`${partner.name || 'This rider'} holds only ₹${before.cashInHand}`);
+    }
+
+    const deposit = await prisma.foodDeliveryCashDeposit.create({
+        data: {
+            deliveryPartnerId: partner.id,
+            amount: paid,
+            paymentMethod: 'cash',
+            status: 'Completed',
+            adminId: isId(adminId) ? String(adminId) : null,
+            adminNote: String(note || '').trim().slice(0, 300) || (full ? 'Paid in full at office' : 'Part payment at office'),
+        },
+    });
+
+    const after = await riderCashStatus(partner.id);
+    return { deposit: { id: deposit.id, amount: paid, createdAt: deposit.createdAt }, before, after };
 }

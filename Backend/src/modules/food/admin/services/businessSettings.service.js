@@ -80,6 +80,14 @@ const serialize = (row) => ({
     discoveryRadiusKm: row.discoveryRadiusKm == null ? null : Number(row.discoveryRadiusKm),
 });
 
+/** "98765 43210", "+91-9876543210", "09876543210" -> "+919876543210"; null if not one. */
+export const toIndianTel = (raw) => {
+    let digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+    if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
+    return /^[6-9]\d{9}$/.test(digits) ? `+91${digits}` : null;
+};
+
 /** The settings row, created on first read. There is only ever one. */
 const loadRow = async () =>
     (await prisma.foodBusinessSettings.findFirst()) ?? prisma.foodBusinessSettings.create({ data: {} });
@@ -164,6 +172,32 @@ export const updateBusinessSettings = async (body = {}, files = null) => {
     if (body.state !== undefined) data.state = String(body.state || '');
     if (body.pincode !== undefined) data.pincode = String(body.pincode || '');
     if (body.region) data.region = String(body.region);
+
+    // Support numbers for the customer app's Help page. A multipart form sends
+    // the list as JSON or comma-separated text. Stored with +91 so every
+    // "Call" in every app dials an Indian number the same way.
+    if (body.supportPhones !== undefined) {
+        let list = body.supportPhones;
+        if (typeof list === 'string') {
+            try { list = JSON.parse(list); } catch { list = list.split(','); }
+        }
+        const phones = (Array.isArray(list) ? list : [])
+            .map((p) => String(p || '').trim())
+            .filter(Boolean)
+            .map((p) => {
+                const tel = toIndianTel(p);
+                if (!tel) throw new ValidationError(`"${p}" is not a valid 10 digit mobile number`);
+                return tel;
+            });
+        if (phones.length > 6) throw new ValidationError('At most 6 support numbers');
+        data.supportPhones = [...new Set(phones)];
+    }
+    if (body.whatsappNumber !== undefined) {
+        const raw = String(body.whatsappNumber || '').trim();
+        const tel = raw ? toIndianTel(raw) : '';
+        if (raw && !tel) throw new ValidationError('WhatsApp number must be a valid 10 digit mobile number');
+        data.whatsappNumber = tel;
+    }
 
     // Blank clears the limit. Zero is refused rather than stored: it would read
     // as "no restaurant is within range" and empty the app for everyone.

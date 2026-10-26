@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { APP_CONFIG } from "../config/constants"; // Adjust path if needed
 import apiClient, { restaurantAPI } from "../services/api";
+import { telHref } from "@/shared/utils/tel";
 
 // Minto's own store listings and social pages. Empty until they are published:
 // a missing link renders as "Coming soon" instead of sending people somewhere
@@ -1080,7 +1081,7 @@ export default function LandingPage() {
             <div className="flex flex-col gap-5 text-sm font-medium">
               <h4 className="text-slate-900 font-bold tracking-widest text-xs uppercase mb-1">Contact</h4>
               <a href={`mailto:${supportContact.email}`} className="hover:text-[#008078] transition-colors">{supportContact.email}</a>
-              <a href={`tel:${supportContact.mobile}`} className="hover:text-[#008078] transition-colors">{supportContact.mobile}</a>
+              <a href={telHref(supportContact.mobile)} className="hover:text-[#008078] transition-colors">{supportContact.mobile}</a>
               <p className="text-slate-400 text-xs mt-3 leading-relaxed">Available 24/7 for premium members.</p>
             </div>
           </div>

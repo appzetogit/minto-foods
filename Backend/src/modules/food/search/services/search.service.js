@@ -90,7 +90,10 @@ export const searchUnified = async (query = {}, options = {}) => {
 
     // 1. Base filter
     const where = { status: 'approved' };
-    where.zoneId = service.zoneId;
+    // By range, not by zone: the zone only says whether we serve the customer
+    // (checked above); the delivery radius decides which restaurants. Only an
+    // explicitly requested zone filters.
+    if (/^[a-f0-9]{24}$/i.test(String(zoneId || '').trim())) where.zoneId = service.zoneId;
     if (isVeg === 'true') where.pureVegRestaurant = true;
     // Filters from the URL are only applied when they are real numbers. A value
     // like `minRating=abc` used to reach the query as NaN, which the database

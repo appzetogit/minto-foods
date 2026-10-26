@@ -1848,9 +1848,12 @@ export const listApprovedRestaurants = async (query = {}) => {
         }
     }
 
-    // Always limited to one zone: the one asked for, or the one the customer
-    // is standing in. Without a zone this used to list every restaurant on the
-    // platform, so a customer outside every service area saw all of India.
+    // The zone decides WHETHER we serve the customer: outside every zone, or
+    // with no location at all, the list is empty. It no longer decides WHICH
+    // restaurants they see -- that is the delivery radius below, so a customer
+    // near a zone's edge sees the restaurants just across it (Kongaon sees
+    // Bhiwandi). Only an explicitly requested zone (admin screens) filters.
+    const askedZone = /^[a-f0-9]{24}$/i.test(String(query.zoneId || '').trim());
     const service = await resolveServiceZone(query);
     if (!service.zoneId) {
         return {
@@ -1862,7 +1865,7 @@ export const listApprovedRestaurants = async (query = {}) => {
             requiresLocation: Boolean(service.requiresLocation),
         };
     }
-    AND.push({ zoneId: service.zoneId });
+    if (askedZone) AND.push({ zoneId: service.zoneId });
 
     const where = { status: 'approved', ...(AND.length ? { AND } : {}) };
 
@@ -1959,6 +1962,9 @@ export const listApprovedRestaurants = async (query = {}) => {
         const byDistance = (a, b) =>
             (distanceById.get(a.id) ?? Infinity) - (distanceById.get(b.id) ?? Infinity);
 
+        const openThenNearest = (a, b) =>
+            (b.isAcceptingOrders === false ? 0 : 1) - (a.isAcceptingOrders === false ? 0 : 1) || byDistance(a, b);
+
         const sorters = {
             rating: (a, b) => b.rating - a.rating || byDistance(a, b),
             'rating-high': (a, b) => b.rating - a.rating || byDistance(a, b),
@@ -1978,7 +1984,9 @@ export const listApprovedRestaurants = async (query = {}) => {
             // Without an explicit sort, keep the order the unlocated list uses
             // (newest first) unless the caller asked for distance -- filtering
             // by radius must not quietly reorder a screen.
-            .sort(sorters[sortBy] || (askedForGeo ? byDistance : sorters.newest));
+            // Default: restaurants taking orders first, then nearest. The newest
+            // restaurant used to top the list however far or closed it was.
+            .sort(sorters[sortBy] || openThenNearest);
 
         return finish(sorted.slice(skip, skip + limit), sorted.length);
     }
@@ -1992,7 +2000,7 @@ export const listApprovedRestaurants = async (query = {}) => {
             'price-low': [{ featuredPrice: 'asc' }, { createdAt: 'desc' }],
             'price-high': [{ featuredPrice: 'desc' }, { createdAt: 'desc' }],
             deliveryTime: [{ estimatedDeliveryTimeMinutes: 'asc' }, { createdAt: 'desc' }],
-        }[sortBy] || [{ createdAt: 'desc' }];
+        }[sortBy] || [{ isAcceptingOrders: 'desc' }, { createdAt: 'desc' }];
 
     const [rows, total] = await Promise.all([
         prisma.foodRestaurant.findMany({
@@ -2027,6 +2035,9 @@ export const listApprovedRestaurants = async (query = {}) => {
  */
 const PUBLIC_RESTAURANT_SELECT = {
     id: true, restaurantName: true, restaurantNameNormalized: true,
+    // The owner's name only, shown on the restaurant's info page. Their phone
+    // and email stay private.
+    ownerName: true,
     profileImage: true, coverImage: true, coverImages: true,
     galleryImages: true, menuImages: true, videos: true,
     cuisines: true, pureVegRestaurant: true, rating: true, totalRatings: true,
@@ -2195,6 +2206,7 @@ export const listPublicOffers = async (query = {}) => {
             perUserLimit: o.perUserLimit ?? null,
             customerScope: o.customerScope,
             isFirstOrderOnly: !!o.isFirstOrderOnly,
+            category: o.category || null,
             restaurantScope: o.restaurantScope,
             restaurantId:
                 restaurant?.id || (o.restaurantScope === 'selected' ? o.restaurantId : null),

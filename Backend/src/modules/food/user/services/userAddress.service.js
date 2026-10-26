@@ -49,6 +49,14 @@ export const addAddress = async (userId, dto) => {
     });
     if (!user) throw new ValidationError('User not found');
 
+    // A cap on saved addresses: past ten the list is unusable, and test
+    // runs left some customers with dozens of identical rows.
+    const MAX_ADDRESSES = 10;
+    const saved = await prisma.userAddress.count({ where: { userId: user.id } });
+    if (saved >= MAX_ADDRESSES) {
+        throw new ValidationError(`You can save up to ${MAX_ADDRESSES} addresses. Delete one to add another.`);
+    }
+
     const existingDefault = await prisma.userAddress.count({
         where: { userId: user.id, isDefault: true },
     });
@@ -64,6 +72,7 @@ export const addAddress = async (userId, dto) => {
             label: normalizeLabel(dto.label),
             street: dto.street,
             additionalDetails: dto.additionalDetails || '',
+            customLabel: dto.customLabel || '',
             city: dto.city,
             state: dto.state,
             zipCode: dto.zipCode || '',
@@ -84,6 +93,7 @@ export const updateAddress = async (userId, addressId, dto) => {
     if (dto.label !== undefined) data.label = normalizeLabel(dto.label);
     if (dto.street !== undefined) data.street = dto.street;
     if (dto.additionalDetails !== undefined) data.additionalDetails = dto.additionalDetails || '';
+    if (dto.customLabel !== undefined) data.customLabel = dto.customLabel || '';
     if (dto.city !== undefined) data.city = dto.city;
     if (dto.state !== undefined) data.state = dto.state;
     if (dto.zipCode !== undefined) data.zipCode = dto.zipCode || '';

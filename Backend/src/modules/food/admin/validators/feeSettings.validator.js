@@ -55,6 +55,11 @@ const feeSettingsUpsertSchema = z.object({
     deliveryFeeGstRate: percentage('Delivery fee GST rate').nullable().optional(),
     // The floor under a rider's earning for one trip; null removes it.
     riderMinPayPerTrip: bounded('Minimum rider pay', MAX_AMOUNT).nullable().optional(),
+    // Cash on Delivery is refused at or above this order total; null resets it
+    // to the ₹2000 default, 0 removes the limit.
+    codMaxOrderValue: bounded('Cash on Delivery limit', MAX_AMOUNT).nullable().optional(),
+    // Most of one dish a customer can add.
+    maxItemQuantity: z.number().int('Max quantity must be a whole number').min(1, 'Max quantity must be at least 1').max(999, 'Max quantity cannot exceed 999').optional(),
     isActive: z.boolean().optional(),
     // Which zone these fees are for. Absent/null is the global default, which
     // is what every pre-zone caller means. Zod strips undeclared keys, so
@@ -103,6 +108,16 @@ export const validateFeeSettingsUpsertDto = (body) => {
                 : body?.riderMinPayPerTrip !== undefined
                     ? Number(body.riderMinPayPerTrip)
                     : undefined,
+        codMaxOrderValue:
+            body?.codMaxOrderValue === null || body?.codMaxOrderValue === ''
+                ? null
+                : body?.codMaxOrderValue !== undefined
+                    ? Number(body.codMaxOrderValue)
+                    : undefined,
+        maxItemQuantity:
+            body?.maxItemQuantity !== undefined && body?.maxItemQuantity !== null && body?.maxItemQuantity !== ''
+                ? Number(body.maxItemQuantity)
+                : undefined,
         isActive: body?.isActive !== undefined ? Boolean(body.isActive) : undefined,
         zoneId: body?.zoneId ? String(body.zoneId) : body?.zoneId === null ? null : undefined
     };

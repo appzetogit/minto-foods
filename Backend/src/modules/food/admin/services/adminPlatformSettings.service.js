@@ -44,6 +44,8 @@ const serializeFeeSettings = (doc) => {
         gstRate: num(doc.gstRate),
         deliveryFeeGstRate: num(doc.deliveryFeeGstRate),
         riderMinPayPerTrip: num(doc.riderMinPayPerTrip),
+        codMaxOrderValue: num(doc.codMaxOrderValue),
+        maxItemQuantity: doc.maxItemQuantity ?? 50,
         deliveryFeeRanges: toFeeRanges(deliveryFeeBands),
     };
 };
@@ -78,7 +80,7 @@ export async function getFeeSettings(zoneId = null) {
  */
 const feeColumns = (body = {}) => {
     const data = {};
-    for (const key of ['deliveryFee', 'platformFee', 'quickDeliveryFee', 'gstRate', 'riderMinPayPerTrip']) {
+    for (const key of ['deliveryFee', 'platformFee', 'quickDeliveryFee', 'gstRate', 'riderMinPayPerTrip', 'codMaxOrderValue']) {
         if (body[key] === null) data[key] = null;
         else if (body[key] !== undefined) data[key] = Number(body[key]);
     }
@@ -88,6 +90,7 @@ const feeColumns = (body = {}) => {
             ? null
             : Number(body.deliveryFeeGstRate);
 
+    if (body.maxItemQuantity !== undefined) data.maxItemQuantity = Number(body.maxItemQuantity);
     if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
     return data;
 };

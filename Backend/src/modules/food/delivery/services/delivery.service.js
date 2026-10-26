@@ -1,3 +1,4 @@
+import { riderCashStatus, cashLimitMessage } from '../../shared/riderCash.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
@@ -400,6 +401,16 @@ const closeOpenSessions = async (tx, partnerId, { bySystem = false, lat = null, 
     return open.length;
 };
 
+/** Takes a rider off duty, closing their open shift, e.g. over the cash limit. */
+export const forceDeliveryPartnerOffline = (partnerId) =>
+    prisma.$transaction(async (tx) => {
+        await tx.foodDeliveryPartner.update({
+            where: { id: String(partnerId) },
+            data: { availabilityStatus: 'offline' },
+        });
+        await closeOpenSessions(tx, String(partnerId), { bySystem: true });
+    });
+
 export const updateDeliveryAvailability = async (userId, payload) => {
     const partner = await requirePartner(userId);
 
@@ -428,6 +439,19 @@ export const updateDeliveryAvailability = async (userId, payload) => {
     // transition -- otherwise the log would be one row per ping.
     const wasOnline = partner.availabilityStatus === 'online';
     const isOnline = validStatus === 'online';
+
+    // Over the cash limit: no going online (and an online rider is taken off)
+    // until enough is deposited, online or at the office.
+    if (isOnline) {
+        const cash = await riderCashStatus(partner.id);
+        if (cash.blocked) {
+            if (wasOnline) await forceDeliveryPartnerOffline(partner.id);
+            const err = new ValidationError(cashLimitMessage(cash));
+            err.publicCode = 'CASH_LIMIT';
+            err.details = cash;
+            throw err;
+        }
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.foodDeliveryPartner.update({ where: { id: partner.id }, data });
@@ -507,7 +531,10 @@ export const getDeliveryPartnerWallet = async (deliveryPartnerId) => {
 
     const totalEarned = num(earningsAgg?._sum?.riderEarning);
     const totalTipsEarned = num(earningsAgg?._sum?.tipAmount);
-    const cashInHand = num(cashAgg?._sum?.riderEarning);
+    // Cash held for us: collected on COD orders minus deposits (shared/riderCash).
+    // This was the rider's own earning on cash orders, a different number.
+    void cashAgg;
+    const { cashInHand } = await riderCashStatus(partnerId);
     const totalBonus = num(bonusAgg?._sum?.amount);
 
     const paymentTransactions = (paymentTxList || []).map((o) => {

@@ -485,6 +485,9 @@ export const adminAPI = {
     apiClient.delete(`/food/admin/sub-admins/${String(id)}`, { contextModule: "admin" }),
   getSubAdminPermissionCatalog: () =>
     apiClient.get("/food/admin/sub-admins/permission-catalog", { contextModule: "admin" }),
+  /** Add a delivery partner from the admin panel (approved unless status: "pending"). */
+  createDeliveryPartner: (payload) =>
+    apiClient.post("/food/admin/delivery/partners", payload, { contextModule: "admin" }),
   /** List approved delivery partners (Deliveryman List page) */
   getDeliveryPartners: (params) =>
     apiClient.get("/food/admin/delivery/partners", {
@@ -1369,6 +1372,9 @@ export const adminAPI = {
     }),
 
   /** Delivery Cash Limit (admin) */
+  /** Record cash a rider paid at the office: { full: true } or { amount }, plus a note. */
+  recordRiderCashDeposit: (deliveryId, body) =>
+    apiClient.post(`/food/admin/delivery/${deliveryId}/cash-deposit`, body ?? {}, { contextModule: "admin" }),
   getDeliveryCashLimit: () =>
     apiClient.get("/food/admin/delivery-cash-limit", {
       contextModule: "admin",

@@ -298,6 +298,9 @@ router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderControlle
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 
+// Customer reviews: every rated order, newest first.
+router.get('/reviews', authMiddleware, requireRestaurant, orderController.listRestaurantReviewsController);
+
 // Complaints (restaurant dashboard)
 router.get('/complaints', authMiddleware, requireRestaurant, getRestaurantComplaintsController);
 router.post('/support/tickets', authMiddleware, requireRestaurant, createRestaurantSupportTicketController);

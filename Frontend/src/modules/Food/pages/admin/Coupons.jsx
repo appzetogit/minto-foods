@@ -234,6 +234,7 @@ export default function Coupons() {
     usageLimit: "",
     perUserLimit: "",
     isFirstOrderOnly: false,
+    category: "",
     adminBearPercentage: "100",
     restaurantBearPercentage: "0",
   })
@@ -445,6 +446,7 @@ export default function Coupons() {
       usageLimit: "",
       perUserLimit: "",
       isFirstOrderOnly: false,
+      category: "",
       adminBearPercentage: "100",
       restaurantBearPercentage: "0",
     })
@@ -497,6 +499,7 @@ export default function Coupons() {
         usageLimit: formData.usageLimit !== "" ? Number(formData.usageLimit) : undefined,
         perUserLimit: formData.perUserLimit !== "" ? Number(formData.perUserLimit) : undefined,
         isFirstOrderOnly: Boolean(formData.isFirstOrderOnly),
+        category: formData.category || null,
         adminBearPercentage: Number(formData.adminBearPercentage),
         restaurantBearPercentage: Number(formData.restaurantBearPercentage),
       }
@@ -778,6 +781,23 @@ export default function Coupons() {
                   className="h-4 w-4"
                 />
                 <label htmlFor="isFirstOrderOnly" className="text-sm text-slate-700">First order only</label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Category in the app</label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => handleFormChange("category", e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">None (All only)</option>
+                  <option value="bank">Bank offers</option>
+                  <option value="free_delivery">Free delivery</option>
+                  <option value="new_user">New user</option>
+                  <option value="top_brands">Top brands</option>
+                  <option value="combo">Combo</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500">Which "Top Coupon Categories" chip shows this coupon.</p>
               </div>
 
                 {formData.restaurantScope === "selected" && (

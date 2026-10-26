@@ -52,6 +52,9 @@ export default function BusinessSetup() {
     pincode: "",
     region: "",
     discoveryRadiusKm: "",
+    // Customer Help page: up to four "Call us" numbers and a WhatsApp number.
+    supportPhones: ["", "", "", ""],
+    whatsappNumber: "",
   });
 
   // Fetch business settings on mount
@@ -77,6 +80,10 @@ export default function BusinessSetup() {
           region: settings.region || "India",
           discoveryRadiusKm:
             settings.discoveryRadiusKm == null ? "" : String(settings.discoveryRadiusKm),
+          supportPhones: [0, 1, 2, 3].map((i) =>
+            String(settings.supportPhones?.[i] || "").replace(/^\+91/, ""),
+          ),
+          whatsappNumber: String(settings.whatsappNumber || "").replace(/^\+91/, ""),
         });
 
         // Set logo and favicon previews if they exist
@@ -174,6 +181,9 @@ export default function BusinessSetup() {
         // Blank is "no limit", which has to travel as null — 0 would read as a
         // radius nobody can order inside.
         discoveryRadiusKm: radiusInput ? Number(radiusInput) : null,
+        // Saved as +91 numbers by the server.
+        supportPhones: formData.supportPhones.map((p) => p.trim()).filter(Boolean),
+        whatsappNumber: formData.whatsappNumber.trim(),
       };
 
       // Prepare files
@@ -446,9 +456,54 @@ export default function BusinessSetup() {
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
                 <p className="mt-1 text-[11px] text-slate-500">
-                  How far from a customer restaurants may be shown and ordered from. Blank means no
-                  limit.
+                  How far from a customer restaurants may be shown and ordered from. Blank means
+                  15 km.
                 </p>
+              </div>
+            </div>
+
+            {/* Customer support contacts (app Help page) */}
+            <div className="mb-4 rounded-lg border border-slate-200 p-4">
+              <p className="text-xs font-semibold text-slate-700">Customer support (app Help page)</p>
+              <p className="mt-1 mb-3 text-[11px] text-slate-500">
+                Shown under "Call us" and "WhatsApp chat". Enter 10 digit mobile numbers; the app
+                always dials them with +91.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {formData.supportPhones.map((value, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">+91</span>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      placeholder={`Support number ${i + 1}`}
+                      value={value}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                        setFormData((prev) => ({
+                          ...prev,
+                          supportPhones: prev.supportPhones.map((p, j) => (j === i ? digits : p)),
+                        }));
+                      }}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                ))}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">WhatsApp +91</span>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    placeholder="WhatsApp number"
+                    value={formData.whatsappNumber}
+                    onChange={(e) =>
+                      handleInputChange("whatsappNumber", e.target.value.replace(/\D/g, "").slice(0, 10))
+                    }
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
               </div>
             </div>
 

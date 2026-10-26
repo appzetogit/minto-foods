@@ -1,3 +1,4 @@
+import { riderCashStatus, cashLimitMessage } from '../../shared/riderCash.js';
 import { prisma } from '../../../../config/prisma.js';
 import { toOrder, toOrders, orderInclude } from '../order.mapper.js';
 import {
@@ -185,7 +186,10 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
     where: {
       dispatchDeliveryPartnerId: String(deliveryPartnerId),
       dispatchStatus: 'accepted',
-      orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'picked_up'] },
+      // Every live stage. reached_pickup and reached_drop used to be missing,
+      // so a trip vanished from the rider's screen on arriving at either end.
+      // Whether the rider is online plays no part: an accepted trip is theirs.
+      orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup', 'picked_up', 'reached_drop'] },
     },
     include: deliveryInclude,
     orderBy: { updatedAt: 'desc' },
@@ -211,20 +215,13 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
         orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       }
     : {
-        OR: [
-          {
-            dispatchStatus: 'unassigned',
-            // The $not/$elemMatch guard becomes a relation filter: no deassign
-            // record for this rider on this order.
-            dispatchOffers: { none: { partnerId, action: 'deassigned' } },
-            orderStatus: { in: ['confirmed', 'preparing', 'ready_for_pickup'] },
-          },
-          {
-            dispatchDeliveryPartnerId: partnerId,
-            dispatchStatus: { in: ['assigned', 'accepted'] },
-            orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-          },
-        ],
+        // Only the order offered to THIS rider. Every unassigned order nearby
+        // used to be listed to every rider, so one order sat on several
+        // screens at once and the others kept it after one rider accepted.
+        // Dispatch now holds an order for one rider at a time (tryAutoAssign).
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: { in: ['assigned', 'accepted'] },
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       };
 
   // For idle partners, pull a wider candidate set then proximity-filter in memory.
@@ -328,31 +325,10 @@ export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
  *
  * Prepaid orders are unaffected. A limit of 0 means no limit, matching the default.
  */
-async function assertCashLimitAllows(deliveryPartnerId, order) {
-  const method = String(order?.payment?.method || order?.paymentMethod || '').toLowerCase();
-  if (method !== 'cash' && method !== 'razorpay_qr') return;
-
-  const [settings, wallet] = await Promise.all([
-    prisma.foodDeliveryCashLimit.findFirst({
-      where: { isActive: true },
-      select: { deliveryCashLimit: true },
-    }),
-    prisma.wallet.findUnique({
-      where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: String(deliveryPartnerId) } },
-      select: { cashInHand: true },
-    }),
-  ]);
-
-  const limit = Number(settings?.deliveryCashLimit) || 0;
-  if (limit <= 0) return;
-
-  const inHand = Number(wallet?.cashInHand) || 0;
-  if (inHand >= limit) {
-    throw new ValidationError(
-      `You are holding Rs.${inHand} in cash, which is at your Rs.${limit} limit. ` +
-        'Deposit your cash to keep accepting cash orders.',
-    );
-  }
+async function assertCashLimitAllows(deliveryPartnerId) {
+  // Any order, not only cash ones: at the limit the rider must deposit first.
+  const status = await riderCashStatus(deliveryPartnerId);
+  if (status.blocked) throw new ValidationError(cashLimitMessage(status));
 }
 
 export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
@@ -1020,6 +996,28 @@ export async function completeDelivery(orderId, deliveryPartnerId, body = {}) {
     prevPayStatus,
     paymentStatus: updated.payment?.status,
   });
+
+  // A cash order can take the rider over their cash limit. Off duty then,
+  // and told why, so they deposit before the next order is offered.
+  if (payMethod === 'cash') {
+    riderCashStatus(deliveryPartnerId)
+      .then(async (cash) => {
+        if (!cash.blocked) return;
+        const { forceDeliveryPartnerOffline } = await import('../../delivery/services/delivery.service.js');
+        await forceDeliveryPartnerOffline(deliveryPartnerId);
+        await notifyOwnersSafely([{ ownerType: 'DELIVERY_PARTNER', ownerId: String(deliveryPartnerId) }], {
+          title: 'Deposit cash to continue',
+          body: cashLimitMessage(cash),
+          data: {
+            type: 'cash_limit_reached',
+            cashInHand: String(cash.cashInHand),
+            limit: String(cash.limit),
+            minimumDeposit: String(cash.minimumDeposit),
+          },
+        });
+      })
+      .catch((e) => logger.warn(`cash limit check after delivery failed: ${e?.message || e}`));
+  }
 
   return sanitizeOrderForDeliveryPartner(updated);
 }

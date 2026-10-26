@@ -639,6 +639,8 @@ model UserAddress {
   userId String @db.VarChar(24)
 
   label             AddressLabel @default(Home)
+  /// The customer's own name for it ("Mom's place"); label is only the type.
+  customLabel       String       @default("") @db.VarChar(40)
   street            String
   additionalDetails String       @default("")
   city              String
@@ -2216,6 +2218,9 @@ model FoodOffer {
   startDate        DateTime?
   endDate          DateTime?
   isFirstOrderOnly Boolean   @default(false)
+  /// The customer app's "Top Coupon Categories": bank | free_delivery |
+  /// new_user | top_brands | combo. Null: shown under All only.
+  category         String?   @db.VarChar(30)
   /// Days the code works on, 0 = Sunday .. 6 = Saturday, in India time.
   /// Empty means every day.
   activeDays      Int[]     @default([])
@@ -2356,6 +2361,12 @@ model FoodFeeSettings {
   /// GST on the delivery fee. Unset means it is not charged at all.
   deliveryFeeGstRate Decimal? @db.Decimal(5, 2)
 
+  /// Order total at or above which Cash on Delivery is refused. Null: ₹2000.
+  /// Zero: no limit.
+  codMaxOrderValue Decimal? @db.Decimal(14, 2)
+  /// Most of one dish a customer may order in one line.
+  maxItemQuantity  Int      @default(50)
+
   /// The least a rider earns for one delivery, whatever the distance bands
   /// work out to. Without it a one-kilometre trip paid per km earned almost
   /// nothing. Null means no floor.
@@ -2434,6 +2445,10 @@ model FoodBusinessSettings {
   email            String @default("admin@mintofood.com")
   phoneCountryCode String @default("+91") @db.VarChar(8)
   phoneNumber      String @default("") @db.VarChar(20)
+  /// Customer support lines on the app's Help page, each stored as +91XXXXXXXXXX.
+  supportPhones    String[] @default([])
+  /// WhatsApp support number (+91XXXXXXXXXX); blank hides WhatsApp chat.
+  whatsappNumber   String   @default("") @db.VarChar(20)
 
   address String @default("")
   state   String @default("")
@@ -3303,6 +3318,8 @@ model NotificationBroadcast {
   targets    Json                @default("[]")
 
   link String @default("")
+  /// Optional picture shown in the push and on the inbox card.
+  imageUrl String @default("")
 
   /// A coupon sent with this campaign, if any.
   ///
@@ -3477,6 +3494,8 @@ model HomePromotionBanner {
   sortOrder Int     @default(0)
   isActive  Boolean @default(true)
   zoneId    String? @db.VarChar(24)
+  /// Where it shows: "home" (Home carousel) or "tracking" (order tracking).
+  placement String  @default("home") @db.VarChar(20)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3484,6 +3503,7 @@ model HomePromotionBanner {
   zone FoodZone? @relation(fields: [zoneId], references: [id])
 
   @@index([isActive, sortOrder])
+  @@index([placement])
   @@index([zoneId])
   @@map("food_home_promotion_banners")
 }

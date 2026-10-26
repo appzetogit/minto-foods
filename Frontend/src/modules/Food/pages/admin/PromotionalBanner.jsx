@@ -19,6 +19,7 @@ export default function PromotionalBanner() {
     ctaLink: "",
     restaurantId: "",
     zoneId: "",
+    placement: "home",
     startDate: "",
     endDate: "",
     file: null,
@@ -132,6 +133,7 @@ export default function PromotionalBanner() {
       data.append("title", formData.title)
       data.append("ctaLink", formData.ctaLink)
       if (formData.zoneId) data.append("zoneId", formData.zoneId)
+      data.append("placement", formData.placement || "home")
       if (formData.startDate) data.append("startDate", formData.startDate)
       if (formData.endDate) data.append("endDate", formData.endDate)
 
@@ -141,6 +143,7 @@ export default function PromotionalBanner() {
           title: formData.title,
           ctaLink: formData.ctaLink,
           zoneId: formData.zoneId || null,
+          placement: formData.placement || "home",
           startDate: formData.startDate || null,
           endDate: formData.endDate || null
         })
@@ -191,6 +194,7 @@ export default function PromotionalBanner() {
       ctaLink: "",
       restaurantId: "",
       zoneId: "",
+      placement: "home",
       startDate: "",
       endDate: "",
       file: null,
@@ -214,6 +218,7 @@ export default function PromotionalBanner() {
       ctaLink: banner.ctaLink || "",
       restaurantId: matchedRestaurantId,
       zoneId: banner.zoneId?._id || banner.zoneId || "",
+      placement: banner.placement || "home",
       startDate: banner.startDate ? new Date(banner.startDate).toISOString().split('T')[0] : "",
       endDate: banner.endDate ? new Date(banner.endDate).toISOString().split('T')[0] : "",
       file: null,
@@ -399,6 +404,17 @@ export default function PromotionalBanner() {
                         {zones.map(z => (
                           <option key={z._id} value={z._id}>{z.name || z.zoneName}</option>
                         ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1.5">Show on</label>
+                      <select
+                        value={formData.placement}
+                        onChange={(e) => setFormData(p => ({...p, placement: e.target.value}))}
+                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm appearance-none"
+                      >
+                        <option value="home">Home screen</option>
+                        <option value="tracking">Order tracking page (paid spot)</option>
                       </select>
                     </div>
                     <div>

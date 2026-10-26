@@ -1,3 +1,4 @@
+import { riderCashStatus } from '../../shared/riderCash.js';
 import { isId } from '../../../../utils/helpers.js';
 import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment } from '../services/deliveryFinance.service.js';
@@ -315,8 +316,13 @@ export const getEmergencyHelpController = async (req, res, next) => {
 
 export const getCashLimitController = async (req, res, next) => {
     try {
-        const data = await getDeliveryCashLimitSettings();
-        return sendResponse(res, 200, 'Cash limit fetched successfully', data);
+        // The settings plus where this rider stands against them, which is
+        // what the app needs to show "deposit cash first".
+        const [data, status] = await Promise.all([
+            getDeliveryCashLimitSettings(),
+            riderCashStatus(req.user?.userId),
+        ]);
+        return sendResponse(res, 200, 'Cash limit fetched successfully', { ...data, ...status });
     } catch (error) {
         next(error);
     }

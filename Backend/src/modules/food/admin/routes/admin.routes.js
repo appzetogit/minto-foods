@@ -520,6 +520,18 @@ router.patch(
     adminController.deassignAndResendOrderEmergencyRequest
 );
 router.get('/delivery/partners', adminController.getDeliveryPartners);
+router.post(
+    '/delivery/partners',
+    requireAdminPermission('delivery_management', 'create'),
+    adminController.createDeliveryPartner
+);
+// Cash in hand against the limit, and cash paid in at the office.
+router.get('/delivery/:id/cash', adminController.getRiderCashStatus);
+router.post(
+    '/delivery/:id/cash-deposit',
+    requireAdminPermission('delivery_management', 'edit'),
+    adminController.recordOfficeCashDeposit
+);
 router.get('/delivery/:id/sessions', adminController.getDeliveryPartnerSessions);
 router.get('/delivery/:id', adminController.getDeliveryPartnerById);
 router.patch('/delivery/:id/approve', adminController.approveDeliveryPartner);

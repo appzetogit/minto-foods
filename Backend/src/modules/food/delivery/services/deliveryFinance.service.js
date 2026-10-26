@@ -122,7 +122,11 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const totalEarned = Math.max(aggTotalEarned, walletTotalEarnings);
     const totalBonus = Math.max(aggTotalBonus, walletTotalBonus);
     const totalWithdrawn = Math.max(aggTotalWithdrawn, walletTotalSettled);
-    const cashInHand = Math.max(computedCashInHand, walletCashInHand);
+    // Collected minus deposited, the one definition (see shared/riderCash.js).
+    // The wallet column is not kept up to date when cash is collected, and
+    // taking the larger of the two kept a rider who had paid looking unpaid.
+    void walletCashInHand;
+    const cashInHand = computedCashInHand;
 
     const totalCashLimit = num(cashLimitSettings.deliveryCashLimit);
     const deliveryWithdrawalLimit = num(cashLimitSettings.deliveryWithdrawalLimit) || 100;

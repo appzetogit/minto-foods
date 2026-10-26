@@ -6,6 +6,7 @@ import AnimatedPage from "@food/components/user/AnimatedPage"
 import { Button } from "@food/components/ui/button"
 import api from "@food/api"
 import useAppBackNavigation from "@food/hooks/useAppBackNavigation"
+import { telHref } from "@/shared/utils/tel";
 
 export default function CMSPage({ endpoint, title: defaultTitle, module = "USER" }) {
   const navigate = useNavigate()
@@ -126,7 +127,7 @@ export default function CMSPage({ endpoint, title: defaultTitle, module = "USER"
                 </div>
                 <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider mb-2">Call Us</h3>
                 <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">{pageData.mobile || '+91 00000 00000'}</p>
-                <a href={`tel:${pageData.mobile}`} className="mt-4 text-xs font-black text-[#008078] uppercase tracking-widest hover:underline">Call Now</a>
+                <a href={telHref(pageData.mobile)} className="mt-4 text-xs font-black text-[#008078] uppercase tracking-widest hover:underline">Call Now</a>
               </div>
             </div>
           )}
