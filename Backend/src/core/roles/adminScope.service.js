@@ -25,6 +25,33 @@ export async function loadAdminScope(admin) {
     };
 }
 
+/**
+ * The zones an admin request is looking at: the city or zone picked in the
+ * panel's header (X-Admin-Zone), within a sub-admin's own cities. Null when
+ * nothing narrows it.
+ *
+ * The admin router applies this to city-bound tables through the Prisma
+ * extension. Banners are neither city-bound nor all behind the admin router
+ * (most live under /food/hero-banners), so their admin lists call this.
+ */
+export async function viewedZoneIds(req) {
+    const admin = isId(req?.user?.userId)
+        ? await prisma.foodAdmin.findUnique({
+            where: { id: String(req.user.userId) },
+            select: { id: true, adminType: true },
+        })
+        : null;
+    const scope = await applyZoneView(await loadAdminScope(admin), admin, req?.headers?.['x-admin-zone']);
+    return scope ? scope.zoneIds : null;
+}
+
+/**
+ * Prisma filter for an admin banner list under [viewedZoneIds]: the
+ * all-zones banners plus those of the zones being viewed.
+ */
+export const adminBannerZoneWhere = (zoneIds) =>
+    zoneIds ? { OR: [{ zoneId: null }, { zoneId: { in: zoneIds } }] } : {};
+
 /** What the admin panel is told about the scope, for hiding filters and labels. */
 export const describeScope = (scope) =>
     scope

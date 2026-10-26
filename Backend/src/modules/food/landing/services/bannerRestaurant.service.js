@@ -153,11 +153,12 @@ export const withoutOfflineRestaurants = async (banners = []) => {
 
 /**
  * The zone a public banner request is for: the zoneId the app sent, else the
- * zone the lat/lng falls in. Null when neither gives one.
+ * zone the lat/lng falls in. Null when the location is in no zone; undefined
+ * when the request said nothing about where the customer is.
  */
 export const resolveBannerZoneId = async ({ zoneId, lat, lng } = {}) => {
     if (isId(zoneId)) return String(zoneId);
-    if (lat === undefined || lat === null || lat === '' || lng === undefined || lng === null || lng === '') return null;
+    if (lat === undefined || lat === null || lat === '' || lng === undefined || lng === null || lng === '') return undefined;
     const latitude = Number(lat);
     const longitude = Number(lng);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
@@ -169,9 +170,16 @@ export const resolveBannerZoneId = async ({ zoneId, lat, lng } = {}) => {
  * Prisma filter for zone-wise banners: the all-zones banners (zoneId null)
  * plus, when the customer's zone is known, that zone's own. A zone-2 banner
  * never shows in zone 1.
+ *
+ * A request that says nothing about where the customer is (undefined) gets
+ * every banner, as before zone-wise banners existed. The customer app sends
+ * no zone or location for banners, so treating that as "in no zone" showed
+ * only the all-zones ones -- none, when every banner was set to one zone.
  */
-export const bannerZoneWhere = (zoneId) =>
-    zoneId ? { OR: [{ zoneId: null }, { zoneId }] } : { zoneId: null };
+export const bannerZoneWhere = (zoneId) => {
+    if (zoneId === undefined) return {};
+    return zoneId ? { OR: [{ zoneId: null }, { zoneId }] } : { zoneId: null };
+};
 
 /**
  * For the admin list: which restaurant each banner opens, and whether its

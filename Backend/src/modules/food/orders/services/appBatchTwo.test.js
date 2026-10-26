@@ -246,6 +246,27 @@ test('a zone-B banner does not show in zone A, and tracking banners stay on the 
     const ads = await getPublicHomePromotionBanners({ lat: SOUTH.lat, lng: SOUTH.lng, placement: 'tracking' });
     assert.deepEqual(ads.map((b) => b.id).filter((id) => created.banners.includes(id)), [tracking.id]);
     assert.equal(ads.find((b) => b.id === tracking.id).zoneId, zoneA.id, 'each banner says its zone');
+
+    // The app asks with no zone and no location: every banner, as before
+    // zone-wise banners. Treating it as "in no zone" emptied the carousel.
+    const unknown = new Set((await getPublicHomePromotionBanners({})).map((b) => b.id));
+    assert.ok(unknown.has(everywhere.id) && unknown.has(inA.id) && unknown.has(inB.id));
+    assert.ok(!unknown.has(tracking.id), 'still home placement only');
+
+    // A location in no zone at all still gets only the all-zones ones.
+    const nowhere = new Set((await getPublicHomePromotionBanners({ lat: 0.5, lng: -150 })).map((b) => b.id));
+    assert.ok(nowhere.has(everywhere.id) && !nowhere.has(inA.id) && !nowhere.has(inB.id));
+
+    // Admin list, with zone A picked in the panel's header: zone A's banners
+    // and the all-zones ones, not zone B's.
+    const { listHomePromotionBanners } = await import('../../landing/services/homePromotionBanner.service.js');
+    const { viewedZoneIds, adminBannerZoneWhere } = await import('../../../../core/roles/adminScope.service.js');
+    const zoneIds = await viewedZoneIds({ user: null, headers: { 'x-admin-zone': zoneA.id } });
+    assert.deepEqual(zoneIds, [zoneA.id]);
+    const adminList = new Set((await listHomePromotionBanners(adminBannerZoneWhere(zoneIds))).map((b) => b.id));
+    assert.ok(adminList.has(everywhere.id) && adminList.has(inA.id) && adminList.has(tracking.id));
+    assert.ok(!adminList.has(inB.id), 'zone B banner hidden while viewing zone A');
+    assert.equal(await viewedZoneIds({ user: null, headers: {} }), null, 'no pick: every banner');
 });
 
 // ---- 7: broadcast with a picture -------------------------------------------------

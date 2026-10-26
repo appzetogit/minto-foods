@@ -25,8 +25,9 @@ const toDate = (value, edge) => {
 const byOrder = [{ sortOrder: 'asc' }, { createdAt: 'desc' }];
 
 /** Admin list, with each banner's restaurant and whether its restaurant link is broken. */
-export const listHomePromotionBanners = async () =>
-    withRestaurantLinkStatus(await prisma.homePromotionBanner.findMany({ orderBy: byOrder }));
+/** Admin list; [where] narrows it to the city or zone being viewed. */
+export const listHomePromotionBanners = async (where = {}) =>
+    withRestaurantLinkStatus(await prisma.homePromotionBanner.findMany({ where, orderBy: byOrder }));
 
 /** Where a home promotion banner shows: the home screen, or the order tracking page (paid ads). */
 export const BANNER_PLACEMENTS = ['home', 'tracking'];

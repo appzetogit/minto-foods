@@ -1,10 +1,12 @@
 import { sendResponse } from '../../../../utils/response.js';
 import * as svc from '../services/offerBanner.service.js';
+import { adminBannerZoneWhere, viewedZoneIds } from '../../../../core/roles/adminScope.service.js';
 
 // ── Admin ──
-export async function listOfferBannersController(_req, res, next) {
+export async function listOfferBannersController(req, res, next) {
     try {
-        return sendResponse(res, 200, 'Offer banners fetched', await svc.listBannersAdmin());
+        const where = adminBannerZoneWhere(await viewedZoneIds(req));
+        return sendResponse(res, 200, 'Offer banners fetched', await svc.listBannersAdmin(where));
     } catch (e) { next(e); }
 }
 

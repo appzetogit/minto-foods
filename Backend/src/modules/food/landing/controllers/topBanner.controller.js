@@ -2,12 +2,16 @@ import { prisma } from '../../../../config/prisma.js';
 import { saveImageFile, deleteStoredFile } from '../../../../services/storage.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { isId } from '../../../../utils/helpers.js';
+import { adminBannerZoneWhere, viewedZoneIds } from '../../../../core/roles/adminScope.service.js';
 
 const BANNER_FOLDER = 'food/top-banners';
 
 export const listTopBannersController = async (req, res) => {
     try {
-        const banners = await prisma.topBanner.findMany({ orderBy: { order: 'asc' } });
+        const banners = await prisma.topBanner.findMany({
+            where: adminBannerZoneWhere(await viewedZoneIds(req)),
+            orderBy: { order: 'asc' },
+        });
         res.status(200).json({ success: true, data: { banners } });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to fetch top banners', error: error.message });

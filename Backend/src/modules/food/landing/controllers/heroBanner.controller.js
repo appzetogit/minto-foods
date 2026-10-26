@@ -6,11 +6,12 @@ import {
     toggleHeroBannerStatus
 } from '../services/heroBanner.service.js';
 import { sendResponse } from '../../../../utils/response.js';
+import { adminBannerZoneWhere, viewedZoneIds } from '../../../../core/roles/adminScope.service.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 
 export const listHeroBannersController = async (req, res, next) => {
     try {
-        const data = await listHeroBanners();
+        const data = await listHeroBanners(adminBannerZoneWhere(await viewedZoneIds(req)));
         // Wrap in { banners } to match LandingPageManagement.jsx expectations
         return sendResponse(res, 200, 'Hero banners fetched successfully', { banners: data });
     } catch (error) {

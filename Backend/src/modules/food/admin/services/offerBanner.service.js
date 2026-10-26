@@ -5,6 +5,7 @@ import { ValidationError } from '../../../../core/auth/errors.js';
 import { uploadImageBuffer } from '../../../../services/cloudinary.service.js';
 import {
     resolveBannerLink,
+    bannerZoneWhere,
     resolveBannerZoneId,
     withoutOfflineRestaurants,
     withRestaurantLinkStatus,
@@ -79,8 +80,9 @@ export const isBannerLive = (banner = {}, now = new Date()) => {
 };
 
 /** Admin: every banner, whatever its state, in display order. */
-export const listBannersAdmin = async () => {
+export const listBannersAdmin = async (where = {}) => {
     const banners = await prisma.foodOfferBanner.findMany({
+        where,
         orderBy: ORDER,
         include: { zone: { select: { name: true } } },
     });
@@ -97,9 +99,9 @@ export const listBannersAdmin = async () => {
 export const listLiveBanners = async (query = {}) => {
     const now = new Date();
     // The zone the app sent, else the one its lat/lng is in (a bare string is
-    // a zoneId, as older callers pass it). An unknown or missing zone still
-    // gets the everywhere banners rather than an empty strip: a customer who
-    // has not set an address yet is the common case, not an error.
+    // a zoneId, as older callers pass it). A location in no zone gets the
+    // everywhere banners; a request with no zone or location at all gets
+    // every banner (see bannerZoneWhere).
     const zone = await resolveBannerZoneId(typeof query === 'object' && query !== null ? query : { zoneId: query });
     const banners = await prisma.foodOfferBanner.findMany({
         where: {
@@ -107,7 +109,7 @@ export const listLiveBanners = async (query = {}) => {
             AND: [
                 { OR: [{ startDate: null }, { startDate: { lte: now } }] },
                 { OR: [{ endDate: null }, { endDate: { gte: now } }] },
-                { OR: [{ zoneId: null }, ...(zone ? [{ zoneId: zone }] : [])] },
+                bannerZoneWhere(zone),
             ],
         },
         orderBy: ORDER,

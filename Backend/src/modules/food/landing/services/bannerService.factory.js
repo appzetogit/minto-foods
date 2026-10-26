@@ -25,7 +25,7 @@ export const makeBannerService = (delegate, folder, extraFields = () => ({})) =>
         });
 
     return {
-        list: () => delegate.findMany({ orderBy: byOrder }),
+        list: (where = {}) => delegate.findMany({ where, orderBy: byOrder }),
 
         createFromFiles: async (files, meta = {}) => {
             if (!files?.length) return [];

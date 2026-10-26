@@ -1,8 +1,13 @@
 import * as bannerService from '../services/homePromotionBanner.service.js';
+import { adminBannerZoneWhere, viewedZoneIds } from '../../../../core/roles/adminScope.service.js';
 
 export const listHomePromotionBannersController = async (req, res, next) => {
     try {
-        const banners = await bannerService.listHomePromotionBanners();
+        // Only the city or zone picked in the panel's header (and the
+        // all-zones banners): this route is outside the admin router.
+        const banners = await bannerService.listHomePromotionBanners(
+            adminBannerZoneWhere(await viewedZoneIds(req)),
+        );
         res.status(200).json({ success: true, banners });
     } catch (error) {
         next(error);
