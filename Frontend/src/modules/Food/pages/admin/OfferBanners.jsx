@@ -271,12 +271,73 @@ export default function OfferBanners() {
 
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-slate-600 mb-1">Opens on tap</label>
-                <input
-                  value={form.ctaLink}
-                  onChange={(e) => setForm((f) => ({ ...f, ctaLink: e.target.value }))}
-                  placeholder="/food/user/restaurants/<id>  — blank means not tappable"
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                />
+                {(() => {
+                  // What the card opens in the customer app. The presets
+                  // write the link the app understands; anything else is
+                  // a custom link.
+                  const link = form.ctaLink || ""
+                  const under = link.match(/^\/store-99\?maxPrice=(\d+)/)
+                  const pct = link.match(/^\/discount\/(\d+)/)
+                  const mode = !link
+                    ? "none"
+                    : under
+                      ? "under"
+                      : pct
+                        ? "discount"
+                        : link === "/all-offers"
+                          ? "offers"
+                          : "custom"
+                  const value = under?.[1] || pct?.[1] || ""
+                  const setLink = (ctaLink) => setForm((f) => ({ ...f, ctaLink }))
+                  const field =
+                    "px-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  return (
+                    <div className="flex flex-wrap gap-2">
+                      <select
+                        value={mode}
+                        onChange={(e) => {
+                          const m = e.target.value
+                          if (m === "none") setLink("")
+                          else if (m === "under") setLink("/store-99?maxPrice=49")
+                          else if (m === "discount") setLink("/discount/20")
+                          else if (m === "offers") setLink("/all-offers")
+                          else setLink("/")
+                        }}
+                        className={field}
+                      >
+                        <option value="none">Not tappable</option>
+                        <option value="under">Items under ₹…</option>
+                        <option value="discount">Restaurants with …% off or more</option>
+                        <option value="offers">All offers page</option>
+                        <option value="custom">Custom link</option>
+                      </select>
+                      {(mode === "under" || mode === "discount") && (
+                        <input
+                          type="number"
+                          min="1"
+                          value={value}
+                          onChange={(e) => {
+                            const n = e.target.value.replace(/\D/g, "")
+                            setLink(mode === "under" ? `/store-99?maxPrice=${n}` : `/discount/${n}`)
+                          }}
+                          placeholder={mode === "under" ? "49" : "20"}
+                          className={`${field} w-24`}
+                        />
+                      )}
+                      {mode === "custom" && (
+                        <input
+                          value={link}
+                          onChange={(e) => setLink(e.target.value)}
+                          placeholder="/restaurant-detail/<id> or https://…"
+                          className={`${field} flex-1 min-w-[220px]`}
+                        />
+                      )}
+                    </div>
+                  )
+                })()}
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Left as "Not tappable", the app still opens "Under ₹49" / "20% off" cards from their title.
+                </p>
               </div>
 
               <div>
