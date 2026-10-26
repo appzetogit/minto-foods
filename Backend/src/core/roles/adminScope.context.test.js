@@ -58,6 +58,16 @@ test('models with no city are left alone', () => {
     assert.equal(applyAdminScope('FoodOrder', 'findMany', args, undefined), args, 'no scope, no change');
 });
 
+test('dishes and add-ons follow their restaurant\'s zone', () => {
+    const byRestaurant = { restaurant: { OR: [{ zoneId: { in: ['z1', 'z2'] } }, { pendingZoneId: { in: ['z1', 'z2'] } }] } };
+    assert.deepEqual(applyAdminScope('FoodItem', 'findMany', { where: { approvalStatus: 'approved' } }, INDORE).where, {
+        AND: [{ approvalStatus: 'approved' }, byRestaurant],
+    });
+    assert.deepEqual(applyAdminScope('FoodAddon', 'count', {}, INDORE).where, byRestaurant);
+    // Creating is checked where the restaurant is picked, not here.
+    assert.equal(createAllowed('FoodItem', { restaurantId: 'r1', name: 'Thali' }, INDORE), true);
+});
+
 test('creating outside the cities is refused', () => {
     assert.equal(createAllowed('FoodZone', { cityId: 'c-indore' }, INDORE), true);
     assert.equal(createAllowed('FoodZone', { cityId: 'c-vapi' }, INDORE), false);

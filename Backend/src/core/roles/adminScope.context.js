@@ -43,6 +43,14 @@ const ZONED = {
     foodRestaurantBankChange: (s) => ({
         restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
     }),
+    // Dishes and add-ons follow their restaurant. Without these, picking a
+    // city left the Food list (and add-ons) showing every city's dishes.
+    foodItem: (s) => ({
+        restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
+    }),
+    foodAddon: (s) => ({
+        restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
+    }),
     // A rider's money requests follow the rider's city. Without these, picking
     // a zone on Delivery Withdrawal still listed every rider in every zone.
     foodDeliveryWithdrawal: (s) => ({ deliveryPartner: { city: { in: s.cityNames, mode: 'insensitive' } } }),
@@ -51,6 +59,13 @@ const ZONED = {
 
 /** Scoped on reads only: these rows are raised by the rider, never by an admin. */
 const RIDER_OWNED = new Set(['foodDeliveryWithdrawal', 'foodDeliveryCashDeposit']);
+
+/**
+ * Rows that carry no zone of their own but belong to a restaurant. Creating
+ * one is checked where the restaurant is chosen, not here; reads, updates and
+ * deletes are still narrowed through the restaurant.
+ */
+const RESTAURANT_OWNED = new Set(['foodItem', 'foodAddon']);
 
 /**
  * Models where no zone means "everywhere". A sub-admin can see those rows but
@@ -101,7 +116,7 @@ export const createAllowed = (model, data, scope) => {
         const city = String(data?.city || '').trim().toLowerCase();
         return scope.cityNames.some((n) => n.toLowerCase() === city);
     }
-    if (RIDER_OWNED.has(name)) return true;
+    if (RIDER_OWNED.has(name) || RESTAURANT_OWNED.has(name)) return true;
     if (ZONED[name] || ZONED_OR_GLOBAL.has(name)) {
         return zones.has(data?.zoneId ?? connectedId(data, 'zone'));
     }
