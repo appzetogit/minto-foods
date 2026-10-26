@@ -112,6 +112,80 @@ export const requestUserOtp = async (phone) => {
   return shouldExposeOtp ? { otp } : {};
 };
 
+/**
+ * Credits the referrer of `userDoc` once. Returns `{ applied, reason }`;
+ * `reason` is set when nothing was paid. The FoodReferralLog row is written
+ * first because (refereeId, role) is unique: it is the lock, so a second
+ * concurrent attempt fails there and never pays a duplicate reward.
+ */
+export const applyUserReferral = async (userDoc, rawCode) => {
+  const code = String(rawCode || "").trim().toLowerCase();
+  if (!isId(code)) return { applied: false, reason: "invalid_code" };
+  if (code === userDoc.id) return { applied: false, reason: "own_code" };
+  if (userDoc.referredById) return { applied: false, reason: "already_referred" };
+
+  const [referrer, settingsDoc] = await Promise.all([
+    prisma.foodUser.findFirst({
+      where: { OR: [{ id: code }, { referralCode: code }] },
+      select: { id: true, referralCount: true },
+    }),
+    prisma.foodReferralSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+  if (!referrer || referrer.id === userDoc.id) {
+    return { applied: false, reason: "invalid_code" };
+  }
+  if (!settingsDoc) return { applied: false, reason: "referral_disabled" };
+
+  const referrerId = referrer.id;
+  const reward = Math.max(0, Number(settingsDoc.referralRewardUser) || 0);
+  const limit = Math.max(0, Number(settingsDoc.referralLimitUser) || 0);
+
+  if (reward <= 0 || limit <= 0 || Number(referrer.referralCount || 0) >= limit) {
+    const reason =
+      reward <= 0 ? "reward_disabled" : limit <= 0 ? "limit_disabled" : "limit_reached";
+    await prisma.foodReferralLog.create({
+      data: {
+        referrerId,
+        refereeId: userDoc.id,
+        role: "USER",
+        rewardAmount: reward,
+        status: "rejected",
+        reason,
+      },
+    });
+    return { applied: false, reason };
+  }
+
+  const log = await prisma.foodReferralLog.create({
+    data: {
+      referrerId,
+      refereeId: userDoc.id,
+      role: "USER",
+      rewardAmount: reward,
+      status: "credited",
+    },
+  });
+  const [updated] = await Promise.all([
+    prisma.foodUser.update({
+      where: { id: userDoc.id },
+      data: { referredById: referrerId },
+    }),
+    prisma.foodUser.update({
+      where: { id: referrerId },
+      data: { referralCount: { increment: 1 } },
+    }),
+    creditReferralReward(referrerId, reward, {
+      role: "USER",
+      refereeId: userDoc.id,
+      referralLogId: log.id,
+    }),
+  ]);
+  return { applied: true, reward, userDoc: updated };
+};
+
 export const verifyUserOtpAndLogin = async (
   phone,
   otp,
@@ -180,87 +254,10 @@ export const verifyUserOtpAndLogin = async (
   }
 
   // Referral crediting: only for brand new accounts.
-  const refRaw = typeof ref === "string" ? String(ref).trim() : "";
-  if (isNewUser && refRaw) {
+  if (isNewUser && typeof ref === "string" && ref.trim()) {
     try {
-      if (isId(refRaw)) {
-        const referrerId = refRaw;
-        if (referrerId !== userDoc.id) {
-          const [referrer, settingsDoc] = await Promise.all([
-            prisma.foodUser.findUnique({
-              where: { id: referrerId },
-              select: { id: true, referralCount: true },
-            }),
-            prisma.foodReferralSettings.findFirst({
-              where: { isActive: true },
-              orderBy: { createdAt: "desc" },
-            }),
-          ]);
-
-          if (referrer && settingsDoc) {
-            const reward = Math.max(
-              0,
-              Number(settingsDoc.referralRewardUser) || 0,
-            );
-            const limit = Math.max(
-              0,
-              Number(settingsDoc.referralLimitUser) || 0,
-            );
-
-            if (
-              reward > 0 &&
-              limit > 0 &&
-              Number(referrer.referralCount || 0) < limit
-            ) {
-              userDoc = await prisma.foodUser.update({
-                where: { id: userDoc.id },
-                data: { referredById: referrerId },
-              });
-
-              // The log is written FIRST: (refereeId, role) is unique, so it is
-              // the lock. A second concurrent signup with the same ref fails here
-              // and never pays a duplicate reward.
-              const log = await prisma.foodReferralLog.create({
-                data: {
-                  referrerId,
-                  refereeId: userDoc.id,
-                  role: "USER",
-                  rewardAmount: reward,
-                  status: "credited",
-                },
-              });
-
-              await Promise.all([
-                prisma.foodUser.update({
-                  where: { id: referrerId },
-                  data: { referralCount: { increment: 1 } },
-                }),
-                creditReferralReward(referrerId, reward, {
-                  role: "USER",
-                  refereeId: userDoc.id,
-                  referralLogId: log.id,
-                }),
-              ]);
-            } else {
-              await prisma.foodReferralLog.create({
-                data: {
-                  referrerId,
-                  refereeId: userDoc.id,
-                  role: "USER",
-                  rewardAmount: reward,
-                  status: "rejected",
-                  reason:
-                    reward <= 0
-                      ? "reward_disabled"
-                      : limit <= 0
-                        ? "limit_disabled"
-                        : "limit_reached",
-                },
-              });
-            }
-          }
-        }
-      }
+      const result = await applyUserReferral(userDoc, ref);
+      if (result.userDoc) userDoc = result.userDoc;
     } catch (e) {
       // Never fail login due to referral errors.
       logger?.warn?.({ err: e }, "Referral crediting failed (user)");

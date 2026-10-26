@@ -9,7 +9,7 @@ const router = express.Router();
 
 const PLAY_STORE_URL =
     process.env.ANDROID_PLAY_STORE_URL ||
-    'https://play.google.com/store/apps/details?id=com.appzeto.food';
+    'https://play.google.com/store/apps/details?id=com.minto.user';
 const APP_STORE_URL = process.env.IOS_APP_STORE_URL || '';
 
 const escapeHtml = (value) =>
@@ -251,6 +251,46 @@ router.get('/food-detail', async (req, res, next) => {
     } catch (err) {
         next(err);
     }
+});
+
+/**
+ * The page a shared referral link lands on. A fresh install cannot receive the
+ * link itself, so the button copies the code first: the app's signup step reads
+ * a code off the clipboard. The intent: URL opens the app when installed and
+ * falls back to the Play Store (carrying the code as the install referrer).
+ */
+router.get(['/invite', '/share/invite'], (req, res) => {
+    const code = String(req.query.ref || '').trim().toLowerCase();
+    if (!isId(code)) return notFoundPage(req, res, 'invite');
+
+    const pkg = process.env.ANDROID_PACKAGE_NAME || 'com.minto.user';
+    const store = `${PLAY_STORE_URL}${PLAY_STORE_URL.includes('?') ? '&' : '?'}referrer=${encodeURIComponent(`ref=${code}`)}`;
+    const intentUrl = `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${pkg};S.browser_fallback_url=${encodeURIComponent(store)};end`;
+    const html = renderPage({
+        title: 'You are invited to MintoFood',
+        description: `Sign up with referral code ${code} and order your first meal.`,
+        image: '',
+        canonical: `${req.protocol}://${req.get('host')}${req.originalUrl}`,
+        appUrl: intentUrl,
+    })
+        .replace(/Suvio/g, 'MintoFood')
+        .replace(/<a class="btn primary" href="[^"]*">[^<]*<\/a>/,
+            `<p style="font-size:20px;font-weight:700;letter-spacing:1px;color:inherit;word-break:break-all">${escapeHtml(code)}</p>
+  <a class="btn primary" id="go" href="${escapeHtml(store)}">Copy code &amp; get the app</a>`)
+        .replace('Already have the app? Open it', 'Already have the app? Copy code &amp; open it')
+        .replace('</body>', `<script>
+(function(){var code=${JSON.stringify(code)};
+function copy(){try{navigator.clipboard.writeText(code)}catch(e){}
+try{var t=document.createElement('textarea');t.value=code;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}catch(e){}}
+document.querySelectorAll('a.btn').forEach(function(a){a.addEventListener('click',copy)});})();
+</script>
+</body>`);
+    res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'unsafe-inline'",
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('html').send(html);
 });
 
 export default router;

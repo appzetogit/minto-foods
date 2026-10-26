@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { buildReferralLinkFromTemplate } from '../../delivery/services/deliveryReferral.service.js';
+import { applyUserReferral } from '../../../../core/auth/auth.service.js';
 
 /**
  * The three rows every referral view needs: the referrer, their wallet (for
@@ -101,4 +102,44 @@ export const getUserReferralDetails = async (userId) => {
         },
         invitedFriends,
     };
+};
+
+const APPLY_MESSAGES = {
+    invalid_code: 'This referral code is not valid',
+    own_code: 'You cannot use your own referral code',
+    already_referred: 'A referral code has already been applied to your account',
+    not_new: 'Referral codes can only be used before your first order',
+    referral_disabled: 'Referrals are not active right now',
+    reward_disabled: 'Referrals are not active right now',
+    limit_disabled: 'Referrals are not active right now',
+    limit_reached: 'This referral code has reached its limit',
+};
+
+/**
+ * Applies a friend's code after signup (the app asks for it on the profile
+ * step, which runs after the OTP login has already created the account).
+ * Only a customer who has not ordered yet counts as new.
+ */
+export const applyReferralCode = async (userId, code) => {
+    const id = String(userId || '');
+    if (!isId(id)) throw new ValidationError('User not found');
+    const [user, orders] = await Promise.all([
+        prisma.foodUser.findUnique({ where: { id } }),
+        prisma.foodOrder.count({ where: { userId: id } }),
+    ]);
+    if (!user) throw new ValidationError('User not found');
+
+    let result;
+    if (orders > 0) result = { applied: false, reason: 'not_new' };
+    else {
+        try {
+            result = await applyUserReferral(user, code);
+        } catch (e) {
+            // (refereeId, role) is unique: a log row already exists.
+            if (e?.code !== 'P2002') throw e;
+            result = { applied: false, reason: 'already_referred' };
+        }
+    }
+    if (!result.applied) throw new ValidationError(APPLY_MESSAGES[result.reason] || 'Referral code could not be applied');
+    return { applied: true, reward: result.reward };
 };
