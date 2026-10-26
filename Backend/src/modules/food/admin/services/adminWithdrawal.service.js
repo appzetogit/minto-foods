@@ -235,6 +235,17 @@ export async function updateDeliveryWithdrawalStatus(
         const locked = Number(wallet?.lockedAmount) || 0;
 
         if (next === 'approved') {
+            // Release the reservation before the debit. The database refuses a
+            // locked amount above the balance, so debiting first failed every
+            // payout of a rider's whole balance (locked 500, balance 500 -> 0)
+            // with a 500. Same transaction, so a refused debit undoes this too.
+            if (locked > 0) {
+                await tx.wallet.update({
+                    where: walletKey,
+                    data: { lockedAmount: { decrement: Math.min(locked, amount) } },
+                });
+            }
+
             // The debit and its ledger entry share this transaction, so an
             // approved withdrawal always leaves a matching row in the rider's
             // transaction history. recordTransaction's own WHERE-clause guard
@@ -263,7 +274,7 @@ export async function updateDeliveryWithdrawalStatus(
 
             await tx.wallet.updateMany({
                 where: { entityType: 'deliveryBoy', entityId: claimed.deliveryPartnerId },
-                data: { totalSettled: { increment: amount }, lockedAmount: { decrement: Math.min(locked, amount) } },
+                data: { totalSettled: { increment: amount } },
             });
         }
 

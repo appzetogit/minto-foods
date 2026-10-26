@@ -98,6 +98,13 @@ export default function OrdersTable({
     ].includes(currentStatus)
   }
 
+  // Delivered and cancelled orders have nothing left to dispatch: their
+  // Resend buttons were shown greyed out on every row of those tabs.
+  const isFinished = (order) => {
+    const s = String(order?.status || order?.orderStatus || "").trim().toLowerCase()
+    return s.includes("cancel") || s === "delivered" || s === "completed"
+  }
+
   const canDeassignAndResend = (order) => {
     const backendStatus = String(order?.status || "").trim().toLowerCase()
     const phase = String(order?.deliveryState?.currentPhase || "").trim().toLowerCase()
@@ -483,7 +490,7 @@ export default function OrdersTable({
                           <span>Cancel</span>
                         </button>
                       ) : null}
-                      {onResendNotification ? (
+                      {onResendNotification && !isFinished(order) ? (
                         <button
                           onClick={() =>
                             canResendNotification(order) && onResendNotification(order)
@@ -510,7 +517,7 @@ export default function OrdersTable({
                           <span>Resend</span>
                         </button>
                       ) : null}
-                      {onDeassignAndResend ? (
+                      {onDeassignAndResend && !isFinished(order) ? (
                         <button
                           onClick={() =>
                             canDeassignAndResend(order) && onDeassignAndResend(order)

@@ -9,6 +9,10 @@ export default function PromotionalBanner() {
   const [banners, setBanners] = useState([])
   const [restaurants, setRestaurants] = useState([])
   const [zones, setZones] = useState([])
+  // A city or zone picked in the header hides other cities' banners.
+  const cityPicked = (() => {
+    try { return Boolean(localStorage.getItem("admin_zone_filter")) } catch { return false }
+  })()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -271,8 +275,12 @@ export default function PromotionalBanner() {
             <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
               <Upload className="w-10 h-10 text-slate-300" />
             </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-2">No Banners Found</h3>
-            <p className="text-slate-500 max-w-xs mx-auto mb-6">Create your first promotional banner to start attracting customers.</p>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">{cityPicked ? "No banners for this city" : "No Banners Found"}</h3>
+            <p className="text-slate-500 max-w-xs mx-auto mb-6">
+              {cityPicked
+                ? "Banners set to other cities are hidden by the city picked at the top. Pick All cities to see them."
+                : "Create your first promotional banner to start attracting customers."}
+            </p>
             <button
                onClick={() => { resetForm(); setEditingBanner(null); setShowAddModal(true); }}
                className="text-blue-600 font-bold hover:underline"
