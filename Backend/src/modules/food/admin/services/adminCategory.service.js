@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import {
+    assertCategoryNameFree,
     getCategoryStats,
     normalizeCategoryFoodTypeScope,
     serializeCategoryForResponse,
@@ -82,6 +83,7 @@ export async function getCategories(query = {}) {
 export async function createCategory(body = {}) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) throw new ValidationError('Category name is required');
+    await assertCategoryNameFree(name);
 
     let zoneId = null;
     const rawZone = String(body.zoneId || '').trim();
@@ -178,6 +180,8 @@ export async function makeCategoryGlobal(id) {
     if (category.approvalStatus !== 'approved') {
         throw new ValidationError('Only approved categories can be made global');
     }
+    // Promoted, it sits beside every global category.
+    await assertCategoryNameFree(category.name, { exceptId: category.id });
 
     return prisma.foodCategory.update({
         where: { id: category.id },
@@ -221,7 +225,11 @@ export async function updateCategory(id, body = {}) {
     }
 
     const data = {};
-    if (body.name !== undefined) data.name = String(body.name || '').trim();
+    if (body.name !== undefined) {
+        data.name = String(body.name || '').trim();
+        if (!data.name) throw new ValidationError('Category name is required');
+        await assertCategoryNameFree(data.name, { restaurantId: category.restaurantId, exceptId: category.id });
+    }
     if (body.image !== undefined) data.image = String(body.image || '').trim();
     if (body.type !== undefined) data.type = String(body.type || '').trim();
     if (body.foodTypeScope !== undefined) data.foodTypeScope = nextFoodTypeScope;

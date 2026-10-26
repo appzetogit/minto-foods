@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import {
     APPROVED_CATEGORY_FILTER,
+    assertCategoryNameFree,
     GLOBAL_CATEGORY_FILTER,
     getCategoryStats,
     normalizeCategoryFoodTypeScope,
@@ -172,6 +173,7 @@ export async function createRestaurantCategory(restaurantId, body = {}) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) throw new ValidationError('Category name is required');
     if (name.length > 200) throw new ValidationError('Category name is too long');
+    await assertCategoryNameFree(name, { restaurantId: context.restaurantId });
 
     const foodTypeScopeRaw = typeof body.foodTypeScope === 'string' ? body.foodTypeScope.trim() : '';
     if (!foodTypeScopeRaw) throw new ValidationError('Category diet type is required');
@@ -229,6 +231,7 @@ export async function updateRestaurantCategory(restaurantId, id, body = {}) {
         const name = String(body.name || '').trim();
         if (!name) throw new ValidationError('Category name is required');
         if (name.length > 200) throw new ValidationError('Category name is too long');
+        await assertCategoryNameFree(name, { restaurantId: context.restaurantId, exceptId: existing.id });
         data.name = name;
     }
     if (body.image !== undefined) data.image = String(body.image || '').trim();

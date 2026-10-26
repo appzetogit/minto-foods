@@ -487,9 +487,17 @@ export default function FoodsList() {
       try {
         const res = await adminAPI.getCategories({ limit: 1000 })
         const list = res?.data?.data?.categories || []
+        // Only categories a dish can actually go in: enabled and approved.
+        // Disabled and rejected ones used to show too, so "Dessert" appeared
+        // three times.
         const options = Array.isArray(list)
           ? list
-              .map((c) => ({ id: String(c.id || c._id || c.name), name: String(c.name || "").trim() }))
+              .filter((c) => c.isActive !== false && (c.approvalStatus || "approved") === "approved")
+              .map((c) => ({
+                id: String(c.id || c._id || c.name),
+                name: String(c.name || "").trim(),
+                restaurantId: c.restaurantId ? String(c.restaurantId) : "",
+              }))
               .filter((c) => c.name)
           : []
         if (!cancelled) setCategoryOptions(options)
@@ -1309,6 +1317,9 @@ export default function FoodsList() {
                     />
                     <div className="max-h-56 overflow-y-auto">
                       {categoryOptions
+                        // Categories every restaurant can use, plus the
+                        // chosen restaurant's own -- never another one's.
+                        .filter((c) => !c.restaurantId || c.restaurantId === String(foodForm.restaurantId || ""))
                         .filter((c) => {
                           const q = String(categorySearch || "").trim().toLowerCase()
                           if (!q) return true

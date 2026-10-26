@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/prisma.js';
 import { isId } from '../../../utils/helpers.js';
+import { ValidationError } from '../../../core/auth/errors.js';
 
 export const CATEGORY_APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
 export const CATEGORY_FOOD_TYPE_SCOPES = ['Veg', 'Non-Veg', 'Both'];
@@ -46,6 +47,38 @@ export const categoryAllowsFoodType = (scope, foodType) => {
 };
 
 export const isGlobalCategory = (category = {}) => !category?.restaurantId;
+
+/** "  Main  Course " and "main course" are the same category name. */
+export const categoryNameKey = (name) => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Refuses a category name that is already taken where both would show side
+ * by side: any category every restaurant can use, and -- for a restaurant's
+ * own -- that restaurant's own ones. Rejected categories do not count, and
+ * neither does the category being renamed ([exceptId]).
+ *
+ * Duplicates showed up as three "Dessert" entries when adding a dish.
+ */
+export async function assertCategoryNameFree(name, { restaurantId = null, exceptId = null } = {}) {
+    const key = categoryNameKey(name);
+    if (!key) return;
+    const candidates = await prisma.foodCategory.findMany({
+        where: {
+            approvalStatus: { not: 'rejected' },
+            OR: [{ restaurantId: null }, ...(restaurantId ? [{ restaurantId: String(restaurantId) }] : [])],
+            ...(exceptId ? { id: { not: String(exceptId) } } : {}),
+        },
+        select: { id: true, name: true, isActive: true, restaurantId: true },
+    });
+    const clash = candidates.find((c) => categoryNameKey(c.name) === key);
+    if (!clash) return;
+    if (restaurantId && !clash.restaurantId) {
+        throw new ValidationError(`"${clash.name}" is already a category every restaurant can use. Pick it instead of creating a new one.`);
+    }
+    throw new ValidationError(
+        `A category named "${clash.name}" already exists${clash.isActive ? '' : ' (it is disabled -- enable it instead)'}`,
+    );
+}
 
 export const getCategoryApprovalStatus = (category = {}) => {
     const status = String(category?.approvalStatus || '').trim();
