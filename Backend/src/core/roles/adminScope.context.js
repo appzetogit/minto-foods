@@ -51,6 +51,22 @@ const ZONED = {
     foodAddon: (s) => ({
         restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
     }),
+    // A restaurant's money and tickets follow the restaurant too. Without
+    // these the Transaction report, Restaurant withdrawals, Commissions and
+    // Support tickets listed every city whatever was picked.
+    foodTransaction: (s) => ({ restaurant: { zoneId: inZones(s) } }),
+    foodRestaurantWithdrawal: (s) => ({ restaurant: { zoneId: inZones(s) } }),
+    foodRestaurantCommission: (s) => ({ restaurant: { zoneId: inZones(s) } }),
+    foodRestaurantSupportTicket: (s) => ({ restaurant: { zoneId: inZones(s) } }),
+    // A customer's ticket belongs to a city through its restaurant or order;
+    // one about neither (account, app) is not a city's and shows in all.
+    foodSupportTicket: (s) => ({
+        OR: [
+            { restaurant: { zoneId: inZones(s) } },
+            { restaurantId: null, order: { zoneId: inZones(s) } },
+            { restaurantId: null, orderId: null },
+        ],
+    }),
     // A rider's money requests follow the rider's city. Without these, picking
     // a zone on Delivery Withdrawal still listed every rider in every zone.
     foodDeliveryWithdrawal: (s) => ({ deliveryPartner: { city: { in: s.cityNames, mode: 'insensitive' } } }),
@@ -65,7 +81,11 @@ const RIDER_OWNED = new Set(['foodDeliveryWithdrawal', 'foodDeliveryCashDeposit'
  * one is checked where the restaurant is chosen, not here; reads, updates and
  * deletes are still narrowed through the restaurant.
  */
-const RESTAURANT_OWNED = new Set(['foodItem', 'foodAddon']);
+const RESTAURANT_OWNED = new Set([
+    'foodItem', 'foodAddon',
+    'foodTransaction', 'foodRestaurantWithdrawal', 'foodRestaurantCommission',
+    'foodRestaurantSupportTicket', 'foodSupportTicket',
+]);
 
 /**
  * Models where no zone means "everywhere". A sub-admin can see those rows but

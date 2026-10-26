@@ -1333,7 +1333,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
 
       {/* Edit details: zone, vehicle, bank / UPI (name and phone edit in the row) */}
       <Dialog open={Boolean(detailsFor)} onOpenChange={(open) => { if (!open) setDetailsFor(null) }}>
-        <DialogContent className="max-w-2xl bg-white max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl bg-white max-h-[85vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle>Edit {detailsFor?.name || "delivery partner"}</DialogTitle>
           </DialogHeader>

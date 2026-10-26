@@ -68,6 +68,23 @@ test('dishes and add-ons follow their restaurant\'s zone', () => {
     assert.equal(createAllowed('FoodItem', { restaurantId: 'r1', name: 'Thali' }, INDORE), true);
 });
 
+test('restaurant money and tickets follow the restaurant\'s zone', () => {
+    const inIndore = { restaurant: { zoneId: { in: ['z1', 'z2'] } } };
+    for (const model of ['FoodTransaction', 'FoodRestaurantWithdrawal', 'FoodRestaurantCommission', 'FoodRestaurantSupportTicket']) {
+        assert.deepEqual(applyAdminScope(model, 'findMany', {}, INDORE).where, inIndore, model);
+    }
+    // A customer ticket: through its restaurant, else its order; one about
+    // neither belongs to no city and stays visible.
+    assert.deepEqual(applyAdminScope('FoodSupportTicket', 'count', {}, INDORE).where, {
+        OR: [
+            inIndore,
+            { restaurantId: null, order: { zoneId: { in: ['z1', 'z2'] } } },
+            { restaurantId: null, orderId: null },
+        ],
+    });
+    assert.equal(createAllowed('FoodTransaction', { restaurantId: 'r1' }, INDORE), true);
+});
+
 test('creating outside the cities is refused', () => {
     assert.equal(createAllowed('FoodZone', { cityId: 'c-indore' }, INDORE), true);
     assert.equal(createAllowed('FoodZone', { cityId: 'c-vapi' }, INDORE), false);
