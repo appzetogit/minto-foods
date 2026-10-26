@@ -35,7 +35,7 @@ const createFoodForm = () => ({
   variants: [],
   description: "",
   image: "",
-  foodType: "Non-Veg",
+  foodType: "",
   isAvailable: true,
   preparationTime: "",
   // The platform's cut on this dish. Empty means it simply follows the
@@ -226,6 +226,7 @@ export default function FoodsList() {
         restaurantsMap.set(restaurantId, {
           id: restaurantId,
           name: getRestaurantName(restaurant) || "Unknown Restaurant",
+          pureVeg: restaurant?.pureVegRestaurant === true,
         })
       })
 
@@ -376,6 +377,10 @@ export default function FoodsList() {
   const restaurantOptions = useMemo(() => {
     return restaurantsForFilter
   }, [restaurantsForFilter])
+
+  const selectedRestaurantIsPureVeg = restaurantOptions.some(
+    (r) => r.id === String(foodForm.restaurantId || "") && r.pureVeg,
+  )
 
   const filteredRestaurantOptions = useMemo(() => {
     const query = restaurantFilterSearch.trim().toLowerCase()
@@ -552,6 +557,10 @@ export default function FoodsList() {
     }
     if (!foodForm.name.trim()) {
       toast.error("Food name is required")
+      return
+    }
+    if (foodForm.foodType !== "Veg" && foodForm.foodType !== "Non-Veg") {
+      toast.error("Choose Veg or Non-Veg")
       return
     }
 
@@ -1275,7 +1284,17 @@ export default function FoodsList() {
                     somewhere else. */}
                 <select
                   value={foodForm.restaurantId}
-                  onChange={(e) => setFoodForm((prev) => ({ ...prev, restaurantId: e.target.value, categoryId: "", categoryName: "" }))}
+                  onChange={(e) => {
+                    const restaurantId = e.target.value
+                    const pureVeg = restaurantOptions.some((r) => r.id === restaurantId && r.pureVeg)
+                    setFoodForm((prev) => ({
+                      ...prev,
+                      restaurantId,
+                      categoryId: "",
+                      categoryName: "",
+                      ...(pureVeg ? { foodType: "Veg" } : {}),
+                    }))
+                  }}
                   disabled={foodFormMode === "edit" || selectedRestaurant !== "all"}
                   className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white disabled:bg-slate-100"
                 >
@@ -1392,9 +1411,13 @@ export default function FoodsList() {
                   onChange={(e) => setFoodForm((prev) => ({ ...prev, foodType: e.target.value }))}
                   className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
                 >
+                  <option value="" disabled>Choose Veg or Non-Veg</option>
                   <option value="Veg">Veg</option>
-                  <option value="Non-Veg">Non-Veg</option>
+                  <option value="Non-Veg" disabled={selectedRestaurantIsPureVeg}>Non-Veg</option>
                 </select>
+                {selectedRestaurantIsPureVeg ? (
+                  <p className="mt-1 text-xs text-emerald-700">Pure veg restaurant: every dish is Veg.</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Upload Images</label>

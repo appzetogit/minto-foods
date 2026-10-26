@@ -184,7 +184,7 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
     const restaurant = await prisma.foodRestaurant.findUnique({
         where: { id: String(restaurantId) },
-        select: { id: true, zoneId: true },
+        select: { id: true, zoneId: true, pureVegRestaurant: true },
     });
     if (!restaurant) throw new ValidationError('Restaurant not found');
 
@@ -355,6 +355,12 @@ export async function processBulkMenuUpload(restaurantId, fileBuffer, options = 
             }
 
             const foodType = normalizeFoodTypeForCategory(data.foodType);
+            // A pure-veg restaurant's sheet cannot add non-veg dishes; the
+            // admin and app forms already refuse it, the sheet did not.
+            if (restaurant.pureVegRestaurant === true && foodType !== 'Veg') {
+                fail(rowNumber, data.name, 'This is a pure veg restaurant, so every dish must be Veg');
+                return;
+            }
             const scope = String(category.foodTypeScope || 'Both').trim();
             if (!categoryAllowsFoodType(scope, foodType)) {
                 fail(

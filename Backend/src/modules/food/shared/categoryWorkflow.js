@@ -1,6 +1,7 @@
 import { prisma } from '../../../config/prisma.js';
 import { isId } from '../../../utils/helpers.js';
 import { ValidationError } from '../../../core/auth/errors.js';
+import { isVegFoodType } from './foodType.util.js';
 
 export const CATEGORY_APPROVAL_STATUSES = ['pending', 'approved', 'rejected'];
 export const CATEGORY_FOOD_TYPE_SCOPES = ['Veg', 'Non-Veg', 'Both'];
@@ -37,8 +38,7 @@ export const normalizeCategoryFoodTypeScope = (value, fallback = 'Both') => {
     return CATEGORY_FOOD_TYPE_SCOPES.includes(normalized) ? normalized : fallback;
 };
 
-export const normalizeFoodTypeForCategory = (value) =>
-    String(value || '').trim() === 'Veg' ? 'Veg' : 'Non-Veg';
+export const normalizeFoodTypeForCategory = (value) => (isVegFoodType(value) ? 'Veg' : 'Non-Veg');
 
 export const categoryAllowsFoodType = (scope, foodType) => {
     const normalizedScope = normalizeCategoryFoodTypeScope(scope, 'Both');

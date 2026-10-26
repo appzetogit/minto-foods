@@ -5,11 +5,18 @@
  * marks a dish as the wrong diet, which is why it lives in one place.
  */
 
+/**
+ * Whether a food type value means vegetarian. Case and spacing are ignored:
+ * an exact 'Veg' match turned 'veg' (the bulk-upload template's own sample),
+ * 'VEG' or 'Pure Veg' into Non-Veg without a word.
+ */
+export const isVegFoodType = (value) => /^(pure\s*)?veg(etarian)?$/i.test(String(value || '').trim());
+
 /** Client value → Prisma enum member. */
-export const toFoodTypeColumn = (value) => (String(value || '').trim() === 'Veg' ? 'Veg' : 'NonVeg');
+export const toFoodTypeColumn = (value) => (isVegFoodType(value) ? 'Veg' : 'NonVeg');
 
 /**
  * Prisma enum member (or a client value) → the hyphenated form the apps read.
  * 'Egg' and anything unrecognised have always counted as non-veg.
  */
-export const fromFoodTypeColumn = (value) => (String(value || '').trim() === 'Veg' ? 'Veg' : 'Non-Veg');
+export const fromFoodTypeColumn = (value) => (isVegFoodType(value) ? 'Veg' : 'Non-Veg');
