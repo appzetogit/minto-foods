@@ -146,11 +146,24 @@ test('past the free distance it is base + rate * the kilometres beyond', () => {
     assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 20 }).deliveryFee, 110);
 });
 
-test('fractional distances are charged exactly, not rounded to a whole km', () => {
-    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 7.5 }).deliveryFee, 47.5);
-    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 2.1 }).deliveryFee, 20.5);
-    // 20 + 5 * (7.3 - 2) is 46.50000000000001 in binary floating point.
-    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 7.3 }).deliveryFee, 46.5);
+test('fractional distances are charged per km, then rounded to the rupee', () => {
+    // 20 + 5 * 5.5 = 47.5 -> 48; 20 + 5 * 0.1 = 20.5 -> 21; 20 + 5 * 0.06 = 20.3 -> 20.
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 7.5 }).deliveryFee, 48);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 2.1 }).deliveryFee, 21);
+    assert.equal(resolveUserDeliveryFee(perKmSettings, { distanceKm: 2.06 }).deliveryFee, 20);
+});
+
+test('surge is added before rounding, and never to free delivery', () => {
+    // The reported bill: 35 + 10 * 4.07 = 75.70, plus a 30 surge = 105.70 -> 106.
+    const bands = {
+        deliveryFeeRanges: [{ min: 5, max: 15, fee: 35, feePerKm: 10 }],
+        surgeFee: 30,
+    };
+    assert.equal(resolveUserDeliveryFee(bands, { distanceKm: 9.07 }).deliveryFee, 106);
+    assert.equal(
+        resolveUserDeliveryFee(bands, { distanceKm: 9.07, subtotal: 500, freeDeliveryAbove: 199 }).deliveryFee,
+        0,
+    );
 });
 
 test('a trip past the last band keeps accruing the rate, not the start price', () => {

@@ -461,16 +461,17 @@ export async function loadActiveFeeSettings(zoneId = null) {
  * more than charging the higher one.
  */
 /**
- * A fee with the surge already on it.
+ * A fee with the surge already on it, rounded to the whole rupee.
  *
  * loadActiveFeeSettings resolves the amount once per request, so this only
  * adds it -- every path that charges for delivery goes through here, and one
- * that forgot would quietly undercharge.
+ * that forgot would quietly undercharge. The per-km rate leaves paise
+ * (Rs 75.70); the bill shows whole rupees, so the rounding lives here too.
  */
 const withSurge = (fee, feeSettings = {}) => {
+  if (!Number.isFinite(fee)) return fee;
   const surge = Number(feeSettings.surgeFee) || 0;
-  if (!Number.isFinite(fee) || surge <= 0) return fee;
-  return Math.round((Number(fee) + surge) * 100) / 100;
+  return Math.round(Number(fee) + Math.max(0, surge));
 };
 
 export function resolveSurgeFee(rules = [], at = new Date()) {
@@ -818,7 +819,13 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     straightLineDistanceKm: Number.isFinite(straightLineKm)
       ? Number(straightLineKm.toFixed(2))
       : null,
-    deliveryFeeBreakdown: deliveryFeeResult.breakdown || null,
+    // What the app's fee explainer reads: which rule priced it, the band, and
+    // the part of deliveryFee that is surge (0 when delivery is free).
+    deliveryFeeBreakdown: {
+      source: deliveryFeeResult.source,
+      band: deliveryFeeResult.band || null,
+      surgeFee: deliveryFee > 0 ? Math.max(0, Number(feeSettings.surgeFee) || 0) : 0,
+    },
   };
 
   const pricing = applyDeliveryModePricing(
