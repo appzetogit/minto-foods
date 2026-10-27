@@ -123,6 +123,9 @@ app.use('/api', routes);
 // Mounted at the root, not under /api, because these paths are what shared links
 // point at and what Android matches its intent filter against.
 app.use(shareLinksRoutes);
+// Production nginx only forwards /api to Node, so the invite page is reachable
+// at /api/v1/share/invite too.
+app.use('/api/v1', shareLinksRoutes);
 
 // Dev-only: serve uploaded files when nginx is not in front (production uses nginx)
 if (config.nodeEnv === 'development') {
