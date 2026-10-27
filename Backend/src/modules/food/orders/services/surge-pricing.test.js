@@ -62,10 +62,11 @@ test('surge is added to the fee the bands worked out', () => {
     );
 });
 
-test('surge rides on a fractional fee without floating-point dust', () => {
+test('surge on a fractional fee lands on a whole rupee', () => {
+    // 47.5 + 15 = 62.5, charged as 63.
     assert.equal(
         resolveUserDeliveryFee({ ...settings, surgeFee: 15 }, { distanceKm: 7.5 }).deliveryFee,
-        62.5,
+        63,
     );
 });
 
