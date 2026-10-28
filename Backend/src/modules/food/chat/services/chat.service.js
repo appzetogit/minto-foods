@@ -275,7 +275,7 @@ export async function sendMessage(sender, dto) {
         // update: conversationId is a no-op that keeps Prisma emitting
         // INSERT ... ON CONFLICT, so two people typing at once cannot collide.
         // Nothing else is touched, or a reply would reopen a closed thread.
-        await tx.foodChatConversation.upsert({
+        const thread = await tx.foodChatConversation.upsert({
             where: { conversationId },
             create: {
                 conversationId,
@@ -289,6 +289,15 @@ export async function sendMessage(sender, dto) {
             },
             update: { conversationId },
         });
+        // The inbox lists a thread from its row, so a party new to the thread
+        // (another rider on the same order) is added to it.
+        const missing = [senderToken, recipientToken].filter((t) => !(thread.participants || []).includes(t));
+        if (missing.length) {
+            await tx.foodChatConversation.update({
+                where: { conversationId },
+                data: { participants: { push: [...new Set(missing)] } },
+            });
+        }
 
         return created;
     });
@@ -432,36 +441,74 @@ export async function markRead(me, conversationId) {
     return { updated: count };
 }
 
+/** Threads per inbox page. */
+const INBOX_PAGE_SIZE = 50;
+
 /**
- * Conversations I take part in, newest first.
+ * Conversations I take part in, newest first, a page at a time.
  *
- * Messages stay the source of truth for lastMessage / lastAt / unread; the
- * conversation row only contributes the support metadata (title, status,
- * closedAt). A thread with no row — every order chat created before support
- * threads existed — still lists, defaulted to an open conversation with no
- * title, so nothing needed backfilling. Threads opened but never written to
- * would be invisible if we only grouped messages, so they are merged in too.
+ * Paged on the conversation rows (every thread has one: sendMessage writes it,
+ * and older threads were backfilled), then the latest message and unread count
+ * are worked out only for the threads on the page. It used to group every
+ * message I was ever part of -- for the admin desk, every support message --
+ * and return every thread.
  *
- * The grouping was a Mongo aggregation pipeline; DISTINCT ON is the Postgres
- * idiom for "latest row per group" and does it in one indexed pass.
+ * Threads with unread messages for me are always in the first page, wherever
+ * they fall, so unread badges stay right without loading the whole history.
  *
- * @param {{orderId?: string}} [query] Pass orderId to list only that order's threads.
+ * @param {{orderId?: string, before?: string, limit?: number}} [query]
+ *   orderId lists only that order's threads (all of them, unpaged).
+ *   before is the createdAt of the last thread already shown (from nextBefore).
  */
 export async function listConversations(me, query = {}) {
     const myToken = partyToken(me.role, me.id);
 
     const orderId = String(query.orderId || '').trim();
     if (orderId && !isId(orderId)) throw new ValidationError('Invalid order id');
-    const orderFilter = orderId ? Prisma.sql`AND "orderId" = ${orderId}` : Prisma.empty;
+    const before = query.before ? new Date(query.before) : null;
+    if (before && Number.isNaN(before.getTime())) throw new ValidationError('Invalid before');
+    const limit = Math.min(Math.max(parseInt(query.limit, 10) || INBOX_PAGE_SIZE, 1), 100);
 
+    const pageRows = await prisma.foodChatConversation.findMany({
+        where: {
+            participants: { has: myToken },
+            ...(orderId ? { orderId } : {}),
+            ...(before ? { createdAt: { lt: before } } : {}),
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(orderId ? {} : { take: limit + 1 }),
+    });
+    const hasMore = !orderId && pageRows.length > limit;
+    const docs = hasMore ? pageRows.slice(0, limit) : pageRows;
+    const nextBefore = hasMore ? docs[docs.length - 1].createdAt : null;
+
+    if (!orderId && !before) {
+        const unreadThreads = await prisma.foodChatMessage.groupBy({
+            by: ['conversationId'],
+            where: { recipientToken: myToken, readAt: null },
+            orderBy: { conversationId: 'asc' },
+            take: 500,
+        });
+        const listed = new Set(docs.map((d) => d.conversationId));
+        const extraIds = unreadThreads.map((r) => r.conversationId).filter((id) => !listed.has(id));
+        if (extraIds.length) {
+            docs.push(...await prisma.foodChatConversation.findMany({
+                where: { conversationId: { in: extraIds }, participants: { has: myToken } },
+            }));
+        }
+    }
+    if (!docs.length) return { conversations: [], hasMore: false, nextBefore: null };
+
+    // DISTINCT ON is the Postgres idiom for "latest row per group"; the
+    // (conversationId, createdAt) index serves it for just these threads.
+    const ids = docs.map((d) => d.conversationId);
     const rows = await prisma.$queryRaw`
         WITH mine AS (
             SELECT * FROM "food_chat_messages"
-            WHERE ${myToken} = ANY("participants") ${orderFilter}
+            WHERE "conversationId" = ANY(${ids}) AND ${myToken} = ANY("participants")
         ),
         agg AS (
             SELECT "conversationId",
-                   MIN("createdAt") AS "firstAt",
                    COUNT(*) FILTER (
                        WHERE "recipientToken" = ${myToken} AND "readAt" IS NULL
                    ) AS "unread"
@@ -477,58 +524,32 @@ export async function listConversations(me, query = {}) {
         )
         SELECT latest."conversationId", latest."orderId",
                latest."text" AS "lastText", latest."createdAt" AS "lastAt",
-               latest."attachmentCount", latest."participants", agg."firstAt", agg."unread"
+               latest."attachmentCount", latest."participants", agg."unread"
         FROM latest
         JOIN agg ON agg."conversationId" = latest."conversationId"
-        ORDER BY latest."createdAt" DESC
     `;
+    const statsById = new Map(rows.map((r) => [r.conversationId, r]));
 
-    const docs = await prisma.foodChatConversation.findMany({
-        where: {
-            participants: { has: myToken },
-            ...(orderId ? { orderId } : {}),
-        },
-    });
-    const docById = new Map(docs.map((d) => [d.conversationId, d]));
-
-    const merged = rows.map((r) => {
-        const doc = docById.get(r.conversationId);
-        docById.delete(r.conversationId);
+    const merged = docs.map((doc) => {
+        const r = statsById.get(doc.conversationId);
+        const peerFromRow = (doc.participants || []).find((t) => t !== myToken);
         return {
-            conversationId: r.conversationId,
-            orderId: r.orderId ? String(r.orderId) : doc?.orderId ? String(doc.orderId) : null,
-            title: doc?.title || '',
-            peerToken: (r.participants || []).find((t) => t !== myToken) || doc?.peerToken || null,
+            conversationId: doc.conversationId,
+            orderId: r?.orderId ? String(r.orderId) : doc.orderId ? String(doc.orderId) : null,
+            title: doc.title || '',
+            peerToken: (r?.participants || []).find((t) => t !== myToken) || peerFromRow || doc.peerToken || null,
             // A message can be pictures and nothing else, and a thread whose
             // newest message is one reads as empty in the list otherwise.
-            lastMessage: r.lastText || photoSummary(Number(r.attachmentCount) || 0),
-            lastAt: r.lastAt,
+            lastMessage: r ? r.lastText || photoSummary(Number(r.attachmentCount) || 0) : '',
+            lastAt: r?.lastAt || null,
             // COUNT is int8, which the driver hands back as a BigInt.
-            unread: Number(r.unread),
-            status: doc?.status || 'open',
-            assignedAdminId: doc?.assignedAdminId ? String(doc.assignedAdminId) : null,
-            // Without a row the thread began with its first message.
-            createdAt: doc?.createdAt || r.firstAt,
-            closedAt: doc?.closedAt || null,
-        };
-    });
-
-    // Opened but not yet written to.
-    for (const doc of docById.values()) {
-        merged.push({
-            conversationId: doc.conversationId,
-            orderId: doc.orderId ? String(doc.orderId) : null,
-            title: doc.title || '',
-            peerToken: doc.peerToken,
-            lastMessage: '',
-            lastAt: null,
-            unread: 0,
-            status: doc.status,
+            unread: r ? Number(r.unread) : 0,
+            status: doc.status || 'open',
             assignedAdminId: doc.assignedAdminId ? String(doc.assignedAdminId) : null,
             createdAt: doc.createdAt,
             closedAt: doc.closedAt || null,
-        });
-    }
+        };
+    });
 
     merged.sort(
         (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
@@ -560,7 +581,7 @@ export async function listConversations(me, query = {}) {
         }
     }
 
-    return { conversations };
+    return { conversations, hasMore, nextBefore };
 }
 
 /** How many of an order's latest messages GET /conversations?orderId= carries. */

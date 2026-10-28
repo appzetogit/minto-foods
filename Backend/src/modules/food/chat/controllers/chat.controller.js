@@ -45,9 +45,12 @@ export async function sendMessageController(req, res, next) {
 
 export async function listConversationsController(req, res, next) {
     try {
-        // ?orderId=<id> narrows to that order's threads. Omit it for everything.
+        // ?orderId=<id> narrows to that order's threads. Otherwise a page of
+        // threads, newest first; ?before=<nextBefore> fetches the next one.
         const data = await chatService.listConversations(me(req), {
-            orderId: req.query.orderId
+            orderId: req.query.orderId,
+            before: req.query.before,
+            limit: req.query.limit,
         });
         return sendResponse(res, 200, 'Conversations fetched', data);
     } catch (err) {

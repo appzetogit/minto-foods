@@ -3346,6 +3346,8 @@ model FoodChatConversation {
 
   @@index([orderId, createdAt(sort: Desc)])
   @@index([status])
+  /// The inbox pages threads newest first.
+  @@index([createdAt(sort: Desc)])
   @@map("food_chat_conversations")
 }
 

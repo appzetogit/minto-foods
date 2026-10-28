@@ -112,11 +112,26 @@ export default function Chattings() {
     }
   })()
 
+  // The server sends threads a page at a time, newest first (plus any with
+  // unread messages). This is where the next older page starts.
+  const olderCursorRef = useRef(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+
   const loadConversations = useCallback(async () => {
     try {
       const response = await chatAPI.listConversations({}, ADMIN_CONFIG)
-      const rows = response?.data?.data?.conversations ?? []
-      setConversations(Array.isArray(rows) ? rows : [])
+      const data = response?.data?.data || {}
+      const rows = Array.isArray(data.conversations) ? data.conversations : []
+      // Fresh first page on top; older pages already loaded stay below it.
+      setConversations((prev) => {
+        const fresh = new Set(rows.map((c) => c.conversationId))
+        return [...rows, ...prev.filter((c) => !fresh.has(c.conversationId))]
+      })
+      if (!olderCursorRef.current) {
+        olderCursorRef.current = data.nextBefore || null
+        setHasMore(Boolean(data.hasMore))
+      }
     } catch (error) {
       toast.error("Could not load conversations")
       setConversations([])
@@ -128,6 +143,26 @@ export default function Chattings() {
   useEffect(() => {
     loadConversations()
   }, [loadConversations])
+
+  const loadOlder = useCallback(async () => {
+    if (!olderCursorRef.current) return
+    setLoadingOlder(true)
+    try {
+      const response = await chatAPI.listConversations({ before: olderCursorRef.current }, ADMIN_CONFIG)
+      const data = response?.data?.data || {}
+      const rows = Array.isArray(data.conversations) ? data.conversations : []
+      setConversations((prev) => {
+        const seen = new Set(prev.map((c) => c.conversationId))
+        return [...prev, ...rows.filter((c) => !seen.has(c.conversationId))]
+      })
+      olderCursorRef.current = data.nextBefore || null
+      setHasMore(Boolean(data.hasMore))
+    } catch (error) {
+      toast.error("Could not load older conversations")
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [])
 
   const openConversation = useCallback(async (conversationId) => {
     setSelectedId(conversationId)
@@ -485,6 +520,16 @@ export default function Chattings() {
                     ))}
                   </div>
                 )}
+                {!loadingList && hasMore ? (
+                  <button
+                    type="button"
+                    onClick={loadOlder}
+                    disabled={loadingOlder}
+                    className="w-full py-3 text-sm text-teal-700 hover:bg-slate-50 disabled:opacity-60 border-t border-slate-100"
+                  >
+                    {loadingOlder ? "Loading…" : "Load older conversations"}
+                  </button>
+                ) : null}
               </div>
             </div>
 
