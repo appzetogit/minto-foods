@@ -8,7 +8,6 @@ import { runUnscoped } from '../../../../core/roles/adminScope.context.js';
 import {
   buildDeliverySocketPayload,
   getBusyDeliveryPartnerIds,
-  haversineKm,
   notifyOwnersActionableAlert,
   pushStatusHistory,
 } from './order.helpers.js';
@@ -283,20 +282,6 @@ async function loadOrderForAssign(orderId) {
 }
 
 /** Riders whose last location is inside the zone's boundary. */
-async function riderIdsInsideZone(zoneId) {
-  if (!zoneId) return new Set();
-  const rows = await prisma.$queryRaw`
-    SELECT p."id"
-    FROM "food_delivery_partners" p
-    JOIN "food_zones" z ON z."id" = ${String(zoneId)}
-    WHERE p."status" = 'approved'
-      AND p."lastLat" IS NOT NULL AND p."lastLng" IS NOT NULL
-      AND z."boundary" IS NOT NULL
-      AND ST_Contains(z."boundary"::geometry, ST_SetSRID(ST_MakePoint(p."lastLng", p."lastLat"), 4326))
-  `;
-  return new Set(rows.map((r) => r.id));
-}
-
 const startOfTodayIst = () => {
   const now = new Date();
   const ist = new Date(now.getTime() + 330 * 60000);
@@ -304,35 +289,97 @@ const startOfTodayIst = () => {
   return new Date(ist.getTime() - 330 * 60000);
 };
 
+/** Most online riders the picker lists, nearest first. */
+export const ELIGIBLE_ONLINE_CAP = 50;
+/** Offline riders per page when the admin asks to see them. */
+export const ELIGIBLE_OFFLINE_PAGE = 20;
+
 /**
- * Riders an admin can pick for an order: approved riders inside the order's
- * zone right now, then riders from the zone's city who are elsewhere. Each
- * says whether they can be assigned and why not.
+ * Riders for an order's zone or city, found in PostgreSQL and bounded.
+ *
+ * It used to load every approved rider in the city (no limit), then their
+ * details, wallets and today's deliveries, and sort the lot in Node.js. Now
+ * the candidates come from one query each: online riders nearest first, at
+ * most ELIGIBLE_ONLINE_CAP; offline riders a page at a time, by name. The
+ * per-rider lookups run only for the riders returned. A rider belongs if
+ * they are in the zone (GPS inside its boundary) or their city matches.
  */
-export async function listEligibleRiders(orderId, { includeOffline = false } = {}) {
+async function eligibleRiderCandidates({ zoneId, cityKey, lat, lng, online, search, limit, offset }) {
+  const hasPoint = Number.isFinite(lat) && Number.isFinite(lng);
+  const q = String(search || '').trim().slice(0, 60);
+  const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return prisma.$queryRaw`
+    SELECT * FROM (
+    SELECT p."id", p."name", p."phone", p."city", p."vehicleType", p."rating", p."lastLocationAt",
+           p."availabilityStatus"::text AS "availabilityStatus",
+           (z."boundary" IS NOT NULL AND p."lastLocation" IS NOT NULL
+             AND ST_Covers(z."boundary", p."lastLocation")) AS "insideZone",
+           CASE WHEN ${hasPoint} AND p."lastLocation" IS NOT NULL
+             THEN ST_Distance(p."lastLocation", ST_MakePoint(${hasPoint ? lng : 0}, ${hasPoint ? lat : 0})::geography) / 1000
+           END AS "distanceKm"
+    FROM "food_delivery_partners" p
+    LEFT JOIN "food_zones" z ON z."id" = ${zoneId || ''}
+    WHERE p."status"::text = 'approved'
+      AND (p."availabilityStatus"::text = 'online') = ${online}
+      AND (
+        (${cityKey} <> '' AND lower(p."city") = ${cityKey})
+        OR (z."boundary" IS NOT NULL AND p."lastLocation" IS NOT NULL AND ST_Covers(z."boundary", p."lastLocation"))
+      )
+      AND (${q} = '' OR p."name" ILIKE ${like} OR p."phone" LIKE ${like})
+    ) c
+    ORDER BY "insideZone" DESC,
+             CASE WHEN ${online} THEN "distanceKm" END ASC NULLS LAST,
+             "name" ASC
+    LIMIT ${limit} OFFSET ${offset}
+  `;
+}
+
+/**
+ * The picker list for assigning an order by hand.
+ *
+ * Options: includeOffline (also list offline riders, a page at a time),
+ * search (name or phone, both lists), offlinePage (1-based).
+ */
+export async function listEligibleRiders(orderId, { includeOffline = false, search = '', offlinePage = 1 } = {}) {
   const row = await loadOrderForAssign(orderId);
   const order = toOrder(row);
   const zoneId = row.zoneId;
   const cityName = row.zone?.cityRef?.name || row.zone?.name || '';
+  const cityKey = String(cityName).trim().toLowerCase();
+  const lat = Number(row.restaurant?.latitude);
+  const lng = Number(row.restaurant?.longitude);
+  const page = Math.max(1, Math.trunc(Number(offlinePage) || 1));
+  const common = { zoneId, cityKey, lat, lng, search };
 
-  const [inside, cityRiders] = await Promise.all([
-    riderIdsInsideZone(zoneId),
-    cityName
-      ? prisma.foodDeliveryPartner.findMany({
-          where: { status: 'approved', city: { equals: cityName, mode: 'insensitive' } },
-          select: { id: true },
+  const [onlineRows, offlineRows] = await Promise.all([
+    // One past the cap, to say whether the list was cut.
+    eligibleRiderCandidates({ ...common, online: true, limit: ELIGIBLE_ONLINE_CAP + 1, offset: 0 }),
+    includeOffline
+      ? eligibleRiderCandidates({
+          ...common,
+          online: false,
+          limit: ELIGIBLE_OFFLINE_PAGE + 1,
+          offset: (page - 1) * ELIGIBLE_OFFLINE_PAGE,
         })
       : [],
   ]);
-  const ids = [...new Set([...inside, ...cityRiders.map((r) => r.id)])];
-  if (!ids.length) return { order: { id: row.id, zoneName: row.zone?.name || '' }, riders: [] };
+  const onlineCapped = onlineRows.length > ELIGIBLE_ONLINE_CAP;
+  const offlineHasMore = offlineRows.length > ELIGIBLE_OFFLINE_PAGE;
+  const candidates = [
+    ...onlineRows.slice(0, ELIGIBLE_ONLINE_CAP),
+    ...offlineRows.slice(0, ELIGIBLE_OFFLINE_PAGE),
+  ];
+  const meta = {
+    order: { id: row.id, displayId: row.order_id || row.id, zoneId, zoneName: row.zone?.name || '', restaurantName: row.restaurant?.restaurantName || '' },
+    onlineCapped,
+    onlineCap: ELIGIBLE_ONLINE_CAP,
+    offline: includeOffline ? { page, pageSize: ELIGIBLE_OFFLINE_PAGE, hasMore: offlineHasMore } : null,
+  };
+  if (!candidates.length) return { ...meta, riders: [] };
 
-  const [partners, busy, cashBlocked, wallets, todayCounts] = await Promise.all([
-    prisma.foodDeliveryPartner.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, name: true, phone: true, city: true, availabilityStatus: true, lastLat: true, lastLng: true, lastLocationAt: true, rating: true, vehicleType: true },
-    }),
-    getBusyDeliveryPartnerIds(),
+  const ids = candidates.map((c) => c.id);
+  const [busy, cashBlocked, wallets, todayCounts] = await Promise.all([
+    getBusyDeliveryPartnerIds(ids),
     orderCollectsCash(order) ? getCashBlockedPartnerIds(ids) : new Set(),
     prisma.wallet.findMany({ where: { entityType: 'deliveryBoy', entityId: { in: ids } }, select: { entityId: true, cashInHand: true } }),
     prisma.foodOrder.groupBy({
@@ -346,18 +393,15 @@ export async function listEligibleRiders(orderId, { includeOffline = false } = {
   const declined = new Set(
     (row.dispatchOffers || []).filter((o) => ['rejected', 'timeout'].includes(o.action)).map((o) => o.partnerId),
   );
-  const rLat = Number(row.restaurant?.latitude);
-  const rLng = Number(row.restaurant?.longitude);
 
-  const riders = partners.map((p) => {
+  const riders = candidates.map((p) => {
     const online = p.availabilityStatus === 'online';
-    const isInside = inside.has(p.id);
+    const isInside = Boolean(p.insideZone);
     const reasons = [];
     if (!online) reasons.push('Offline');
     if (busy.has(p.id)) reasons.push('On another delivery');
     if (cashBlocked.has(p.id)) reasons.push('Cash limit reached');
-    const distanceKm =
-      Number.isFinite(rLat) && p.lastLat != null ? Math.round(haversineKm(rLat, rLng, p.lastLat, p.lastLng) * 10) / 10 : null;
+    const distanceKm = p.distanceKm == null ? null : Math.round(Number(p.distanceKm) * 10) / 10;
     return {
       id: p.id,
       name: p.name,
@@ -386,10 +430,7 @@ export async function listEligibleRiders(orderId, { includeOffline = false } = {
   riders.sort(
     (a, b) => rank(a) - rank(b) || (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9) || a.name.localeCompare(b.name),
   );
-  return {
-    order: { id: row.id, displayId: row.order_id || row.id, zoneId, zoneName: row.zone?.name || '', restaurantName: row.restaurant?.restaurantName || '' },
-    riders: includeOffline ? riders : riders.filter((r) => r.online),
-  };
+  return { ...meta, riders };
 }
 
 // ---- assigning -------------------------------------------------------------------

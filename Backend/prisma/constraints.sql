@@ -380,6 +380,10 @@ CREATE INDEX IF NOT EXISTS "food_user_addresses_location_gist"
   ON "food_user_addresses" USING GIST ("location");
 CREATE INDEX IF NOT EXISTS "food_delivery_partners_last_location_gist"
   ON "food_delivery_partners" USING GIST ("lastLocation");
+
+-- The manual-assign rider list matches riders by city, case-insensitively.
+CREATE INDEX IF NOT EXISTS "food_delivery_partners_city_lower_idx"
+  ON "food_delivery_partners" (lower("city"));
 CREATE INDEX IF NOT EXISTS "food_orders_addr_location_gist"
   ON "food_orders" USING GIST ("addrLocation");
 CREATE INDEX IF NOT EXISTS "food_orders_rider_location_gist"

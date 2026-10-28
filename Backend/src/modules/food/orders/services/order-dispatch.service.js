@@ -10,7 +10,6 @@ import {
   riderContact,
   buildOrderIdentityFilter,
   getBusyDeliveryPartnerIds,
-  haversineKm,
   notifyOwnersActionableAlert,
   notifyOwnersSafely,
   TERMINAL_ORDER_STATUSES,
@@ -181,6 +180,19 @@ export function orderCollectsCash(order) {
   return method === 'cash' || method === 'razorpay_qr';
 }
 
+/**
+ * The nearest online riders who can be offered an order from `restaurant`,
+ * closest first, at most `limit` of them.
+ *
+ * Found in PostgreSQL with the GiST index on lastLocation: ST_DWithin bounds
+ * the search and `<->` orders it, so only `limit` rows reach Node.js. This
+ * used to load every online rider in the country and measure each one here on
+ * every dispatch round.
+ *
+ * Same rules as before: approved riders (pending ones too outside production),
+ * a GPS fix no older than DISPATCH_STALE_GPS_MS, within maxKm. No coordinates
+ * means no fallback to riders elsewhere (the cross-zone bug).
+ */
 async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit = 25 } = {}) {
   const rLat = Number(restaurant?.latitude);
   const rLng = Number(restaurant?.longitude);
@@ -189,14 +201,7 @@ async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit 
     return { partners: [] };
   }
 
-  const allOnline = await prisma.foodDeliveryPartner.findMany({
-    where: { availabilityStatus: 'online' },
-    select: { id: true, status: true, lastLat: true, lastLng: true, lastLocationAt: true, name: true },
-  });
-
-  const scored = [];
-  const allowedStatuses =
-    process.env.NODE_ENV === 'production' ? ['approved'] : ['approved', 'pending'];
+  const allowedStatuses = config.nodeEnv === 'production' ? ['approved'] : ['approved', 'pending'];
 
   // A rider is only dropped for staleness after this long WITHOUT any GPS ping.
   //
@@ -205,45 +210,45 @@ async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit 
   // no push is sent to wake the app, so the GPS stays stale. Coordinates half an
   // hour old and 3 km away still beat offering the order to nobody.
   const STALE_GPS_MS = Number(process.env.DISPATCH_STALE_GPS_MS) || 45 * 60 * 1000;
+  const freshSince = new Date(Date.now() - STALE_GPS_MS);
+  const radiusMeters = Math.max(0.1, Number(maxKm) || 15) * 1000;
+  const take = Math.max(1, Math.trunc(Number(limit) || 25));
 
-  let droppedStale = 0;
-  for (const p of allOnline) {
-    if (!allowedStatuses.includes(p.status)) continue;
+  const rows = await prisma.$queryRaw`
+      SELECT "id", "status"::text AS "status",
+             ST_Distance("lastLocation", ST_MakePoint(${rLng}, ${rLat})::geography) / 1000 AS "distanceKm"
+      FROM "food_delivery_partners"
+      WHERE "availabilityStatus"::text = 'online'
+        AND "status"::text = ANY(${allowedStatuses})
+        AND "lastLocation" IS NOT NULL
+        AND "lastLocationAt" > ${freshSince}
+        AND ST_DWithin("lastLocation", ST_MakePoint(${rLng}, ${rLat})::geography, ${radiusMeters})
+      ORDER BY "lastLocation" <-> ST_MakePoint(${rLng}, ${rLat})::geography
+      LIMIT ${take}
+  `;
 
-    // No coordinates at all → genuinely unplaceable (never score as 999, which
-    // used to bypass the maxKm gate entirely).
-    if (p.lastLat == null || p.lastLng == null) {
-      droppedStale += 1;
-      continue;
+  if (!rows.length) {
+    // Without this, a starved dispatch is indistinguishable from "no riders
+    // online". Only counted when nobody was found, so the normal path stays one
+    // bounded query.
+    const [{ online, stale }] = await prisma.$queryRaw`
+        SELECT COUNT(*)::int AS "online",
+               COUNT(*) FILTER (WHERE "lastLocation" IS NULL OR "lastLocationAt" IS NULL OR "lastLocationAt" <= ${freshSince})::int AS "stale"
+        FROM "food_delivery_partners"
+        WHERE "availabilityStatus"::text = 'online' AND "status"::text = ANY(${allowedStatuses})
+    `;
+    if (stale > 0) {
+      logger.warn(
+        `[Dispatch] ${stale}/${online} online riders skipped for missing/stale GPS ` +
+          `(restaurant ${restaurant.id}, maxKm ${maxKm}). 0 eligible.`,
+      );
     }
-    if (!p.lastLocationAt || Date.now() - new Date(p.lastLocationAt).getTime() > STALE_GPS_MS) {
-      droppedStale += 1;
-      continue;
-    }
-
-    const d = haversineKm(rLat, rLng, p.lastLat, p.lastLng);
-    if (Number.isFinite(d) && d <= maxKm) {
-      scored.push({ partnerId: p.id, distanceKm: d, status: p.status });
-    }
+    return { partners: [] };
   }
 
-  // Without this, a starved dispatch is indistinguishable from "no riders online".
-  if (droppedStale > 0) {
-    logger.warn(
-      `[Dispatch] ${droppedStale}/${allOnline.length} online riders skipped for missing/stale GPS ` +
-        `(restaurant ${restaurant.id}, maxKm ${maxKm}). ${scored.length} eligible.`,
-    );
-  }
-
-  scored.sort((a, b) => a.distanceKm - b.distanceKm);
-  const picked = scored.slice(0, Math.max(1, limit));
-
-  // Do NOT fall back to any online partner worldwide (cross-zone bug). The caller
-  // retries later when nearby GPS updates.
-  if (picked.length === 0) return { partners: [] };
-
-  const final = config.nodeEnv === 'production' ? picked.filter((p) => p.status === 'approved') : picked;
-  return { partners: final };
+  return {
+    partners: rows.map((r) => ({ partnerId: r.id, distanceKm: Number(r.distanceKm), status: r.status })),
+  };
 }
 
 /** The platform-wide dispatch settings row, with defaults. */
@@ -304,10 +309,13 @@ export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) 
  * Riders holding a live offer on some other order. A rider gets one offer at
  * a time; an offer stuck past its window (a lost timeout job) stops counting.
  */
-async function getRidersHoldingAnOffer(exceptOrderId, windowMs) {
+async function getRidersHoldingAnOffer(exceptOrderId, windowMs, partnerIds = null) {
+  if (Array.isArray(partnerIds) && !partnerIds.length) return new Set();
   const rows = await prisma.foodOrder.findMany({
     where: {
       id: { not: exceptOrderId },
+      // Only the candidates being considered, not every open offer.
+      ...(Array.isArray(partnerIds) ? { dispatchDeliveryPartnerId: { in: partnerIds.map(String) } } : {}),
       dispatchStatus: 'assigned',
       dispatchAcceptedAt: null,
       dispatchDeliveryPartnerId: { not: null },
@@ -472,9 +480,10 @@ export async function tryAutoAssign(orderId, options = {}) {
     }
 
     const { partners } = await listNearbyOnlineDeliveryPartners(row.restaurant, { maxKm, limit: 25 });
+    const candidateIds = partners.map((p) => String(p.partnerId));
     const [busy, holdingOffer] = await Promise.all([
-      getBusyDeliveryPartnerIds(),
-      getRidersHoldingAnOffer(id, windowMs),
+      getBusyDeliveryPartnerIds(candidateIds),
+      getRidersHoldingAnOffer(id, windowMs, candidateIds),
     ]);
     // Riders at their cash ceiling are skipped for cash-collect orders only.
     const cashBlocked = orderCollectsCash(order)

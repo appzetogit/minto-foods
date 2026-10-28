@@ -212,20 +212,53 @@ export function RiderPicker({ order, onClose, onAssigned }) {
   const [loading, setLoading] = useState(true)
   const [showOffline, setShowOffline] = useState(false)
   const [q, setQ] = useState("")
+  const [search, setSearch] = useState("")
   const [saving, setSaving] = useState("")
+  // The server caps the online list and pages the offline one.
+  const [onlineCapped, setOnlineCapped] = useState(0)
+  const [offline, setOffline] = useState(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  // Search runs on the server, so riders past the first page can be found.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(q.trim()), 350)
+    return () => clearTimeout(t)
+  }, [q])
 
   useEffect(() => {
     let alive = true
     setLoading(true)
     adminAPI
-      .getEligibleRiders(order.id, showOffline)
-      .then((res) => alive && setRiders(dataOf(res).riders || []))
+      .getEligibleRiders(order.id, showOffline, { search })
+      .then((res) => {
+        if (!alive) return
+        const d = dataOf(res)
+        setRiders(d.riders || [])
+        setOnlineCapped(d.onlineCapped ? d.onlineCap : 0)
+        setOffline(d.offline || null)
+      })
       .catch((e) => alive && toast.error(errText(e, "Could not load riders")))
       .finally(() => alive && setLoading(false))
     return () => {
       alive = false
     }
-  }, [order.id, showOffline])
+  }, [order.id, showOffline, search])
+
+  const loadMoreOffline = async () => {
+    if (!offline?.hasMore) return
+    try {
+      setLoadingMore(true)
+      const d = dataOf(await adminAPI.getEligibleRiders(order.id, true, { search, offlinePage: offline.page + 1 }))
+      const seen = new Set(riders.map((r) => r.id))
+      // The online riders come back again on every page; keep only the new offline ones.
+      setRiders([...riders, ...(d.riders || []).filter((r) => !r.online && !seen.has(r.id))])
+      setOffline(d.offline || null)
+    } catch (e) {
+      toast.error(errText(e, "Could not load more riders"))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const assign = async (r) => {
     let body = { deliveryPartnerId: r.id }
@@ -318,6 +351,19 @@ export function RiderPicker({ order, onClose, onAssigned }) {
             ))}
           </div>
         )}
+        {!loading && onlineCapped ? (
+          <p className="text-xs text-slate-500">Showing the {onlineCapped} nearest online riders. Search by name or phone to find others.</p>
+        ) : null}
+        {!loading && offline?.hasMore ? (
+          <button
+            type="button"
+            onClick={loadMoreOffline}
+            disabled={loadingMore}
+            className="w-full py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {loadingMore ? "Loading…" : "Load more offline riders"}
+          </button>
+        ) : null}
       </div>
     </div>
   )

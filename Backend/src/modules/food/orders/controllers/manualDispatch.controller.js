@@ -43,6 +43,8 @@ export const getEligibleRiders = wrap(async (req, res) =>
         res,
         await listEligibleRiders(requireId(req.params.id, 'order'), {
             includeOffline: ['1', 'true'].includes(String(req.query.includeOffline || '')),
+            search: String(req.query.search || ''),
+            offlinePage: Number(req.query.offlinePage) || 1,
         }),
     ),
 );

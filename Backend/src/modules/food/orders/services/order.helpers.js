@@ -273,11 +273,17 @@ export async function partnerHasActiveDelivery(deliveryPartnerId) {
   return Boolean(active);
 }
 
-export async function getBusyDeliveryPartnerIds() {
+/**
+ * Riders on an accepted, unfinished trip. Pass the candidate ids to check
+ * only those (dispatch looks at its 25 nearest), rather than every active
+ * order on the platform.
+ */
+export async function getBusyDeliveryPartnerIds(partnerIds = null) {
+  if (Array.isArray(partnerIds) && !partnerIds.length) return new Set();
   const rows = await prisma.foodOrder.findMany({
     where: {
       dispatchStatus: 'accepted',
-      dispatchDeliveryPartnerId: { not: null },
+      dispatchDeliveryPartnerId: Array.isArray(partnerIds) ? { in: partnerIds.map(String) } : { not: null },
       orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
     },
     select: { dispatchDeliveryPartnerId: true },

@@ -151,6 +151,22 @@ test('the picker lists online riders in the zone first and flags the rest', asyn
     assert.match(dev.notAssignableReason, /Offline/);
 });
 
+test('the picker searches by name or phone on the server and pages offline riders', async () => {
+    const byName = await listEligibleRiders(orderA, { includeOffline: true, search: riders.dev.name.toUpperCase() });
+    assert.deepEqual(byName.riders.map((r) => r.id), [riders.dev.id]);
+    const byPhone = await listEligibleRiders(orderA, { search: riders.amit.phone.slice(-6) });
+    assert.deepEqual(byPhone.riders.map((r) => r.id), [riders.amit.id]);
+    // LIKE wildcards in the search are taken literally.
+    assert.equal((await listEligibleRiders(orderA, { includeOffline: true, search: '%' })).riders.length, 0);
+
+    const first = await listEligibleRiders(orderA, { includeOffline: true });
+    assert.equal(first.onlineCapped, false);
+    assert.deepEqual(first.offline, { page: 1, pageSize: 20, hasMore: false });
+    const second = await listEligibleRiders(orderA, { includeOffline: true, offlinePage: 2 });
+    assert.ok(!second.riders.some((r) => !r.online), 'nothing past the last page');
+    assert.equal((await listEligibleRiders(orderA)).offline, null);
+});
+
 test('an offline or out-of-zone rider is refused without an override', async () => {
     await assert.rejects(() => assignRiderManually(orderA, riders.dev.id, null), /Offline/);
     await assert.rejects(() => assignRiderManually(orderA, riders.chetan.id, null), /zone/);

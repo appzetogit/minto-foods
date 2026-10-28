@@ -1312,9 +1312,13 @@ export const adminAPI = {
     apiClient.patch(`/food/admin/dispatch/zones/${String(zoneId)}`, { dispatchMode }, { contextModule: "admin" }),
   getDispatchQueue: () =>
     apiClient.get("/food/admin/dispatch/queue", { contextModule: "admin" }),
-  getEligibleRiders: (orderId, includeOffline = false) =>
+  getEligibleRiders: (orderId, includeOffline = false, { search = "", offlinePage = 1 } = {}) =>
     apiClient.get(`/food/admin/orders/${String(orderId)}/eligible-riders`, {
-      params: includeOffline ? { includeOffline: 1 } : {},
+      params: {
+        ...(includeOffline ? { includeOffline: 1 } : {}),
+        ...(search ? { search } : {}),
+        ...(offlinePage > 1 ? { offlinePage } : {}),
+      },
       contextModule: "admin",
     }),
   assignRider: (orderId, body) =>
