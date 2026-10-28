@@ -78,19 +78,22 @@ export const searchUnified = async (query = {}, options = {}) => {
     // Dishes whose timed out-of-stock has run out come back before matching,
     // and anything still out of stock never matches: a customer must not be
     // sent to a restaurant for a dish they cannot order.
-    if (term || categoryFiltered) await restoreExpiredFoodAvailability();
+    // Only the restaurants in reach: this was a platform-wide write on every
+    // search keystroke.
+    if (term || categoryFiltered) await restoreExpiredFoodAvailability({ restaurantId: { in: reachIds } });
 
     // 2. Category filter — restaurants have no category, their dishes do.
     if (categoryFiltered) {
-        const catFoodItems = await prisma.foodItem.findMany({
+        // GROUP BY in the database; Prisma's distinct fetches every dish and
+        // dedupes them in Node.
+        const catFoodItems = await prisma.foodItem.groupBy({
+            by: ['restaurantId'],
             where: {
                 categoryId: String(categoryId),
                 approvalStatus: 'approved',
                 isAvailable: true,
                 restaurantId: { in: reachIds },
             },
-            select: { restaurantId: true },
-            distinct: ['restaurantId'],
         });
 
         if (!catFoodItems.length) return empty();

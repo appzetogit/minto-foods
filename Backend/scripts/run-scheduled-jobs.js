@@ -59,6 +59,13 @@ const start = async () => {
                 logger.error(`Pending payment cleanup error: ${err.message}`);
             }
             try {
+                // Orders the restaurant never accepted, in case the per-order job was lost.
+                const { expireUnacceptedOrdersSweep } = await import('../src/modules/food/orders/services/order.service.js');
+                await expireUnacceptedOrdersSweep();
+            } catch (err) {
+                logger.error(`Unaccepted order sweep error: ${err.message}`);
+            }
+            try {
                 // Anything the hunt above could not rescue is eventually closed
                 // out rather than left open for days.
                 const { expired, failed } = await expireStalledOrders();

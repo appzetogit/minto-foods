@@ -35,7 +35,10 @@ export const restaurantIdsMatchingCuisine = async (term, limit = 500) => {
  * ST_DWithin rather than a computed distance in the WHERE clause: only the
  * former can use the index.
  *
- * @returns {Promise<Array<{id: string, distanceInKm: number}>>}
+ * zoneId and deliveryRadiusKm come back too, so callers that apply the
+ * delivery radius need no second lookup.
+ *
+ * @returns {Promise<Array<{id: string, distanceInKm: number, zoneId: string|null, deliveryRadiusKm: number|null}>>}
  */
 export const restaurantsNearPoint = async (lat, lng, radiusKm = null, cap = 2000) => {
     const latitude = Number(lat);
@@ -48,7 +51,7 @@ export const restaurantsNearPoint = async (lat, lng, radiusKm = null, cap = 2000
     const radiusMeters = radiusKm === null ? 100_000 : Math.max(0.1, Number(radiusKm)) * 1000;
 
     const rows = await prisma.$queryRaw`
-        SELECT "id",
+        SELECT "id", "zoneId", "deliveryRadiusKm"::float8 AS "deliveryRadiusKm",
                ROUND((ST_Distance("location", ST_MakePoint(${longitude}, ${latitude})::geography) / 1000)::numeric, 2) AS "distanceInKm"
         FROM "food_restaurants"
         WHERE "status" = 'approved'
@@ -58,5 +61,10 @@ export const restaurantsNearPoint = async (lat, lng, radiusKm = null, cap = 2000
         LIMIT ${cap}
     `;
 
-    return rows.map((row) => ({ id: row.id, distanceInKm: Number(row.distanceInKm) }));
+    return rows.map((row) => ({
+        id: row.id,
+        distanceInKm: Number(row.distanceInKm),
+        zoneId: row.zoneId ?? null,
+        deliveryRadiusKm: row.deliveryRadiusKm ?? null,
+    }));
 };

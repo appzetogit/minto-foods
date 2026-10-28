@@ -381,6 +381,18 @@ CREATE INDEX IF NOT EXISTS "food_user_addresses_location_gist"
 CREATE INDEX IF NOT EXISTS "food_delivery_partners_last_location_gist"
   ON "food_delivery_partners" USING GIST ("lastLocation");
 
+-- Sweeps that look only at open orders: partial, so they stay small as the
+-- orders table grows (the watchdog's lock clear was a full scan every 5 min).
+CREATE INDEX IF NOT EXISTS "food_orders_acceptance_deadline_open_idx"
+  ON "food_orders" ("acceptanceDeadlineAt")
+  WHERE "orderStatus" IN ('created', 'confirmed') AND "acceptanceDeadlineAt" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "food_orders_dispatching_at_idx"
+  ON "food_orders" ("dispatchingAt") WHERE "dispatchingAt" IS NOT NULL;
+
+-- Dishes switched off until a set time; restored on every menu and search read.
+CREATE INDEX IF NOT EXISTS "food_items_stock_resume_idx"
+  ON "food_items" ("stockResumeAt") WHERE "stockResumeAt" IS NOT NULL;
+
 -- The manual-assign rider list matches riders by city, case-insensitively.
 CREATE INDEX IF NOT EXISTS "food_delivery_partners_city_lower_idx"
   ON "food_delivery_partners" (lower("city"));

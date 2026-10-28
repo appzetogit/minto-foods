@@ -68,10 +68,14 @@ export const computeCashbackAmount = (settings, subtotal) => {
     return Math.max(0, Math.floor(amount)); // whole rupees, never round up in our favour
 };
 
-/** Every cashback credit this customer has received, newest first. */
+const cashbackWhere = (userId) => ({
+    entityType: 'user', entityId: userId, category: 'wallet_topup', description: { startsWith: 'Cashback' },
+});
+
+/** Cashback credits this customer has received, newest first. */
 const listCashbackTransactions = (userId, { skip, take } = {}) =>
     prisma.transaction.findMany({
-        where: { entityType: 'user', entityId: userId, category: 'wallet_topup', description: { startsWith: 'Cashback' } },
+        where: cashbackWhere(userId),
         orderBy: { createdAt: 'desc' },
         ...(skip !== undefined ? { skip } : {}),
         ...(take !== undefined ? { take } : {}),
@@ -115,8 +119,8 @@ export const awardOrderCashback = async (orderId) => {
 
         const perUserLimit = Number(settings.perUserLimit) || 0;
         if (perUserLimit > 0) {
-            const priorAwards = await listCashbackTransactions(order.userId);
-            if (priorAwards.length >= perUserLimit) {
+            const priorAwards = await prisma.transaction.count({ where: cashbackWhere(order.userId) });
+            if (priorAwards >= perUserLimit) {
                 return { awarded: false, reason: 'per_user_limit_reached' };
             }
         }
@@ -159,10 +163,15 @@ export const getCashbackHistory = async (userId, query = {}) => {
     const page = Math.max(parseInt(query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
 
-    const all = await listCashbackTransactions(id);
-    const totalEarned = all.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    // Totals in the database and one page of rows, not every credit ever.
+    const [pageRows, total, sum] = await Promise.all([
+        listCashbackTransactions(id, { skip: (page - 1) * limit, take: limit }),
+        prisma.transaction.count({ where: cashbackWhere(id) }),
+        prisma.transaction.aggregate({ where: cashbackWhere(id), _sum: { amount: true } }),
+    ]);
+    const totalEarned = Number(sum._sum.amount) || 0;
 
-    const items = all.slice((page - 1) * limit, page * limit).map((t) => ({
+    const items = pageRows.map((t) => ({
         id: t.id,
         amount: Number(t.amount) || 0,
         description: t.description || '',
@@ -179,8 +188,8 @@ export const getCashbackHistory = async (userId, query = {}) => {
         pagination: {
             page,
             limit,
-            total: all.length,
-            totalPages: Math.max(1, Math.ceil(all.length / limit)),
+            total,
+            totalPages: Math.max(1, Math.ceil(total / limit)),
         },
     };
 };

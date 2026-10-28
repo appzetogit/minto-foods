@@ -116,6 +116,13 @@ const startBackgroundJobs = async () => {
         } catch (err) {
             logger.error(`Pending payment sweep error: ${err.message}`);
         }
+        try {
+            // Orders the restaurant never accepted, in case the per-order job was lost.
+            const { expireUnacceptedOrdersSweep } = await import('./src/modules/food/orders/services/order.service.js');
+            await expireUnacceptedOrdersSweep();
+        } catch (err) {
+            logger.error(`Unaccepted order sweep error: ${err.message}`);
+        }
         // Manual dispatch: remind admins of orders still waiting for a rider.
         try {
             const { remindStaleManualQueue } = await import('./src/modules/food/orders/services/manualDispatch.service.js');

@@ -145,6 +145,23 @@ async function monthlyTrend(where) {
     return months;
 }
 
+/** The five customers who ordered most recently in a zone, newest first. */
+async function recentZoneCustomers(orderWhere) {
+    const latest = await prisma.foodOrder.groupBy({
+        by: ['userId'],
+        where: orderWhere,
+        _max: { createdAt: true },
+        orderBy: { _max: { createdAt: 'desc' } },
+        take: 5,
+    });
+    const users = await prisma.foodUser.findMany({
+        where: { id: { in: latest.map((r) => r.userId) } },
+        select: { id: true, name: true },
+    });
+    const byId = new Map(users.map((u) => [u.id, u]));
+    return latest.filter((r) => byId.has(r.userId)).map((r) => ({ ...byId.get(r.userId), createdAt: r._max.createdAt }));
+}
+
 export async function getDashboardStats(query = {}) {
     const periodRange = getDateRangeByPeriod(query.period);
     const zoneId = isId(query.zoneId) ? String(query.zoneId) : null;
@@ -191,10 +208,9 @@ export async function getDashboardStats(query = {}) {
         prisma.foodItem.count({ where: { approvalStatus: 'approved', ...menuScope } }),
         prisma.foodAddon.count({ where: { approvalStatus: 'approved', isDeleted: false, ...menuScope } }),
         // Zoned: customers who ordered in this zone. Unzoned: everyone.
+        // GROUP BY in the database: Prisma's distinct loaded every order.
         zoneId
-            ? prisma.foodOrder.findMany({
-                where: orderWhere, distinct: ['userId'], select: { userId: true },
-            }).then((rows) => rows.length)
+            ? prisma.foodOrder.groupBy({ by: ['userId'], where: orderWhere }).then((rows) => rows.length)
             : prisma.foodUser.count(),
         prisma.foodRestaurant.findMany({
             where: { ...restaurantWhere, status: 'pending' },
@@ -222,11 +238,7 @@ export async function getDashboardStats(query = {}) {
             select: { orderId: true, updatedAt: true },
         }),
         zoneId
-            ? prisma.foodOrder.findMany({
-                where: orderWhere,
-                orderBy: { createdAt: 'desc' }, take: 5, distinct: ['userId'],
-                select: { createdAt: true, user: { select: { id: true, name: true } } },
-            }).then((rows) => rows.map((r) => ({ ...r.user, createdAt: r.createdAt })))
+            ? recentZoneCustomers(orderWhere)
             : prisma.foodUser.findMany({
                 orderBy: { createdAt: 'desc' }, take: 5,
                 select: { name: true, phone: true, createdAt: true },

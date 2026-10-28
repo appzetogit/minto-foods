@@ -255,6 +255,10 @@ export async function expireStalePendingPaymentOrders({ force = false } = {}) {
       createdAt: { lte: cutoff },
     },
     select: { id: true, orderStatus: true, paymentStatus: true, razorpayOrderId: true, total: true, onlineAmount: true },
+    // One Razorpay call each, so a pass is capped. Newest first: an order the
+    // gateway keeps answering 'unknown' for stays, and must not starve the rest.
+    orderBy: { createdAt: 'desc' },
+    take: 100,
   });
 
   for (const doc of stale) {
@@ -354,6 +358,9 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
 
 // ----- Acceptance window expiry -----
 
+/** Most orders one pass cancels; the scheduler's next pass takes the rest. */
+const EXPIRE_UNACCEPTED_BATCH = 100;
+
 async function expireUnacceptedOrders(where = {}) {
   const now = new Date();
   const baseWhere = {
@@ -365,6 +372,8 @@ async function expireUnacceptedOrders(where = {}) {
   const docs = await prisma.foodOrder.findMany({
     where: baseWhere,
     select: { id: true, orderStatus: true },
+    orderBy: { acceptanceDeadlineAt: 'asc' },
+    take: EXPIRE_UNACCEPTED_BATCH,
   });
   if (!docs.length) return 0;
 
@@ -427,6 +436,15 @@ async function expireUnacceptedOrders(where = {}) {
 export async function expireUnacceptedOrderById(orderMongoId) {
   if (!isId(orderMongoId)) return 0;
   return expireUnacceptedOrders({ id: String(orderMongoId) });
+}
+
+/**
+ * Safety net for the per-order expiry job (a lost BullMQ job, Redis down):
+ * run by the scheduler. Order reads used to run this for the whole platform
+ * on every request; they now only expire the orders they are about to show.
+ */
+export async function expireUnacceptedOrdersSweep() {
+  return expireUnacceptedOrders();
 }
 
 // ----- Settings -----
@@ -1151,8 +1169,9 @@ export async function processDispatchTimeout(orderId, partnerId, options = {}) {
 
 // ----- User: list, get, cancel -----
 export async function listOrdersUser(userId, query) {
-  await expireStalePendingPaymentOrders();
-  await expireUnacceptedOrders();
+  // Only this customer's orders. Unpaid online orders are not listed here, and
+  // the scheduler clears them every few minutes.
+  await expireUnacceptedOrders({ userId: String(userId) });
 
   const { page, limit, skip } = buildPaginationOptions(query);
   const where = { userId: String(userId), orderStatus: { not: 'pending_payment' } };
@@ -1264,9 +1283,9 @@ export async function getOrderById(
   orderId,
   { userId, restaurantId, deliveryPartnerId, admin } = {},
 ) {
-  await expireUnacceptedOrders();
   const identity = buildOrderIdentityFilter(orderId);
   if (!identity) throw new ValidationError("Order id required");
+  await expireUnacceptedOrders(identity);
 
   const row = await prisma.foodOrder.findFirst({
     where: identity,
@@ -1457,6 +1476,8 @@ export async function recoverStuckOrders() {
         orderStatus: { notIn: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant'] },
       },
       select: { id: true },
+      orderBy: { dispatchAssignedAt: 'asc' },
+      take: 50,
     });
 
     if (stuckAssigned.length > 0) {
@@ -2471,7 +2492,8 @@ function applyAdminAmountFilter(AND, minAmountRaw, maxAmountRaw) {
 }
 
 export async function listOrdersAdmin(query) {
-  await expireStalePendingPaymentOrders();
+  // Unpaid online orders are cleared by the scheduler every few minutes, not
+  // here: each one is a Razorpay call, which this page used to wait for.
 
   const page = Math.max(parseInt(query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(query.limit, 10) || 50, 1), 2000);

@@ -124,16 +124,9 @@ export async function restaurantsInReach({ lat, lng, radiusKm } = {}) {
     );
     if (!near.length) return { requiresLocation: false, distanceById: new Map() };
 
-    const rows = await prisma.foodRestaurant.findMany({
-        where: { id: { in: near.map((r) => r.id) } },
-        select: { id: true, zoneId: true, deliveryRadiusKm: true },
-    });
-    const byId = new Map(rows.map((r) => [r.id, r]));
-
     const distanceById = new Map();
-    for (const { id, distanceInKm } of near) {
-        const row = byId.get(id);
-        if (!row) continue;
+    for (const row of near) {
+        const { id, distanceInKm } = row;
         if (asked !== null && distanceInKm > asked) continue;
         const bandKm = serviceable.forZone(row.zoneId);
         if (bandKm !== null && distanceInKm > bandKm) continue;

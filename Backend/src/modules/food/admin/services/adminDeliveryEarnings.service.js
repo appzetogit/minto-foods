@@ -115,11 +115,8 @@ export async function getDeliveryEarnings(query = {}) {
                 _sum: { deliveryFee: true },
             }),
         ]),
-        prisma.foodOrder.findMany({
-            where,
-            distinct: ['dispatchDeliveryPartnerId'],
-            select: { dispatchDeliveryPartnerId: true },
-        }),
+        // GROUP BY in the database: Prisma's distinct loads every order.
+        prisma.foodOrder.groupBy({ by: ['dispatchDeliveryPartnerId'], where }),
     ]);
 
     const earnings = orders.map((order) => ({
