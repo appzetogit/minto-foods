@@ -1005,6 +1005,14 @@ export default function RestaurantsList() {
     if (!selectedRestaurant) return
     const restaurantId = selectedRestaurant._id || selectedRestaurant.id
 
+    // Same rule the server applies; an old email is left alone if untouched.
+    const ownerEmail = detailsForm.ownerEmail.trim()
+    const emailChanged = ownerEmail.toLowerCase() !== String(selectedRestaurant.ownerEmail || "").trim().toLowerCase()
+    if (ownerEmail && emailChanged && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(ownerEmail)) {
+      toast.error("Owner email must be a valid email address")
+      return
+    }
+
     try {
       setSavingDetails(true)
 

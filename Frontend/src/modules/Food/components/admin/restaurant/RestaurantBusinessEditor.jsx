@@ -110,6 +110,8 @@ export default function RestaurantBusinessEditor({ restaurant, onSaved }) {
     if (pan && !PAN.test(pan)) return "PAN looks wrong. It is 10 characters, like ABCDE1234F."
     const gst = form.gstNumber.trim().toUpperCase()
     if (form.gstRegistered && gst && !GSTIN.test(gst)) return "GSTIN looks wrong. It is 15 characters."
+    const fssai = form.fssaiNumber.trim()
+    if (fssai && !/^\d{14}$/.test(fssai)) return "FSSAI number must be exactly 14 digits."
     const aadhaar = form.aadhaarNumber.replace(/\s/g, "")
     if (aadhaar && !/^\d{12}$/.test(aadhaar)) return "Aadhaar number must be 12 digits."
     const acct = form.accountNumber.replace(/\s/g, "")

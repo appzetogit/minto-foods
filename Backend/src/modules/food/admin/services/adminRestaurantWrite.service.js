@@ -45,6 +45,62 @@ const assertIndianMobile = (value, label) => {
     return raw;
 };
 
+/**
+ * Format checks for the owner's email and the tax, licence and bank numbers
+ * (admin issue #29). Like the phone check, an empty value is allowed (these
+ * are optional) and anything else must look like the real thing. Codes are
+ * stored trimmed and upper-cased, since "abcde1234f" is the same PAN.
+ */
+const IDENTITY_FORMATS = {
+    ownerEmail: {
+        label: 'Owner email',
+        normalize: (v) => v.toLowerCase(),
+        pattern: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
+        hint: 'a valid email address',
+    },
+    panNumber: {
+        label: 'PAN',
+        normalize: (v) => v.toUpperCase(),
+        pattern: /^[A-Z]{5}\d{4}[A-Z]$/,
+        hint: '10 characters like ABCDE1234F',
+    },
+    gstNumber: {
+        label: 'GSTIN',
+        normalize: (v) => v.toUpperCase(),
+        pattern: /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/,
+        hint: '15 characters like 27ABCDE1234F1Z5',
+    },
+    fssaiNumber: {
+        label: 'FSSAI number',
+        normalize: (v) => v,
+        pattern: /^\d{14}$/,
+        hint: 'exactly 14 digits',
+    },
+    ifscCode: {
+        label: 'IFSC code',
+        normalize: (v) => v.toUpperCase(),
+        pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/,
+        hint: '11 characters like SBIN0001234',
+    },
+    accountNumber: {
+        label: 'Bank account number',
+        normalize: (v) => v,
+        pattern: /^\d{9,18}$/,
+        hint: '9 to 18 digits',
+    },
+};
+
+export const checkIdentityField = (key, value) => {
+    const format = IDENTITY_FORMATS[key];
+    const raw = toStr(value);
+    if (!raw) return raw;
+    const normalized = format.normalize(raw);
+    if (!format.pattern.test(normalized)) {
+        throw new ValidationError(`${format.label} must be ${format.hint}`);
+    }
+    return normalized;
+};
+
 const getUrl = (v) => (v && typeof v === 'object' ? v.url : v);
 
 // Through the normalizer, not raw. An admin edit posts back the urls the GET
@@ -132,9 +188,14 @@ export async function updateRestaurantById(id, body = {}) {
     }
 
     if (body.ownerName !== undefined) data.ownerName = toStr(body.ownerName);
-    if (body.ownerEmail !== undefined) data.ownerEmail = toStr(body.ownerEmail).toLowerCase();
     // Checked only when changed: an edit form posts every field back, and an
     // old record saved before this check must still be editable.
+    for (const key of Object.keys(IDENTITY_FORMATS)) {
+        if (body[key] === undefined) continue;
+        const unchanged = toStr(body[key]).toLowerCase() === toStr(existing[key]).toLowerCase();
+        data[key] = unchanged ? toStr(body[key]) : checkIdentityField(key, body[key]);
+        if (key === 'ownerEmail') data[key] = data[key].toLowerCase();
+    }
     if (body.ownerPhone !== undefined && toStr(body.ownerPhone) !== toStr(existing.ownerPhone)) {
         data.ownerPhone = assertIndianMobile(body.ownerPhone, 'Owner phone');
         if (!data.ownerPhone) throw new ValidationError('Owner phone cannot be empty');
@@ -203,23 +264,18 @@ export async function updateRestaurantById(id, body = {}) {
     }
 
     // Business and documents
-    if (body.panNumber !== undefined) data.panNumber = toStr(body.panNumber);
     if (body.aadhaarNumber !== undefined) data.aadhaarNumber = toStr(body.aadhaarNumber);
     if (body.nameOnPan !== undefined) data.nameOnPan = toStr(body.nameOnPan);
     if (body.gstRegistered !== undefined) {
         data.gstRegistered = parseBooleanLike(body.gstRegistered, 'gstRegistered');
     }
-    if (body.gstNumber !== undefined) data.gstNumber = toStr(body.gstNumber);
     if (body.gstLegalName !== undefined) data.gstLegalName = toStr(body.gstLegalName);
     if (body.gstAddress !== undefined) data.gstAddress = toStr(body.gstAddress);
-    if (body.fssaiNumber !== undefined) data.fssaiNumber = toStr(body.fssaiNumber);
     if (body.fssaiExpiry !== undefined) {
         data.fssaiExpiry = body.fssaiExpiry ? new Date(body.fssaiExpiry) : null;
     }
 
     // Bank details
-    if (body.accountNumber !== undefined) data.accountNumber = toStr(body.accountNumber);
-    if (body.ifscCode !== undefined) data.ifscCode = toStr(body.ifscCode);
     if (body.accountHolderName !== undefined) data.accountHolderName = toStr(body.accountHolderName);
     if (body.accountType !== undefined) data.accountType = toStr(body.accountType);
     // UPI was stored by onboarding but could not be corrected by an admin.
@@ -289,6 +345,10 @@ export async function createRestaurantByAdmin(body = {}) {
     const restaurantName = toStr(body.restaurantName) || toStr(body.name);
     const ownerName = toStr(body.ownerName);
     const ownerPhone = assertIndianMobile(body.ownerPhone, 'Owner phone');
+    // Checked before anything is written, so a bad PAN cannot leave half a restaurant.
+    const identity = Object.fromEntries(
+        Object.keys(IDENTITY_FORMATS).map((key) => [key, checkIdentityField(key, body[key])]),
+    );
     const primaryContactNumber =
         assertIndianMobile(body.primaryContactNumber, 'Primary contact number') || ownerPhone;
 
@@ -365,7 +425,7 @@ export async function createRestaurantByAdmin(body = {}) {
             data: {
                 restaurantName,
                 ownerName,
-                ownerEmail: toStr(body.ownerEmail),
+                ownerEmail: identity.ownerEmail,
                 ownerPhone,
                 primaryContactNumber,
                 pureVegRestaurant: body.pureVegRestaurant !== undefined
@@ -391,17 +451,17 @@ export async function createRestaurantByAdmin(body = {}) {
                 openingTime,
                 closingTime,
                 openDays: Array.isArray(body.openDays) ? body.openDays : [],
-                panNumber: toStr(body.panNumber),
+                panNumber: identity.panNumber,
                 aadhaarNumber: toStr(body.aadhaarNumber),
                 nameOnPan: toStr(body.nameOnPan),
                 gstRegistered: Boolean(body.gstRegistered),
-                gstNumber: toStr(body.gstNumber),
+                gstNumber: identity.gstNumber,
                 gstLegalName: toStr(body.gstLegalName),
                 gstAddress: toStr(body.gstAddress),
-                fssaiNumber: toStr(body.fssaiNumber),
+                fssaiNumber: identity.fssaiNumber,
                 fssaiExpiry: body.fssaiExpiry ? new Date(body.fssaiExpiry) : null,
-                accountNumber: toStr(body.accountNumber),
-                ifscCode: toStr(body.ifscCode),
+                accountNumber: identity.accountNumber,
+                ifscCode: identity.ifscCode,
                 accountHolderName: toStr(body.accountHolderName),
                 accountType: toStr(body.accountType),
                 menuImages: toUrlList(body.menuImages, 10),
