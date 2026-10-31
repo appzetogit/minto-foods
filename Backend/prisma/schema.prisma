@@ -1812,6 +1812,9 @@ model FoodSettings {
   manualQueueAlertMinutes   Int @default(5)
   /// How long a rider has to accept an automatic offer before it moves on.
   riderAcceptWindowSeconds  Int @default(45)
+  /// How many accepted, unfinished orders one rider may carry at once (peak
+  /// time batching). 1 = one trip at a time, the behaviour before this existed.
+  maxActiveOrdersPerRider   Int @default(1)
   updatedByRole    String?
   updatedByAdminId String?   @db.VarChar(24)
   updatedAtBy      DateTime?

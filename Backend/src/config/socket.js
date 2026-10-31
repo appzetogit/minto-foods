@@ -12,6 +12,30 @@ const riderFixes = createRiderFixTracker();
 
 let io = null;
 
+/**
+ * The orders a rider is carrying right now, cached on their socket for 20 s
+ * so a GPS fix every 2 s does not query the database each time.
+ */
+const RIDER_ORDERS_TTL_MS = 20000;
+async function activeOrderIdsForRider(socket, riderId) {
+    const cached = socket.data?.activeOrders;
+    if (cached && Date.now() - cached.at < RIDER_ORDERS_TTL_MS) return cached.ids;
+    const { prisma } = await import('./prisma.js');
+    const { TERMINAL_ORDER_STATUSES } = await import('../modules/food/orders/services/order.helpers.js');
+    const rows = await prisma.foodOrder.findMany({
+        where: {
+            dispatchDeliveryPartnerId: String(riderId),
+            dispatchStatus: 'accepted',
+            orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+        },
+        select: { id: true },
+        take: 10,
+    });
+    const ids = rows.map((row) => row.id);
+    socket.data = { ...(socket.data || {}), activeOrders: { ids, at: Date.now() } };
+    return ids;
+}
+
 function logDeliverySocket(message, extra = {}) {
     const suffix = Object.keys(extra).length ? ` ${JSON.stringify(extra)}` : '';
     logger.info(`[DeliverySocket] ${message}${suffix}`);
@@ -408,6 +432,35 @@ export const initSocket = async (server) => {
             } catch (err) {
                 // Silently skip if Firebase not initialized yet
                 logger.debug(`Firebase RTDB sync skipped: ${err.message}`);
+            }
+
+            // ─── Peak-time batching: the same bike carries the rider's other orders ───
+            // The app reports one order at a time; every other order the rider
+            // holds gets the same fix so its customer sees the bike move too.
+            try {
+                const siblings = (await activeOrderIdsForRider(socket, userId)).filter(
+                    (id) => id !== String(data.orderId),
+                );
+                if (!siblings.length) return;
+                const { getRedisClient } = await import('../config/redis.js');
+                const redis = getRedisClient();
+                const db = getFirebaseDB();
+                const coordString = JSON.stringify({ lat, lng, timestamp: now });
+                for (const siblingId of siblings) {
+                    socket.to(roomNames.tracking(siblingId)).emit('location-update', { ...payload, orderId: siblingId });
+                    if (redis) redis.hSet('order:locations:hot', siblingId, coordString).catch(() => {});
+                    if (riderFixes.shouldSave(siblingId, now)) {
+                        saveRiderPosition({ orderId: siblingId, riderId: userId, lat, lng, at: new Date(now) })
+                            .catch((e) => logger.error(`Rider position save failed: ${e.message}`));
+                    }
+                    if (db) {
+                        db.ref(`active_orders/${siblingId}`)
+                            .update({ lat, lng, boy_lat: lat, boy_lng: lng, heading, speed, accuracy, last_updated: now })
+                            .catch((e) => logger.error(`Firebase orderRef update error: ${e.message}`));
+                    }
+                }
+            } catch (err) {
+                logger.debug(`Sibling order location fan-out skipped: ${err.message}`);
             }
         });
 

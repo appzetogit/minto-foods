@@ -214,6 +214,27 @@ test('the assigned rider accepts; the order leaves the queue', async () => {
     // That rider is now busy and can't be given another order.
     const another = await confirmedOrder();
     await assert.rejects(() => assignRiderManually(another, assignee, null), /another delivery/);
+
+    // At peak time an admin lets riders carry two: the same rider can now be
+    // given the second order, accept it, and then has both on their list.
+    const before = await getDispatchSettings();
+    await updateDispatchSettings(before.dispatchMode, null, { maxActiveOrdersPerRider: 2 });
+    try {
+        const { riders } = await listEligibleRiders(another);
+        const sameRider = riders.find((r) => r.id === assignee);
+        assert.equal(sameRider?.activeOrders, 1);
+        await assignRiderManually(another, assignee, null);
+        await acceptOrderDelivery(another, assignee);
+        const { getActiveTripsDelivery } = await import('./order-delivery.service.js');
+        const trips = await getActiveTripsDelivery(assignee);
+        assert.deepEqual(trips.map((t) => String(t._id || t.id)).sort(), [orderA, another].map(String).sort());
+
+        // A third is refused: two is the limit.
+        const third = await confirmedOrder();
+        await assert.rejects(() => assignRiderManually(third, assignee, null), /Already carrying 2 orders/);
+    } finally {
+        await updateDispatchSettings(before.dispatchMode, null, { maxActiveOrdersPerRider: before.maxActiveOrdersPerRider });
+    }
 });
 
 test('no answer in time sends the order back to the queue', async () => {

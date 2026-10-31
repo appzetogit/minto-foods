@@ -274,23 +274,32 @@ export async function partnerHasActiveDelivery(deliveryPartnerId) {
 }
 
 /**
- * Riders on an accepted, unfinished trip. Pass the candidate ids to check
- * only those (dispatch looks at its 25 nearest), rather than every active
- * order on the platform.
+ * How many accepted, unfinished orders each rider is carrying. Pass the
+ * candidate ids to count only those, rather than every active order on the
+ * platform.
  */
-export async function getBusyDeliveryPartnerIds(partnerIds = null) {
-  if (Array.isArray(partnerIds) && !partnerIds.length) return new Set();
-  const rows = await prisma.foodOrder.findMany({
+export async function getRiderActiveOrderCounts(partnerIds = null) {
+  if (Array.isArray(partnerIds) && !partnerIds.length) return new Map();
+  const rows = await prisma.foodOrder.groupBy({
+    by: ['dispatchDeliveryPartnerId'],
     where: {
       dispatchStatus: 'accepted',
       dispatchDeliveryPartnerId: Array.isArray(partnerIds) ? { in: partnerIds.map(String) } : { not: null },
       orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
     },
-    select: { dispatchDeliveryPartnerId: true },
-    distinct: ['dispatchDeliveryPartnerId'],
+    _count: { _all: true },
   });
+  return new Map(rows.map((row) => [row.dispatchDeliveryPartnerId, row._count._all]));
+}
 
-  return new Set(rows.map((row) => row.dispatchDeliveryPartnerId));
+/**
+ * Riders who cannot take another order: they already carry `maxActive`
+ * accepted, unfinished ones (1 unless an admin allows peak-time batching).
+ */
+export async function getBusyDeliveryPartnerIds(partnerIds = null, maxActive = 1) {
+  const counts = await getRiderActiveOrderCounts(partnerIds);
+  const cap = Math.max(1, Number(maxActive) || 1);
+  return new Set([...counts].filter(([, count]) => count >= cap).map(([id]) => id));
 }
 
 /** Accepts either a raw order id or the display id ("FOD-…"). */

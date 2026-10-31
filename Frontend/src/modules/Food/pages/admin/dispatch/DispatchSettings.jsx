@@ -20,7 +20,7 @@ const MANUAL_WARNING = (where) =>
 
 export default function DispatchSettings() {
   const [data, setData] = useState(null)
-  const [form, setForm] = useState({ dispatchMode: "auto", riderAcceptWindowSeconds: 45, manualAcceptWindowSeconds: 120, manualQueueAlertMinutes: 5 })
+  const [form, setForm] = useState({ dispatchMode: "auto", riderAcceptWindowSeconds: 45, manualAcceptWindowSeconds: 120, manualQueueAlertMinutes: 5, maxActiveOrdersPerRider: 1 })
   const [saving, setSaving] = useState("")
 
   const load = async () => {
@@ -32,6 +32,7 @@ export default function DispatchSettings() {
         riderAcceptWindowSeconds: d.riderAcceptWindowSeconds || 45,
         manualAcceptWindowSeconds: d.manualAcceptWindowSeconds || 120,
         manualQueueAlertMinutes: d.manualQueueAlertMinutes || 5,
+        maxActiveOrdersPerRider: d.maxActiveOrdersPerRider || 1,
       })
     } catch (e) {
       toast.error(errText(e, "Could not load dispatch settings"))
@@ -50,6 +51,7 @@ export default function DispatchSettings() {
         riderAcceptWindowSeconds: Number(form.riderAcceptWindowSeconds),
         manualAcceptWindowSeconds: Number(form.manualAcceptWindowSeconds),
         manualQueueAlertMinutes: Number(form.manualQueueAlertMinutes),
+        maxActiveOrdersPerRider: Number(form.maxActiveOrdersPerRider),
       })))
       toast.success("Dispatch settings saved")
     } catch (e) {
@@ -143,6 +145,18 @@ export default function DispatchSettings() {
                 onChange={(e) => setForm((f) => ({ ...f, manualQueueAlertMinutes: e.target.value }))}
                 className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
               />
+            </label>
+            <label className="text-sm text-slate-700">
+              Orders one rider can carry at once
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={form.maxActiveOrdersPerRider}
+                onChange={(e) => setForm((f) => ({ ...f, maxActiveOrdersPerRider: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
+              <span className="block text-xs text-slate-400 mt-1">1 = one trip at a time. Raise it at peak time so a rider on a trip can still be offered or assigned another order (needs the latest rider app).</span>
             </label>
           </div>
           <div className="flex justify-end">

@@ -400,6 +400,11 @@ export function RiderPicker({ order, onClose, onAssigned }) {
                     <span className={`w-2 h-2 rounded-full ${r.online ? "bg-emerald-500" : "bg-slate-300"}`} />
                     {!r.insideZone ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">outside zone</span> : null}
                     {r.declinedThisOrder ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">declined this</span> : null}
+                    {r.activeOrders > 0 ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                        carrying {r.activeOrders}{r.maxActiveOrders > 1 ? ` of ${r.maxActiveOrders}` : ""}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="text-xs text-slate-500 flex flex-wrap gap-x-3">
                     <span>{r.phone}</span>

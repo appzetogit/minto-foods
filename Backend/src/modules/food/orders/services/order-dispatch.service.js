@@ -260,8 +260,13 @@ export async function getDispatchSettings() {
     manualQueueAlertMinutes: Number(row?.manualQueueAlertMinutes) || 5,
     riderAcceptWindowSeconds: Math.min(300, Math.max(15,
       Number(row?.riderAcceptWindowSeconds) || DRIVER_ACCEPT_WINDOW_MS / 1000)),
+    maxActiveOrdersPerRider: Math.min(MAX_ORDERS_PER_RIDER_CAP, Math.max(1,
+      Math.trunc(Number(row?.maxActiveOrdersPerRider)) || 1)),
   };
 }
+
+/** The most an admin can let one rider carry; past this a bike runs out of bag. */
+const MAX_ORDERS_PER_RIDER_CAP = 5;
 
 /**
  * Saves the global dispatch mode. This used to write 'auto' whatever was sent,
@@ -289,6 +294,13 @@ export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) 
   if (Number.isFinite(riderWindow)) {
     if (riderWindow < 15 || riderWindow > 300) throw new ValidationError('Rider accept time must be 15 to 300 seconds');
     data.riderAcceptWindowSeconds = Math.round(riderWindow);
+  }
+  const maxOrders = Number(extra.maxActiveOrdersPerRider);
+  if (Number.isFinite(maxOrders)) {
+    if (maxOrders < 1 || maxOrders > MAX_ORDERS_PER_RIDER_CAP) {
+      throw new ValidationError(`Orders per rider must be 1 to ${MAX_ORDERS_PER_RIDER_CAP}`);
+    }
+    data.maxActiveOrdersPerRider = Math.round(maxOrders);
   }
   const before = await getDispatchSettings();
   await prisma.foodSettings.upsert({
@@ -481,8 +493,10 @@ export async function tryAutoAssign(orderId, options = {}) {
 
     const { partners } = await listNearbyOnlineDeliveryPartners(row.restaurant, { maxKm, limit: 25 });
     const candidateIds = partners.map((p) => String(p.partnerId));
+    // A rider on a trip still gets offers while under the admin's per-rider limit.
+    const { maxActiveOrdersPerRider } = await getDispatchSettings();
     const [busy, holdingOffer] = await Promise.all([
-      getBusyDeliveryPartnerIds(candidateIds),
+      getBusyDeliveryPartnerIds(candidateIds, maxActiveOrdersPerRider),
       getRidersHoldingAnOffer(id, windowMs, candidateIds),
     ]);
     // Riders at their cash ceiling are skipped for cash-collect orders only.

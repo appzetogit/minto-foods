@@ -308,6 +308,15 @@ export async function updateOrderStatusDeliveryController(req, res, next) {
     }
 }
 
+export async function getActiveTripsDeliveryController(req, res, next) {
+    try {
+        const orders = await orderService.getActiveTripsDelivery(req.user?.userId);
+        return sendResponse(res, 200, 'Active trips retrieved', { orders });
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function getCurrentTripDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;

@@ -25,7 +25,6 @@ import {
   haversineKm,
   notifyOwnerSafely,
   notifyOwnersSafely,
-  partnerHasActiveDelivery,
   pushStatusHistory,
   sanitizeOrderForDeliveryPartner,
   riderContact,
@@ -201,6 +200,31 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
 }
 
 /**
+ * Every trip the rider is carrying, oldest accepted first. With peak-time
+ * batching a rider can hold several; /orders/current still answers with one
+ * for app builds that only know about one.
+ */
+export async function getActiveTripsDelivery(deliveryPartnerId) {
+  if (!deliveryPartnerId) throw new ValidationError('Delivery partner ID required');
+
+  const rows = await prisma.foodOrder.findMany({
+    where: {
+      dispatchDeliveryPartnerId: String(deliveryPartnerId),
+      dispatchStatus: 'accepted',
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
+    include: deliveryInclude,
+    orderBy: [{ dispatchAcceptedAt: 'asc' }, { createdAt: 'asc' }],
+    take: 10,
+  });
+
+  const txByOrder = await loadTransactionsByOrder(rows.map((r) => r.id));
+  return rows.map((row) =>
+    sanitizeOrderForDeliveryPartner(mergeTransactionIntoOrder(toOrder(row), txByOrder.get(row.id) || null)),
+  );
+}
+
+/**
  * What the rider's "available orders" screen shows: only orders offered to
  * this rider right now (dispatch asks one rider at a time), plus the trip
  * they already accepted. Unassigned orders nearby are no longer listed --
@@ -210,7 +234,18 @@ export async function getCurrentTripDelivery(deliveryPartnerId) {
 export async function listOrdersAvailableDelivery(deliveryPartnerId, query) {
   const { page, limit, skip } = buildPaginationOptions(query);
   const partnerId = String(deliveryPartnerId);
-  const hasActiveDelivery = await partnerHasActiveDelivery(partnerId);
+  const [activeCount, { maxActiveOrdersPerRider }] = await Promise.all([
+    prisma.foodOrder.count({
+      where: {
+        dispatchDeliveryPartnerId: partnerId,
+        dispatchStatus: 'accepted',
+        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+      },
+    }),
+    dispatchService.getDispatchSettings(),
+  ]);
+  // Offers are listed while the rider can still take one (peak-time batching).
+  const hasActiveDelivery = activeCount >= maxActiveOrdersPerRider;
 
   const rows = await prisma.foodOrder.findMany({
     where: {
@@ -325,24 +360,26 @@ export async function acceptOrderDelivery(orderId, deliveryPartnerId) {
   if (!requested) throw new NotFoundError('Order not found');
   const id = requested.id;
 
-  const alreadyOnTrip = await partnerHasActiveDelivery(partnerId);
-  if (alreadyOnTrip) {
-    const existingActive = await prisma.foodOrder.findFirst({
-      where: {
-        dispatchDeliveryPartnerId: partnerId,
-        dispatchStatus: 'accepted',
-        orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
-      },
-      select: { id: true },
-    });
-
-    if (existingActive?.id && existingActive.id === id) {
-      const { order } = await loadOrder(id, deliveryInclude);
-      return sanitizeOrderForDeliveryPartner(order);
-    }
-
+  const activeTrips = await prisma.foodOrder.findMany({
+    where: {
+      dispatchDeliveryPartnerId: partnerId,
+      dispatchStatus: 'accepted',
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
+    select: { id: true },
+  });
+  // Accepting the same order twice (a retried tap) returns it, not an error.
+  if (activeTrips.some((trip) => trip.id === id)) {
+    const { order } = await loadOrder(id, deliveryInclude);
+    return sanitizeOrderForDeliveryPartner(order);
+  }
+  // At peak time an admin may let a rider carry several orders at once.
+  const { maxActiveOrdersPerRider } = await dispatchService.getDispatchSettings();
+  if (activeTrips.length >= maxActiveOrdersPerRider) {
     throw new ValidationError(
-      'You already have an active delivery. Complete it before accepting another order.',
+      activeTrips.length > 1
+        ? `You already have ${activeTrips.length} active deliveries. Complete one before accepting another order.`
+        : 'You already have an active delivery. Complete it before accepting another order.',
     );
   }
 

@@ -7,7 +7,7 @@ import { addOrderJob } from '../../../../queues/producers/order.producer.js';
 import { runUnscoped } from '../../../../core/roles/adminScope.context.js';
 import {
   buildDeliverySocketPayload,
-  getBusyDeliveryPartnerIds,
+  getRiderActiveOrderCounts,
   notifyOwnersActionableAlert,
   pushStatusHistory,
 } from './order.helpers.js';
@@ -378,8 +378,9 @@ export async function listEligibleRiders(orderId, { includeOffline = false, sear
   if (!candidates.length) return { ...meta, riders: [] };
 
   const ids = candidates.map((c) => c.id);
-  const [busy, cashBlocked, wallets, todayCounts] = await Promise.all([
-    getBusyDeliveryPartnerIds(ids),
+  const [activeCounts, { maxActiveOrdersPerRider }, cashBlocked, wallets, todayCounts] = await Promise.all([
+    getRiderActiveOrderCounts(ids),
+    getDispatchSettings(),
     orderCollectsCash(order) ? getCashBlockedPartnerIds(ids) : new Set(),
     prisma.wallet.findMany({ where: { entityType: 'deliveryBoy', entityId: { in: ids } }, select: { entityId: true, cashInHand: true } }),
     prisma.foodOrder.groupBy({
@@ -397,9 +398,15 @@ export async function listEligibleRiders(orderId, { includeOffline = false, sear
   const riders = candidates.map((p) => {
     const online = p.availabilityStatus === 'online';
     const isInside = Boolean(p.insideZone);
+    // At peak time an admin may let a rider carry more than one order; a rider
+    // under that limit can still be given this one.
+    const activeOrders = activeCounts.get(p.id) || 0;
+    const atLimit = activeOrders >= maxActiveOrdersPerRider;
     const reasons = [];
     if (!online) reasons.push('Offline');
-    if (busy.has(p.id)) reasons.push('On another delivery');
+    if (atLimit) {
+      reasons.push(maxActiveOrdersPerRider > 1 ? `Already carrying ${activeOrders} orders` : 'On another delivery');
+    }
     if (cashBlocked.has(p.id)) reasons.push('Cash limit reached');
     const distanceKm = p.distanceKm == null ? null : Math.round(Number(p.distanceKm) * 10) / 10;
     return {
@@ -411,7 +418,9 @@ export async function listEligibleRiders(orderId, { includeOffline = false, sear
       rating: Number(p.rating) || 0,
       online,
       insideZone: isInside,
-      busy: busy.has(p.id),
+      busy: atLimit,
+      activeOrders,
+      maxActiveOrders: maxActiveOrdersPerRider,
       cashInHand: cash.get(p.id) || 0,
       cashBlocked: cashBlocked.has(p.id),
       deliveredToday: today.get(p.id) || 0,

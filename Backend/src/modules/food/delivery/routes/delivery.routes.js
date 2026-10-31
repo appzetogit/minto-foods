@@ -76,6 +76,8 @@ router.get('/order-emergency-requests/:id', authMiddleware, requireRoles('DELIVE
 
 // ----- Orders -----
 router.get('/orders/current', authMiddleware, requireRoles('DELIVERY_PARTNER'), orderController.getCurrentTripDeliveryController);
+// Every trip the rider is carrying (peak-time batching can mean more than one).
+router.get('/orders/active', authMiddleware, requireRoles('DELIVERY_PARTNER'), orderController.getActiveTripsDeliveryController);
 router.get('/orders/available', authMiddleware, requireRoles('DELIVERY_PARTNER'), orderController.listOrdersAvailableDeliveryController);
 router.get('/orders/:orderId', authMiddleware, requireRoles('DELIVERY_PARTNER'), orderController.getOrderByIdDeliveryController);
 router.patch('/orders/:orderId/accept', authMiddleware, requireRoles('DELIVERY_PARTNER'), orderController.acceptOrderDeliveryController);

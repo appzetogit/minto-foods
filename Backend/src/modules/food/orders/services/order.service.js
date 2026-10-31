@@ -2402,6 +2402,10 @@ export async function resendDeliveryNotificationAdmin(orderId) {
   return dispatchService.resendDeliveryNotificationAdmin(orderId);
 }
 
+export async function getActiveTripsDelivery(deliveryPartnerId) {
+  return deliveryService.getActiveTripsDelivery(deliveryPartnerId);
+}
+
 export async function getCurrentTripDelivery(deliveryPartnerId) {
   return deliveryService.getCurrentTripDelivery(deliveryPartnerId);
 }
