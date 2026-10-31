@@ -2204,7 +2204,7 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     }
   }
 
-  let title = `Order ${updated.id} updated`;
+  let title = `Order ${updated.order_id || updated.orderId || updated.id} updated`;
   let body = `Status changed to ${String(orderStatus).replace(/_/g, " ")}`;
 
   if (orderStatus === "confirmed") {

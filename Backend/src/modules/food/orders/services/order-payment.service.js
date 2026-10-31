@@ -131,7 +131,7 @@ export async function createCollectQr(orderId, deliveryPartnerId, customerInfo =
   const link = await createPaymentLink({
     amountPaise: Math.round(amountDue * 100),
     currency: 'INR',
-    description: `Order ${order.id} - COD collect`,
+    description: `Order ${order.order_id || order.orderId || order.id} - COD collect`,
     orderId: order.id,
     customerName: customerInfo.name || user.name || 'Customer',
     customerEmail: customerInfo.email || user.email || 'customer@example.com',

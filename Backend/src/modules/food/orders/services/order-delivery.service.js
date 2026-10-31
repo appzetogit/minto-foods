@@ -110,23 +110,26 @@ function emitOrderUpdate(order, deliveryPartnerId, customerEvent = null) {
     if (!['picked_up', 'reached_drop', 'delivered'].includes(status)) return;
 
     const orderId = order.id;
+    // The rider reads the order number (MFB...), not the database id the app
+    // uses to open the order -- that one stays in `data` below.
+    const orderNumber = order.order_id || order.orderId || orderId;
     let riderTitle = '';
     let riderBody = '';
 
     if (status === 'picked_up') {
       riderTitle = 'Order picked up!';
-      riderBody = `You have picked up order #${orderId}. Proceed to the customer location.`;
+      riderBody = `You have picked up order #${orderNumber}. Proceed to the customer location.`;
     } else if (status === 'reached_drop') {
       riderTitle = 'Arrived at drop!';
-      riderBody = `You have reached the customer location for order #${orderId}.`;
+      riderBody = `You have reached the customer location for order #${orderNumber}.`;
     } else if (status === 'delivered') {
       riderTitle = 'Delivery successful!';
-      riderBody = `Order #${orderId} has been successfully delivered.`;
+      riderBody = `Order #${orderNumber} has been successfully delivered.`;
 
       if (order.payment?.method === 'cash' || order.paymentMethod === 'cash') {
         riderTitle = 'Payment collected!';
         const amt = order.pricing?.total || order.amounts?.totalCustomerPaid || 0;
-        riderBody = `You have collected Rs ${amt} cash for Order #${orderId}.`;
+        riderBody = `You have collected Rs ${amt} cash for Order #${orderNumber}.`;
       }
     }
 
