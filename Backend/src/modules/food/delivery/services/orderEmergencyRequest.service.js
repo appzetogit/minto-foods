@@ -139,7 +139,14 @@ async function deassignOrderForRedispatch({
 
     const order = await prisma.foodOrder.findUnique({ where: { id: existingOrder.id } });
 
-    const db = getFirebaseDB();
+    // Clearing the old rider's map pin is cleanup: a process without Firebase
+    // set up must still hand the order back out.
+    let db = null;
+    try {
+        db = getFirebaseDB();
+    } catch (error) {
+        logger.warn(`Firebase unavailable while reassigning order ${order.id}: ${error.message}`);
+    }
     if (db) {
         await db.ref(`active_orders/${order.id}`).remove().catch((error) => {
             logger.warn(`Failed to clear tracking for reassigned order ${order.id}: ${error.message}`);

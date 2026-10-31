@@ -105,6 +105,7 @@ test.after(async () => {
     const orders = await prisma.foodOrder.findMany({ where: { restaurantId: { in: created.restaurants } }, select: { id: true } });
     const ids = orders.map((o) => o.id);
     await prisma.orderDispatchOffer.deleteMany({ where: { orderId: { in: ids } } });
+    await prisma.deliveryOrderEmergencyRequest.deleteMany({ where: { orderId: { in: ids } } });
     await prisma.foodTransaction.deleteMany({ where: { orderId: { in: ids } } });
     await prisma.orderItem.deleteMany({ where: { orderId: { in: ids } } });
     await prisma.orderStatusHistory.deleteMany({ where: { orderId: { in: ids } } });
@@ -293,6 +294,36 @@ test('an outside rider (Rapido) can take an order; customers see them as the rid
     assert.equal(shaped.dispatch.deliveryPartnerId.provider, 'Rapido');
 
     await assert.rejects(() => assignExternalRider(id, 'admin-test', { name: 'X Y', phone: '9876543211' }), /already accepted/);
+});
+
+test('a rider asks to give up an order; the admin approves and it goes back out', async () => {
+    const {
+        createOrderEmergencyRequest,
+        listOrderEmergencyRequestsAdmin,
+        deassignAndResendEmergencyOrder,
+    } = await import('../../delivery/services/orderEmergencyRequest.service.js');
+    const id = await confirmedOrder();
+    const rider = await makeRider(`Reassign${Date.now()}`);
+    await assignRiderManually(id, rider.id, null);
+    await acceptOrderDelivery(id, rider.id);
+
+    await assert.rejects(() => createOrderEmergencyRequest(rider.id, { orderId: id, reason: 'flat' }), /at least 10/);
+    const request = await createOrderEmergencyRequest(rider.id, { orderId: id, reason: 'Vehicle breakdown: tyre burst' });
+    assert.equal(String(request.orderId?._id || request.orderId?.id || request.orderId), id);
+    await assert.rejects(
+        () => createOrderEmergencyRequest(rider.id, { orderId: id, reason: 'Vehicle breakdown again' }),
+        /already exists/,
+    );
+
+    const { requests } = await listOrderEmergencyRequestsAdmin({ status: 'open' });
+    const listed = requests.find((r) => String(r._id || r.id) === String(request._id || request.id));
+    assert.ok(listed, 'the admin sees the open request');
+
+    await deassignAndResendEmergencyOrder(request._id || request.id, null);
+    const row = await orderRow(id);
+    assert.notEqual(row.dispatchDeliveryPartnerId === rider.id && row.dispatchStatus === 'accepted', true,
+        'the rider no longer holds the order');
+    assert.ok(row.dispatchOffers.some((o) => o.partnerId === rider.id && o.action === 'deassigned') || row.dispatchDeliveryPartnerId !== rider.id);
 });
 
 test('the global setting is saved (it used to always save auto)', async () => {
