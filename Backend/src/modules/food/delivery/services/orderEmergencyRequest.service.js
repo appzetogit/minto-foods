@@ -228,12 +228,17 @@ export async function createOrderEmergencyRequest(deliveryPartnerId, payload = {
     }
 
     const partnerId = String(deliveryPartnerId);
+    // The order the rider asked about. Without it the first open one was taken,
+    // which with several orders per rider could flag the wrong trip.
+    const identity = payload.orderId ? buildOrderIdentityFilter(payload.orderId) : null;
     const order = await prisma.foodOrder.findFirst({
         where: {
+            ...(identity || {}),
             dispatchDeliveryPartnerId: partnerId,
             dispatchStatus: 'accepted',
             orderStatus: { in: PRE_PICKUP_ORDER_STATUSES },
         },
+        orderBy: { dispatchAcceptedAt: 'desc' },
     });
 
     if (!order || !isBeforePickup(order)) {
@@ -256,6 +261,18 @@ export async function createOrderEmergencyRequest(deliveryPartnerId, payload = {
             },
             include: requestInclude,
         });
+        // An admin has to act before the rider reaches the restaurant, so say so
+        // now rather than waiting for someone to open the requests page.
+        void notifyOwnersSafely([{ ownerType: 'ADMIN', ownerId: 'GLOBAL' }], {
+            title: 'Rider asked to give up an order',
+            body: `Order #${order.order_id || order.id}: ${reason.slice(0, 120)}`,
+            data: { type: 'order_reassignment_request', orderId: order.id, requestId: created.id },
+        }).catch(() => {});
+        try {
+            getIO()?.to(rooms.admin()).emit('order_reassignment_request', { requestId: created.id, orderId: order.id });
+        } catch {
+            /* best effort */
+        }
         return serializeRequest(created);
     } catch (error) {
         if (error?.code === 'P2002') {

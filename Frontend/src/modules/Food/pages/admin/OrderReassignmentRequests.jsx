@@ -57,9 +57,9 @@ export default function OrderReassignmentRequests() {
   const [search, setSearch] = useState("");
   const [actionId, setActionId] = useState(null);
 
-  const fetchRequests = useCallback(async () => {
+  const fetchRequests = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const params = {};
       if (status) params.status = status;
       if (search.trim()) params.search = search.trim();
@@ -79,6 +79,15 @@ export default function OrderReassignmentRequests() {
   useEffect(() => {
     void fetchRequests();
   }, [fetchRequests, status]);
+
+  // A rider's request has to be handled before they reach the restaurant, so
+  // new ones show up without a reload.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") void fetchRequests({ silent: true });
+    }, 20000);
+    return () => clearInterval(id);
+  }, [fetchRequests]);
 
   const deassignAndResend = async (request) => {
     const retryable = canRetryDispatch(request);
