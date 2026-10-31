@@ -113,13 +113,11 @@ test('the serviceable radius is the widest band max', () => {
     assert.equal(serviceableRadiusKm({ deliveryFeeRanges: [] }), null);
 });
 
-test('delivery-fee GST is charged only at a configured rate', () => {
-    assert.equal(resolveDeliveryFeeGstRate(settings), 18);
-    assert.equal(computeDeliveryFeeGst(40, 18), 7.2);
-
-    // Unset means not charged — it used to be a hidden hardcoded 18%.
+test('delivery-fee GST is never charged, even with a rate left in settings', () => {
+    // GST is on food only (admin issue #28).
+    assert.equal(resolveDeliveryFeeGstRate(settings), 0);
     assert.equal(resolveDeliveryFeeGstRate({}), 0);
-    assert.equal(computeDeliveryFeeGst(40, 0), 0);
+    assert.equal(computeDeliveryFeeGst(40, resolveDeliveryFeeGstRate(settings)), 0);
 });
 
 /**

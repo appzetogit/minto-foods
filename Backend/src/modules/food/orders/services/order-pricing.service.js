@@ -33,16 +33,15 @@ export const checkCheckoutTip = (amount, settings = {}) => {
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
 /**
- * GST on the delivery fee, at the rate the admin configured.
+ * GST on the delivery fee: never charged.
  *
- * This used to be a hardcoded 18% that nothing exposed and no one could switch
- * off — it was folded silently into the total, so customers paid it without a
- * line item ever naming it. It is now `deliveryFeeGstRate` in the fee settings
- * alongside the item GST rate, and unset means not charged.
+ * GST applies to the food only (client decision, admin issue #28). Neither the
+ * delivery fee nor the platform fee carries GST, whatever an old
+ * `deliveryFeeGstRate` left in the fee settings says. The column and
+ * `deliveryFeeGst` on orders stay so past bills still read correctly.
  */
-export function resolveDeliveryFeeGstRate(feeSettings = {}) {
-  const rate = Number(feeSettings.deliveryFeeGstRate);
-  return Number.isFinite(rate) && rate > 0 ? rate : 0;
+export function resolveDeliveryFeeGstRate() {
+  return 0;
 }
 
 export function computeDeliveryFeeGst(deliveryFee, ratePercent = 0) {

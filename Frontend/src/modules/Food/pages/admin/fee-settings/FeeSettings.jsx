@@ -1024,34 +1024,10 @@ export default function FeeSettings() {
                     placeholder="5"
                   />
                   <p className="text-xs text-slate-500">
-                    GST percentage applied on order subtotal
+                    GST on the food only (after discount). Not charged on the delivery fee or platform fee.
                   </p>
                   {feeErrors.gstRate ? (
                     <p className="text-xs font-medium text-red-600">{feeErrors.gstRate}</p>
-                  ) : null}
-                </div>
-
-                {/* Delivery Fee GST Rate */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-semibold text-slate-700">
-                    Delivery Fee GST Rate (%)
-                  </label>
-                  <input
-                    type="number"
-                    value={feeSettings.deliveryFeeGstRate}
-                    onChange={(e) => setFee("deliveryFeeGstRate", e.target.value)}
-                    onKeyDown={blockExponent}
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    className={feeInputClass("deliveryFeeGstRate")}
-                    placeholder="0"
-                  />
-                  <p className="text-xs text-slate-500">
-                    GST percentage applied on the delivery fee. Leave blank or 0 to not charge it.
-                  </p>
-                  {feeErrors.deliveryFeeGstRate ? (
-                    <p className="text-xs font-medium text-red-600">{feeErrors.deliveryFeeGstRate}</p>
                   ) : null}
                 </div>
               </div>

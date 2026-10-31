@@ -43,7 +43,8 @@ const serializeFeeSettings = (doc) => {
         platformFee: num(doc.platformFee),
         quickDeliveryFee: num(doc.quickDeliveryFee),
         gstRate: num(doc.gstRate),
-        deliveryFeeGstRate: num(doc.deliveryFeeGstRate),
+        // GST is on food only (admin issue #28); an old stored rate is ignored.
+        deliveryFeeGstRate: null,
         riderMinPayPerTrip: num(doc.riderMinPayPerTrip),
         codMaxOrderValue: num(doc.codMaxOrderValue),
         maxItemQuantity: doc.maxItemQuantity ?? null,
@@ -94,11 +95,9 @@ const feeColumns = (body = {}, { isDefaultRow = false } = {}) => {
         if (body[key] === null) data[key] = null;
         else if (body[key] !== undefined) data[key] = Number(body[key]);
     }
-    // Cleared or simply absent both mean the delivery fee is not taxed.
-    data.deliveryFeeGstRate =
-        body.deliveryFeeGstRate === null || body.deliveryFeeGstRate === undefined
-            ? null
-            : Number(body.deliveryFeeGstRate);
+    // The delivery fee is never taxed (GST on food only), so saving clears any
+    // rate left over from before.
+    data.deliveryFeeGstRate = null;
 
     // Which distance the fee is charged on, and the road-distance cap.
     if (body.deliveryDistanceMode !== undefined) data.deliveryDistanceMode = body.deliveryDistanceMode || null;
