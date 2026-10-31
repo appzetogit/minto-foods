@@ -276,6 +276,73 @@ export async function getDeliveryPartners(query = {}) {
     };
 }
 
+// Statuses where a rider is still heading to the restaurant, and where the food
+// is on the bike. Everything else (delivered, cancelled) frees the rider.
+const TO_PICKUP_STATUSES = ['created', 'confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup'];
+const TO_DROP_STATUSES = ['picked_up', 'reached_drop'];
+
+/**
+ * What each rider is doing right now, for the live tracking map: which order
+ * they hold, whether they are heading to the restaurant or the customer, and
+ * where that is. A rider with no row here is vacant.
+ *
+ * "assigned" is an offer the rider has not accepted yet; it is reported so the
+ * planning team can see the order is waiting on that rider.
+ */
+export async function getRiderActiveOrders() {
+    const orders = await prisma.foodOrder.findMany({
+        where: {
+            dispatchDeliveryPartnerId: { not: null },
+            dispatchStatus: { in: ['assigned', 'accepted'] },
+            orderStatus: { in: [...TO_PICKUP_STATUSES, ...TO_DROP_STATUSES] },
+        },
+        select: {
+            id: true,
+            order_id: true,
+            orderStatus: true,
+            dispatchStatus: true,
+            dispatchDeliveryPartnerId: true,
+            dispatchAcceptedAt: true,
+            addrStreet: true,
+            addrCity: true,
+            addrLat: true,
+            addrLng: true,
+            restaurant: {
+                select: { restaurantName: true, area: true, formattedAddress: true, latitude: true, longitude: true },
+            },
+        },
+        orderBy: { createdAt: 'asc' },
+    });
+
+    return orders.map((order) => {
+        const toDrop = TO_DROP_STATUSES.includes(order.orderStatus);
+        const restaurant = order.restaurant || {};
+        const pickup = {
+            name: restaurant.restaurantName || 'Restaurant',
+            area: restaurant.area || restaurant.formattedAddress || '',
+            lat: toFiniteNumber(restaurant.latitude),
+            lng: toFiniteNumber(restaurant.longitude),
+        };
+        const drop = {
+            name: 'Customer',
+            area: [order.addrStreet, order.addrCity].filter(Boolean).join(', '),
+            lat: toFiniteNumber(order.addrLat),
+            lng: toFiniteNumber(order.addrLng),
+        };
+        return {
+            riderId: order.dispatchDeliveryPartnerId,
+            orderId: order.id,
+            orderNumber: order.order_id || order.id,
+            orderStatus: order.orderStatus,
+            accepted: order.dispatchStatus === 'accepted',
+            stage: toDrop ? 'to_drop' : 'to_pickup',
+            pickup,
+            drop,
+            destination: toDrop ? drop : pickup,
+        };
+    });
+}
+
 export async function getDeliveryPartnerById(id) {
     if (!isId(id)) return null;
 

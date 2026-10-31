@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Bike, Clock, Loader2, MapPin, RefreshCw, Search, Wifi, WifiOff } from "lucide-react"
+import { Bike, Clock, Loader2, MapPin, Navigation, RefreshCw, Search, Wifi, WifiOff } from "lucide-react"
 import { Loader } from "@googlemaps/js-api-loader"
 import { adminAPI } from "@food/api"
 import { subscribeAllDeliveryLocations } from "@food/realtimeTracking"
@@ -8,6 +8,57 @@ import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 const debugError = () => {}
 
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 }
+const ACTIVE_ORDERS_REFRESH_MS = 30000
+
+// What a rider is doing, worked out from their online flag and current order.
+const RIDER_STATUS = {
+  vacant: { label: "Vacant", color: "#16a34a", badge: "bg-emerald-100 text-emerald-700" },
+  awaiting: { label: "Order offered", color: "#d97706", badge: "bg-amber-100 text-amber-700" },
+  to_pickup: { label: "Going to pickup", color: "#2563eb", badge: "bg-blue-100 text-blue-700" },
+  to_drop: { label: "Delivering", color: "#7c3aed", badge: "bg-violet-100 text-violet-700" },
+  offline: { label: "Offline", color: "#64748b", badge: "bg-slate-100 text-slate-600" },
+}
+
+const STATUS_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "on_order", label: "On order" },
+  { key: "vacant", label: "Vacant" },
+  { key: "offline", label: "Offline" },
+]
+
+const getRiderStatus = (isOnline, activeOrder) => {
+  if (activeOrder) {
+    if (!activeOrder.accepted) return "awaiting"
+    return activeOrder.stage === "to_drop" ? "to_drop" : "to_pickup"
+  }
+  return isOnline ? "vacant" : "offline"
+}
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch])
+
+const describeDestination = (activeOrder) => {
+  if (!activeOrder) return ""
+  const { destination, stage } = activeOrder
+  const place = [destination?.name, destination?.area].filter(Boolean).join(" · ")
+  return `${stage === "to_drop" ? "Drop" : "Pickup"}: ${place || "location not set"}`
+}
+
+const hasCoordinates = (point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lng)
+
+// Marker labels sit on the map tiles, so give them a solid pill to stay readable.
+const MARKER_LABEL_CSS = `
+  .rider-map-label {
+    background: #0f172a;
+    color: #ffffff !important;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px !important;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  }
+`
 
 const toFiniteNumber = (value) => {
   const numericValue = Number(value)
@@ -119,10 +170,13 @@ export default function DeliveryLiveTracking() {
   const mapContainerRef = useRef(null)
   const mapRef = useRef(null)
   const markersRef = useRef(new Map())
+  // Per busy rider: the arrow to where they are heading and a pin at that place.
+  const routesRef = useRef(new Map())
   const infoWindowRef = useRef(null)
   const geocoderRef = useRef(null)
 
   const [deliverymen, setDeliverymen] = useState([])
+  const [activeOrdersByRider, setActiveOrdersByRider] = useState({})
   const [locationsById, setLocationsById] = useState({})
   const [selectedDeliveryId, setSelectedDeliveryId] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
@@ -154,8 +208,33 @@ export default function DeliveryLiveTracking() {
     }
   }
 
-  useEffect(() => {
+  const fetchActiveOrders = async () => {
+    try {
+      const response = await adminAPI.getRiderActiveOrders()
+      const orders = response?.data?.data?.orders || []
+      // A rider normally holds one order; if more, show the one closest to done.
+      const byRider = {}
+      orders.forEach((order) => {
+        const current = byRider[order.riderId]
+        if (!current || (order.stage === "to_drop" && current.stage !== "to_drop")) {
+          byRider[order.riderId] = order
+        }
+      })
+      setActiveOrdersByRider(byRider)
+    } catch (error) {
+      debugError("Failed to load rider active orders:", error)
+    }
+  }
+
+  const refreshAll = () => {
     fetchDeliverymen()
+    fetchActiveOrders()
+  }
+
+  useEffect(() => {
+    refreshAll()
+    const timer = setInterval(fetchActiveOrders, ACTIVE_ORDERS_REFRESH_MS)
+    return () => clearInterval(timer)
   }, [])
 
   useEffect(() => {
@@ -237,6 +316,11 @@ export default function DeliveryLiveTracking() {
       cancelled = true
       markersRef.current.forEach((marker) => marker.setMap(null))
       markersRef.current.clear()
+      routesRef.current.forEach(({ line, pin }) => {
+        line.setMap(null)
+        pin.setMap(null)
+      })
+      routesRef.current.clear()
       if (mapRef.current) {
         mapRef.current = null
       }
@@ -250,7 +334,9 @@ export default function DeliveryLiveTracking() {
       const dbLocation = getDbLocationFromDeliveryman(deliveryman)
       const freshestLocation = getFreshestLocation(liveLocation, dbLocation)
       const hasCoordinates = Number.isFinite(freshestLocation?.lat) && Number.isFinite(freshestLocation?.lng)
-      const isOnline = isDeliveryOnlineFromDb(deliveryman)
+      const activeOrder = activeOrdersByRider[deliveryId] || null
+      // A rider holding an order is working even if the online flag lagged.
+      const isOnline = isDeliveryOnlineFromDb(deliveryman) || Boolean(activeOrder)
 
       return {
         id: deliveryId,
@@ -258,18 +344,21 @@ export default function DeliveryLiveTracking() {
         phone: getDeliveryPhone(deliveryman),
         zone: deliveryman?.zone?.name || deliveryman?.zoneName || deliveryman?.serviceZone || "N/A",
         isOnline,
+        activeOrder,
+        status: getRiderStatus(isOnline, activeOrder),
         location: isOnline && hasCoordinates ? freshestLocation : null,
         lastSeen: freshestLocation?.timestamp || deliveryman?.lastLocationAt || null,
       }
     }).filter((deliveryman) => deliveryman.id)
-  }, [deliverymen, locationsById])
+  }, [deliverymen, locationsById, activeOrdersByRider])
 
   const filteredDeliveryRows = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase()
     return deliveryRows.filter((deliveryman) => {
       const matchesStatus =
         statusFilter === "all" ||
-        (statusFilter === "online" && deliveryman.isOnline) ||
+        (statusFilter === "on_order" && Boolean(deliveryman.activeOrder)) ||
+        (statusFilter === "vacant" && deliveryman.status === "vacant") ||
         (statusFilter === "offline" && !deliveryman.isOnline)
       const matchesSearch =
         !normalizedSearch ||
@@ -284,8 +373,9 @@ export default function DeliveryLiveTracking() {
     [deliveryRows, selectedDeliveryId],
   )
 
-  const onlineCount = deliveryRows.filter((deliveryman) => deliveryman.isOnline).length
-  const offlineCount = Math.max(deliveryRows.length - onlineCount, 0)
+  const onOrderCount = deliveryRows.filter((deliveryman) => deliveryman.activeOrder).length
+  const vacantCount = deliveryRows.filter((deliveryman) => deliveryman.status === "vacant").length
+  const offlineCount = deliveryRows.filter((deliveryman) => !deliveryman.isOnline).length
 
   useEffect(() => {
     const google = window.google
@@ -302,35 +392,33 @@ export default function DeliveryLiveTracking() {
       }
     })
 
-    const bounds = new google.maps.LatLngBounds()
-
     onlineRows.forEach((deliveryman) => {
       const position = {
         lat: deliveryman.location.lat,
         lng: deliveryman.location.lng,
       }
-      bounds.extend(position)
+
+      const statusMeta = RIDER_STATUS[deliveryman.status] || RIDER_STATUS.vacant
+      const icon = {
+        path: google.maps.SymbolPath.CIRCLE,
+        fillColor: statusMeta.color,
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 3,
+        scale: 9,
+        // In path units (× scale): puts the name pill just under the dot.
+        labelOrigin: new google.maps.Point(0, 3.2),
+      }
+      const label = {
+        text: deliveryman.name,
+        color: "#ffffff",
+        fontWeight: "700",
+        className: "rider-map-label",
+      }
 
       let marker = markersRef.current.get(deliveryman.id)
       if (!marker) {
-        marker = new google.maps.Marker({
-          map,
-          position,
-          title: deliveryman.name,
-          label: {
-            text: "D",
-            color: "#ffffff",
-            fontWeight: "700",
-          },
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            fillColor: "#16a34a",
-            fillOpacity: 1,
-            strokeColor: "#ffffff",
-            strokeWeight: 3,
-            scale: 12,
-          },
-        })
+        marker = new google.maps.Marker({ map, position, zIndex: 10 })
         marker.addListener("click", () => {
           setSelectedDeliveryId(deliveryman.id)
         })
@@ -338,27 +426,134 @@ export default function DeliveryLiveTracking() {
       }
 
       marker.setPosition(position)
-      marker.setTitle(deliveryman.name)
+      marker.setTitle(`${deliveryman.name} · ${statusMeta.label}`)
+      marker.setIcon(icon)
+      marker.setLabel(label)
 
+      const { activeOrder } = deliveryman
       marker.deliveryInfoContent = `
-        <div style="min-width:190px;padding:4px;">
-          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">${deliveryman.name}</div>
-          <div style="font-size:12px;color:#475569;margin-bottom:4px;">${deliveryman.phone}</div>
-          <div style="font-size:12px;color:#16a34a;font-weight:700;">Online</div>
+        <div style="min-width:210px;padding:4px;">
+          <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">${escapeHtml(deliveryman.name)}</div>
+          <div style="font-size:12px;color:#475569;margin-bottom:4px;">${escapeHtml(deliveryman.phone)}</div>
+          <div style="font-size:12px;color:${statusMeta.color};font-weight:700;">${statusMeta.label}</div>
+          ${activeOrder ? `
+            <div style="font-size:12px;color:#0f172a;margin-top:6px;">Order ${escapeHtml(activeOrder.orderNumber)}</div>
+            <div style="font-size:12px;color:#475569;margin-top:2px;">${escapeHtml(describeDestination(activeOrder))}</div>
+          ` : ""}
         </div>
       `
     })
 
-    if (selectedDeliveryman?.isOnline && selectedDeliveryman.location) {
-      map.panTo({
-        lat: selectedDeliveryman.location.lat,
-        lng: selectedDeliveryman.location.lng,
+    // Arrow from each busy rider to the restaurant (before pickup) or the
+    // customer (after pickup), with a pin at that place.
+    const routedRows = onlineRows.filter((deliveryman) => hasCoordinates(deliveryman.activeOrder?.destination))
+    const routedIds = new Set(routedRows.map((deliveryman) => deliveryman.id))
+    routesRef.current.forEach(({ line, pin }, deliveryId) => {
+      if (!routedIds.has(deliveryId)) {
+        line.setMap(null)
+        pin.setMap(null)
+        routesRef.current.delete(deliveryId)
+      }
+    })
+
+    routedRows.forEach((deliveryman) => {
+      const { activeOrder } = deliveryman
+      const statusMeta = RIDER_STATUS[deliveryman.status] || RIDER_STATUS.vacant
+      const from = { lat: deliveryman.location.lat, lng: deliveryman.location.lng }
+      const to = { lat: activeOrder.destination.lat, lng: activeOrder.destination.lng }
+
+      let route = routesRef.current.get(deliveryman.id)
+      if (!route) {
+        route = {
+          line: new google.maps.Polyline({ map, geodesic: true, strokeOpacity: 0, zIndex: 5 }),
+          pin: new google.maps.Marker({ map, zIndex: 8 }),
+        }
+        route.pin.addListener("click", () => setSelectedDeliveryId(deliveryman.id))
+        routesRef.current.set(deliveryman.id, route)
+      }
+
+      // Dashed line drawn with repeated dash symbols, then an arrowhead at the end.
+      route.line.setOptions({
+        path: [from, to],
+        icons: [
+          {
+            icon: { path: "M 0,-1 0,1", strokeColor: statusMeta.color, strokeOpacity: 0.9, strokeWeight: 3, scale: 3 },
+            offset: "0",
+            repeat: "14px",
+          },
+          {
+            icon: {
+              path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              fillColor: statusMeta.color,
+              fillOpacity: 1,
+              strokeColor: statusMeta.color,
+              strokeWeight: 1,
+              scale: 4,
+            },
+            offset: "100%",
+          },
+        ],
       })
-      map.setZoom(Math.max(map.getZoom() || 14, 14))
-    } else if (onlineRows.length > 0 && !selectedDeliveryId) {
-      map.fitBounds(bounds, { top: 32, right: 32, bottom: 32, left: 32 })
+
+      route.pin.setPosition(to)
+      route.pin.setTitle(`${deliveryman.name} → ${describeDestination(activeOrder)}`)
+      route.pin.setIcon({
+        path: google.maps.SymbolPath.CIRCLE,
+        fillColor: "#ffffff",
+        fillOpacity: 1,
+        strokeColor: statusMeta.color,
+        strokeWeight: 3,
+        scale: 8,
+      })
+      route.pin.setLabel({
+        text: activeOrder.stage === "to_drop" ? "C" : "R",
+        color: statusMeta.color,
+        fontWeight: "700",
+        fontSize: "11px",
+      })
+    })
+
+  }, [deliveryRows, mapLoading])
+
+  // Camera moves only when the selection changes, so the 30-second order
+  // refresh and live location pings don't keep yanking the map back.
+  const autoFittedRef = useRef(false)
+  const hasAnyLocation = deliveryRows.some((deliveryman) => deliveryman.location)
+  useEffect(() => {
+    const google = window.google
+    const map = mapRef.current
+    if (!google?.maps || !map || mapLoading) return
+
+    if (selectedDeliveryman?.isOnline && selectedDeliveryman.location) {
+      const destination = selectedDeliveryman.activeOrder?.destination
+      if (hasCoordinates(destination)) {
+        const bounds = new google.maps.LatLngBounds()
+        bounds.extend({ lat: selectedDeliveryman.location.lat, lng: selectedDeliveryman.location.lng })
+        bounds.extend({ lat: destination.lat, lng: destination.lng })
+        map.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 })
+      } else {
+        map.panTo({ lat: selectedDeliveryman.location.lat, lng: selectedDeliveryman.location.lng })
+        map.setZoom(Math.max(map.getZoom() || 14, 14))
+      }
+      return
     }
-  }, [deliveryRows, selectedDeliveryId, selectedDeliveryman, mapLoading])
+
+    if (autoFittedRef.current) return
+    const bounds = new google.maps.LatLngBounds()
+    let points = 0
+    deliveryRows.forEach((deliveryman) => {
+      if (!deliveryman.location) return
+      bounds.extend({ lat: deliveryman.location.lat, lng: deliveryman.location.lng })
+      points += 1
+      const destination = deliveryman.activeOrder?.destination
+      if (hasCoordinates(destination)) bounds.extend({ lat: destination.lat, lng: destination.lng })
+    })
+    if (points > 0) {
+      map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 })
+      autoFittedRef.current = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDeliveryId, mapLoading, hasAnyLocation])
 
   useEffect(() => {
     const map = mapRef.current
@@ -407,6 +602,7 @@ export default function DeliveryLiveTracking() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-3 lg:p-4">
+      <style>{MARKER_LABEL_CSS}</style>
       <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex items-center gap-3">
@@ -415,13 +611,13 @@ export default function DeliveryLiveTracking() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-slate-900">Delivery Live Tracking</h1>
-              <p className="text-sm text-slate-600">Monitor online and offline delivery partners with live map locations.</p>
+              <p className="text-sm text-slate-600">See who is vacant, who is on an order, and where each rider is heading.</p>
             </div>
           </div>
         </div>
         <button
           type="button"
-          onClick={fetchDeliverymen}
+          onClick={refreshAll}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
         >
           <RefreshCw className="h-4 w-4" />
@@ -432,14 +628,18 @@ export default function DeliveryLiveTracking() {
       <div className="grid gap-3 lg:grid-cols-[380px_1fr] lg:items-stretch">
         <section className="flex min-h-[540px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:h-[calc(100vh-214px)]">
           <div className="border-b border-slate-100 p-3">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               <div className="rounded-xl bg-slate-50 p-2.5">
                 <p className="text-xs text-slate-500">All</p>
                 <p className="text-lg font-bold text-slate-900">{deliveryRows.length}</p>
               </div>
+              <div className="rounded-xl bg-blue-50 p-2.5">
+                <p className="text-xs text-blue-700">On order</p>
+                <p className="text-lg font-bold text-blue-700">{onOrderCount}</p>
+              </div>
               <div className="rounded-xl bg-emerald-50 p-2.5">
-                <p className="text-xs text-emerald-700">Online</p>
-                <p className="text-lg font-bold text-emerald-700">{onlineCount}</p>
+                <p className="text-xs text-emerald-700">Vacant</p>
+                <p className="text-lg font-bold text-emerald-700">{vacantCount}</p>
               </div>
               <div className="rounded-xl bg-slate-100 p-2.5">
                 <p className="text-xs text-slate-600">Offline</p>
@@ -448,18 +648,18 @@ export default function DeliveryLiveTracking() {
             </div>
 
             <div className="mt-3 flex gap-2">
-              {["all", "online", "offline"].map((filter) => (
+              {STATUS_FILTERS.map((filter) => (
                 <button
-                  key={filter}
+                  key={filter.key}
                   type="button"
-                  onClick={() => setStatusFilter(filter)}
-                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold capitalize transition ${
-                    statusFilter === filter
+                  onClick={() => setStatusFilter(filter.key)}
+                  className={`flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition ${
+                    statusFilter === filter.key
                       ? "bg-slate-900 text-white"
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  {filter}
+                  {filter.label}
                 </button>
               ))}
             </div>
@@ -510,15 +710,22 @@ export default function DeliveryLiveTracking() {
                     <h3 className="font-semibold text-slate-900">{deliveryman.name}</h3>
                     <p className="mt-1 text-sm text-slate-500">{deliveryman.phone}</p>
                   </div>
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${
-                    deliveryman.isOnline
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-slate-100 text-slate-600"
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${
+                    RIDER_STATUS[deliveryman.status].badge
                   }`}>
                     {deliveryman.isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                    {deliveryman.isOnline ? "Online" : "Offline"}
+                    {RIDER_STATUS[deliveryman.status].label}
                   </span>
                 </div>
+                {deliveryman.activeOrder && (
+                  <div className="mt-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs">
+                    <p className="font-semibold text-slate-800">Order {deliveryman.activeOrder.orderNumber}</p>
+                    <p className="mt-0.5 flex items-start gap-1 text-slate-600">
+                      <Navigation className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>{describeDestination(deliveryman.activeOrder)}</span>
+                    </p>
+                  </div>
+                )}
                 <div className="mt-3 flex items-center gap-1 text-xs text-slate-500">
                   <Clock className="h-3.5 w-3.5" />
                   {formatLastSeen(deliveryman.lastSeen)}
@@ -533,14 +740,27 @@ export default function DeliveryLiveTracking() {
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">Online Delivery Map</h2>
-                <p className="text-xs text-slate-500">Google Maps shows online delivery partners only.</p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                  {["vacant", "awaiting", "to_pickup", "to_drop"].map((key) => (
+                    <span key={key} className="inline-flex items-center gap-1">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: RIDER_STATUS[key].color }} />
+                      {RIDER_STATUS[key].label}
+                    </span>
+                  ))}
+                  <span>Arrow → R restaurant / C customer</span>
+                </div>
               </div>
               {selectedDeliveryman && (
                 <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm">
                   <p className="font-semibold text-slate-900">{selectedDeliveryman.name}</p>
                   <p className="text-slate-500">
-                    {selectedDeliveryman.isOnline ? "Selected online location" : "Selected partner is offline"}
+                    {selectedDeliveryman.activeOrder
+                      ? `${RIDER_STATUS[selectedDeliveryman.status].label} · Order ${selectedDeliveryman.activeOrder.orderNumber}`
+                      : selectedDeliveryman.isOnline ? "Vacant" : "Selected partner is offline"}
                   </p>
+                  {selectedDeliveryman.activeOrder && (
+                    <p className="text-xs text-slate-500">{describeDestination(selectedDeliveryman.activeOrder)}</p>
+                  )}
                 </div>
               )}
             </div>

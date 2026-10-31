@@ -1425,6 +1425,19 @@ export async function updateSupportTicket(req, res, next) {
 }
 
 // ----- Delivery partners -----
+export async function getRiderActiveOrders(req, res, next) {
+    try {
+        const orders = await adminService.getRiderActiveOrders();
+        res.status(200).json({
+            success: true,
+            message: 'Rider active orders fetched successfully',
+            data: { orders }
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getDeliveryPartners(req, res, next) {
     try {
         const data = await adminService.getDeliveryPartners(req.query);

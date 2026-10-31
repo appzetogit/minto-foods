@@ -614,6 +614,8 @@ router.post('/orders/:id/assign-rider', manualDispatchController.assignRider);
 router.post('/orders/:id/unassign-rider', manualDispatchController.unassignRider);
 router.post('/orders/:id/assign-external-rider', manualDispatchController.assignOutsideRider);
 router.get('/delivery/partners', adminController.getDeliveryPartners);
+// Live tracking map: each busy rider's order and where they are heading.
+router.get('/delivery/active-orders', adminController.getRiderActiveOrders);
 // Add Deliveryman: an admin-created rider, approved at once.
 router.post('/delivery/partners', upload.any(), createDeliveryPartnerByAdmin);
 router.post('/delivery-partners', upload.any(), createDeliveryPartnerByAdmin);
