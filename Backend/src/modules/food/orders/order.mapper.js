@@ -39,6 +39,19 @@ export const orderPopulate = {
  */
 const populated = (relation, id) => relation ?? id;
 
+/** An outside rider, in the shape a populated rider has. */
+const externalRider = (row) =>
+    row?.externalRiderName
+        ? {
+            _id: null,
+            id: null,
+            name: row.externalRiderName,
+            phone: row.externalRiderPhone || '',
+            isExternal: true,
+            provider: row.externalRiderProvider || '',
+        }
+        : null;
+
 const num = (value) => (value == null ? null : Number(value));
 /** Money columns come back as Decimal; the API has always emitted numbers. */
 const money = (value) => Number(value ?? 0);
@@ -150,7 +163,8 @@ export function toOrder(row) {
         dispatch: {
             modeAtCreation: 'auto',
             status: row.dispatchStatus,
-            deliveryPartnerId: populated(row.deliveryPartner, row.dispatchDeliveryPartnerId),
+            deliveryPartnerId: populated(row.deliveryPartner, row.dispatchDeliveryPartnerId) ?? externalRider(row),
+            externalRider: externalRider(row),
             assignedAt: row.dispatchAssignedAt,
             acceptedAt: row.dispatchAcceptedAt,
             dispatchingAt: row.dispatchingAt,
@@ -256,7 +270,9 @@ export function toFoodTransaction(row) {
             adminDiscountShare: money(row.adminDiscountShare),
             restaurantDiscountShare: money(row.restaurantDiscountShare),
             discountAdminBearPercentage: money(row.discountAdminBearPercentage),
-            discountRestaurantBearPercentage: money(row.discountRestaurantBearPercentage)
+            discountRestaurantBearPercentage: money(row.discountRestaurantBearPercentage),
+            // Refunds the restaurant agreed to bear, already off restaurantShare.
+            restaurantRefundDeduction: money(row.restaurantRefundDeduction)
         },
         gateway: {
             provider: row.gatewayProvider,

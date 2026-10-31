@@ -1,3 +1,4 @@
+import { findZoneForPoint } from '../../shared/zone.service.js';
 import { notifyCustomer, notifyCustomerForStatus } from './customerNotify.service.js';
 import { normalizeRecipientFields } from '../validators/order.validator.js';
 import { prisma } from '../../../../config/prisma.js';
@@ -356,6 +357,29 @@ async function applyCancellationRefund(order, { cancelledBy = 'system', refundAm
   };
 }
 
+/**
+ * Take a cancelled order out of restaurant and rider payouts.
+ *
+ * Payouts sum restaurantShare and riderShare over 'captured' transactions, and
+ * the admin-cancel and expiry paths never moved the transaction on -- so a
+ * refunded order was still paid out to the restaurant and rider. Paid money
+ * makes it 'refunded', anything else 'failed', as the customer cancel does.
+ */
+async function syncCancelledTransaction(orderId, kind, { note, byRole = 'SYSTEM', byId = null } = {}) {
+  try {
+    const row = await prisma.foodOrder.findUnique({ where: { id: String(orderId) }, select: { paymentStatus: true } });
+    const paid = ['paid', 'refunded'].includes(String(row?.paymentStatus || ''));
+    await foodTransactionService.updateTransactionStatus(String(orderId), kind, {
+      status: paid ? 'refunded' : 'failed',
+      note,
+      recordedByRole: byRole,
+      recordedById: byId,
+    });
+  } catch (err) {
+    logger.warn(`Cancelled order transaction sync failed for ${orderId}: ${err?.message || err}`);
+  }
+}
+
 // ----- Acceptance window expiry -----
 
 /** Most orders one pass cancels; the scheduler's next pass takes the rest. */
@@ -410,7 +434,9 @@ async function expireUnacceptedOrders(where = {}) {
       }
     } catch (err) {
       logger.warn(`expireUnacceptedOrders refund failed for ${doc.id}: ${err?.message || err}`);
+      await prisma.foodOrder.update({ where: { id: doc.id }, data: { refundStatus: 'failed' } }).catch(() => {});
     }
+    await syncCancelledTransaction(doc.id, 'cancelled_by_restaurant', { note: 'Not accepted by restaurant in time' });
 
     try {
       const io = getIO();
@@ -722,8 +748,15 @@ export async function createOrder(userId, rawDto) {
       normalizedPricing.roadDistanceKm = distanceKm;
     }
 
-    // Same zone the order is about to be stamped with, a few lines below.
-    const orderZoneId = dto.zoneId || restaurant.zoneId || null;
+    // Same zone the order is about to be stamped with, a few lines below. A
+    // restaurant with no zone set used to give the order none, and an order with
+    // no zone is hidden from every city view in the admin panel -- so it never
+    // showed under Pending there. Fall back to the zone the restaurant (or the
+    // customer) is standing in.
+    const orderZoneId = dto.zoneId || restaurant.zoneId
+      || (await findZoneForPoint(restaurant.latitude, restaurant.longitude))?.id
+      || (await findZoneForPoint(deliveryAddress?.latitude, deliveryAddress?.longitude))?.id
+      || null;
     const feeSettings = await loadActiveFeeSettings(orderZoneId);
     // The tip belongs to the rider, so it is added to what they are owed. It is
     // also kept on the order in its own column, so a payout can always show how
@@ -772,7 +805,7 @@ export async function createOrder(userId, rawDto) {
       ...fromOrder({ pricing: normalizedPricing, payment, deliveryAddress }),
       userId: requireId(userId, 'User ID'),
       restaurantId,
-      zoneId: dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : restaurant.zoneId || null,
+      zoneId: dto.zoneId ? requireId(dto.zoneId, 'Zone ID') : orderZoneId,
       customerName: customer.name,
       customerPhone: customer.phone,
       isForSomeoneElse: forSomeoneElse,
@@ -2184,12 +2217,22 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
     title = "Food is ready! 🛍️";
     body = "Your order is ready and waiting to be picked up.";
   } else if (String(orderStatus).includes("cancel")) {
-    const isOnlinePaid =
-      updated.paymentMethod === "razorpay" &&
-      (updated.paymentStatus === "paid" || updated.paymentStatus === "refunded");
-    const refundDetail = isOnlinePaid
-      ? ` Your refund of ₹${updated.total} is being processed and will be credited to your original payment method within 5-7 working days.`
-      : "";
+    // Sent before the refund runs, so it says where the money goes rather than
+    // an amount: a split order is partly wallet, partly card, and with no
+    // gateway the online part goes to the wallet too.
+    const paid = updated.paymentStatus === "paid" || updated.paymentStatus === "refunded";
+    const method = String(updated.paymentMethod || "").toLowerCase();
+    const fromWallet = Number(updated.walletAmount) > 0 || method === "wallet";
+    const fromOnline = method === "razorpay";
+    const refundDetail = !paid
+      ? ""
+      : fromOnline && fromWallet
+        ? " Your refund is on its way: the wallet part back to your Minto wallet, the rest to your original payment method (5-7 working days). The order shows the details."
+        : fromOnline
+          ? " Your refund is on its way to your original payment method (5-7 working days). The order shows the details."
+          : fromWallet
+            ? " The amount you paid is being added back to your Minto wallet."
+            : "";
     title = "Order Cancelled ❌";
     body = (note && String(note).trim()) ? note : `Unfortunately, your order has been cancelled by the restaurant.${refundDetail}`;
   }
@@ -2242,8 +2285,9 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
 
     if (isCancellation) {
       try {
+        // Wallet money is paid money too; it is refunded like the online part.
         const isOnlinePaid =
-          updated.paymentMethod === "razorpay" &&
+          ["razorpay", "wallet"].includes(updated.paymentMethod) &&
           (updated.paymentStatus === "paid" || updated.paymentStatus === "refunded");
         await foodTransactionService.updateTransactionStatus(order.id, 'cancelled_by_restaurant', {
           status: isOnlinePaid ? 'refunded' : 'failed',
@@ -2730,6 +2774,14 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
     note: note || "Status updated by admin",
   });
 
+  if (String(orderStatus).includes("cancel")) {
+    await syncCancelledTransaction(order.id, String(orderStatus), {
+      note: `Order cancelled by admin${note ? `: ${note}` : ''}`,
+      byRole: 'ADMIN',
+      byId: adminId,
+    });
+  }
+
   if (String(orderStatus) === "delivered") {
     try {
       const ledgerKind = codBecomesPaid ? "cod_marked_paid_on_delivery" : "payment_snapshot_sync";
@@ -2942,7 +2994,19 @@ export async function markOrderDeliveredAdmin(orderId, adminId, note = "") {
   return normalizeOrderForClient(updated);
 }
 
-export async function processRefundAdmin(orderId, amount, adminId, destination = 'original') {
+/**
+ * An admin refunds an order, in full or in part, at any stage.
+ *
+ * Any paid order can be refunded -- delivered ones too (an item was missing),
+ * and a COD order once its cash was collected, which goes back as wallet
+ * credit. `chargedTo` says who bears it:
+ *  - 'restaurant': taken off the restaurant's payout for this order (its
+ *    mistake, and it agreed). Refused once that payout has been paid.
+ *  - 'platform': Minto's cost (rider or company mistake); the restaurant and
+ *    rider are paid as normal.
+ * A cancelled order that is now fully refunded leaves the payouts entirely.
+ */
+export async function processRefundAdmin(orderId, amount, adminId, destination = 'original', { chargedTo = 'platform', reason = '' } = {}) {
   const identity = buildOrderIdentityFilter(orderId);
   const row = await prisma.foodOrder.findFirst({ where: identity, include: orderInclude });
   if (!row) throw new NotFoundError("Order not found");
@@ -2950,41 +3014,61 @@ export async function processRefundAdmin(orderId, amount, adminId, destination =
 
   const requested = amount == null || amount === "" ? null : Number(amount);
   if (requested != null && !(requested > 0)) throw new ValidationError("Invalid refund amount");
+  if (!['platform', 'restaurant'].includes(chargedTo)) {
+    throw new ValidationError('Choose who bears the refund: the restaurant or the company');
+  }
+
+  const method = String(order.paymentMethod || 'cash').toLowerCase();
+  const isCash = method === 'cash' || method === 'cod';
+  const cancelled = String(order.orderStatus || '').startsWith('cancelled');
+
+  if (chargedTo === 'restaurant') {
+    const txn = await prisma.foodTransaction.findUnique({
+      where: { orderId: order.id },
+      select: { isRestaurantSettled: true },
+    });
+    if (txn?.isRestaurantSettled) {
+      throw new ValidationError(
+        "This order's payout to the restaurant has already been paid, so the refund cannot come off it. Charge it to the company, or recover it from the restaurant separately.",
+      );
+    }
+  }
 
   // strict: asking for more than is left is an error here, not quietly less.
-  const refundResult = await applyCancellationRefund(order, {
-    cancelledBy: 'admin',
-    refundAmount: requested,
-    destination,
-    strict: true,
+  const result = await refundOrder({
+    orderId: order.id,
+    amount: requested,
+    destination: isCash ? 'wallet' : destination,
+    initiatedBy: 'admin',
     initiatedById: adminId,
+    reason: String(reason || '').trim().slice(0, 300)
+      || (cancelled ? buildCancellationRefundDescription(order, 'admin') : `Refund on order #${order.order_id || order.id}`),
+    strict: true,
+    allowCash: isCash,
+    chargedTo,
   });
 
-  if (!refundResult.attempted) {
-    if (refundResult.reason === 'cash_payment') {
-      throw new ValidationError('Cash on Delivery orders do not require a refund');
-    }
-    if (refundResult.reason === 'already_refunded') {
+  if (!result.legs.length) {
+    if (result.reason === 'nothing_left_to_refund') {
       throw new ValidationError('Nothing is left to refund on this order');
+    }
+    if (result.reason === 'cash_payment') {
+      throw new ValidationError('This cash order has not been paid yet (it was not delivered), so there is nothing to refund');
     }
     throw new ValidationError('This order has not been paid, so there is nothing to refund');
   }
-  if (!refundResult.processed) {
-    throw new ValidationError(`Refund failed: ${refundResult.reason || 'the payment gateway refused it'}`);
+  const moving = result.legs.filter((l) => l.status !== 'failed');
+  if (!moving.length) {
+    throw new ValidationError(`Refund failed: ${result.legs[0]?.failureReason || 'the payment gateway refused it'}`);
   }
-  const refundAmount = refundResult.legs
-    .filter((l) => l.status !== 'failed')
-    .reduce((sum, l) => sum + Number(l.amount), 0);
+  const refundAmount = Math.round(moving.reduce((sum, l) => sum + Number(l.amount), 0) * 100) / 100;
+  const refundMessage = describeRefundLegs(result.legs);
+  const fullyRefunded = result.order?.paymentStatus === 'refunded';
 
   try {
-    await foodTransactionService.updateTransactionStatus(order.id, order.orderStatus, {
-      status: 'refunded',
-      note: `Refund of ₹${refundAmount} processed by admin`,
-      recordedByRole: 'ADMIN',
-      recordedById: adminId,
-    });
+    await applyRefundToPayouts(order.id, refundAmount, { chargedTo, cancelled, fullyRefunded, adminId });
   } catch (err) {
-    logger.warn(`Admin refund transaction sync failed: ${err?.message || err}`);
+    logger.warn(`Admin refund payout update failed for ${order.id}: ${err?.message || err}`);
   }
 
   const updated = toOrder(
@@ -2994,7 +3078,7 @@ export async function processRefundAdmin(orderId, amount, adminId, destination =
   if (updated.userId) {
     await notifyOwnersSafely([{ ownerType: "USER", ownerId: updated.userId }], {
       title: "Refund Processed! 💸",
-      body: `Refund for Order #${updated.order_id || updated.id}: ${refundResult.message || `₹${refundAmount} has been processed.`}`,
+      body: `Refund for Order #${updated.order_id || updated.id}: ${refundMessage || `₹${refundAmount} has been processed.`}`,
       image: BRAND_IMAGE_URL,
       data: {
         type: "refund_processed",
@@ -3006,5 +3090,56 @@ export async function processRefundAdmin(orderId, amount, adminId, destination =
     });
   }
 
-  return { success: true, order: normalizeOrderForClient(updated) };
+  return { success: true, refundAmount, chargedTo, order: normalizeOrderForClient(updated) };
+}
+
+/**
+ * What an admin refund does to the money record behind the payouts.
+ *
+ * A cancelled order fully refunded leaves the payout set ('refunded'). Any
+ * other refund keeps the order in it: charged to the restaurant, the amount
+ * comes off restaurantShare (and is kept in restaurantRefundDeduction so the
+ * payout can show it); charged to the platform, it comes off the platform's
+ * profit. Either way the transaction history records it.
+ */
+async function applyRefundToPayouts(orderId, amount, { chargedTo, cancelled, fullyRefunded, adminId }) {
+  const txn = await prisma.foodTransaction.findUnique({ where: { orderId: String(orderId) } });
+  if (!txn) return;
+  const history = {
+    create: [{
+      kind: 'refund',
+      amount,
+      at: new Date(),
+      note: `Refund of ₹${amount} by admin, borne by ${chargedTo === 'restaurant' ? 'the restaurant' : 'the company'}`,
+      recordedByRole: 'ADMIN',
+      recordedById: adminId ? String(adminId) : null,
+    }],
+  };
+
+  if (cancelled) {
+    await prisma.foodTransaction.update({
+      where: { id: txn.id },
+      data: { ...(fullyRefunded ? { status: 'refunded' } : {}), history },
+    });
+    return;
+  }
+
+  if (chargedTo === 'restaurant') {
+    const take = Math.min(amount, Math.max(0, Number(txn.restaurantShare) || 0));
+    // Guarded on not-yet-settled, so a payout run in between is not undercut.
+    const { count } = await prisma.foodTransaction.updateMany({
+      where: { id: txn.id, isRestaurantSettled: false },
+      data: {
+        restaurantShare: { decrement: take },
+        restaurantRefundDeduction: { increment: take },
+      },
+    });
+    if (!count) logger.warn(`Refund on ${orderId} not taken off the restaurant payout: it was settled meanwhile`);
+  } else {
+    await prisma.foodTransaction.update({
+      where: { id: txn.id },
+      data: { platformNetProfit: { decrement: amount } },
+    });
+  }
+  await prisma.foodTransaction.update({ where: { id: txn.id }, data: { history } });
 }

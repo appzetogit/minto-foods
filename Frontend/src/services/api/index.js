@@ -922,6 +922,9 @@ export const adminAPI = {
       {},
       { contextModule: "admin" },
     ),
+  // Refund tracking: every refund movement with totals (status, chargedTo, from, to, search, page).
+  getOrderRefunds: (params = {}) =>
+    apiClient.get("/food/admin/order-refunds", { params, contextModule: "admin" }),
   processRefund: (orderId, data) =>
     apiClient.post(`/food/admin/orders/${String(orderId)}/refund`, data ?? {}, {
       contextModule: "admin",
@@ -950,6 +953,12 @@ export const adminAPI = {
     apiClient.delete(`/food/admin/restaurants/${String(id)}`, {
       contextModule: "admin",
     }),
+
+  /** Pause all ordering (or chosen zones): { paused, zoneIds, message, until }. */
+  getOrderPause: () =>
+    apiClient.get("/food/admin/business-settings/order-pause", { contextModule: "admin" }),
+  updateOrderPause: (body) =>
+    apiClient.put("/food/admin/business-settings/order-pause", body ?? {}, { contextModule: "admin" }),
 
   /** List delivery zones. Query: limit, page, isActive, search */
   getZones: (params = {}) =>
@@ -1323,6 +1332,9 @@ export const adminAPI = {
     }),
   assignRider: (orderId, body) =>
     apiClient.post(`/food/admin/orders/${String(orderId)}/assign-rider`, body ?? {}, { contextModule: "admin" }),
+  /** Give the order to an outside rider (Rapido, Shadowfax...): { provider, name, phone }. */
+  assignExternalRider: (orderId, body) =>
+    apiClient.post(`/food/admin/orders/${String(orderId)}/assign-external-rider`, body ?? {}, { contextModule: "admin" }),
   unassignRider: (orderId) =>
     apiClient.post(`/food/admin/orders/${String(orderId)}/unassign-rider`, {}, { contextModule: "admin" }),
   /** Add Deliveryman: creates an approved rider (multipart: fields + document photos). */

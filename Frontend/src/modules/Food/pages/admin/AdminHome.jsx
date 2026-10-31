@@ -104,7 +104,7 @@ export default function AdminHome() {
     return [
       { label: "Delivered", value: byStatus.delivered || 0, color: "#0ea5e9" },
       { label: "Cancelled", value: byStatus.cancelled || 0, color: "#ef4444" },
-      { label: "Refunded", value: 0, color: "#f59e0b" }, // Refunded not tracked separately
+      { label: "Refunded", value: byStatus.refunded || 0, color: "#f59e0b" },
       { label: "Pending", value: byStatus.pending || 0, color: "#10b981" },
     ]
   }

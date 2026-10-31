@@ -17,32 +17,37 @@ const paise = (n) => Math.round(Number(n || 0) * 100)
  * payment block. The server works this out again and refuses anything over it;
  * this is only so the admin sees the numbers before confirming.
  */
-function refundPicture(order) {
+export function refundPicture(order) {
   const payment = order?.payment || {}
-  const method = String(payment.method || "").toLowerCase()
+  const method = String(payment.method || order?.paymentMethod || "").toLowerCase()
+  const paid = ["paid", "refunded"].includes(String(payment.status || "").toLowerCase())
   const total = Number(order?.totalAmount ?? order?.pricing?.total ?? 0)
   let wallet = paise(payment.walletAmount)
   let online = paise(payment.onlineAmount)
+  let cash = 0
   if (wallet === 0 && online === 0) {
     if (method === "wallet") wallet = paise(total)
     else if (method === "razorpay") online = paise(total)
+    // Cash once it was collected on delivery; it can only go back as wallet credit.
+    else if ((method === "cash" || method === "cod") && paid) cash = paise(total)
   }
   const legs = Array.isArray(payment.refund?.legs) ? payment.refund.legs : []
-  const used = { wallet: 0, online: 0 }
+  const used = { wallet: 0, online: 0, cash: 0 }
   for (const leg of legs) {
-    if (leg.status === "pending" || leg.status === "processed") used[leg.source] += paise(leg.amount)
+    if (leg.status === "pending" || leg.status === "processed") used[leg.source] = (used[leg.source] || 0) + paise(leg.amount)
   }
   const leftOnline = Math.max(0, online - used.online)
   const leftWallet = Math.max(0, wallet - used.wallet)
-  return { wallet, online, legs, leftOnline, leftWallet, left: leftOnline + leftWallet }
+  const leftCash = Math.max(0, cash - used.cash)
+  return { wallet, online, cash, legs, leftOnline, leftWallet, leftCash, left: leftOnline + leftWallet + leftCash, paid }
 }
 
-/** How a refund of `amountPaise` would be split: online part first, then wallet. */
+/** How a refund of `amountPaise` would be split: online part first, then wallet, then cash (to wallet). */
 function splitPreview(picture, amountPaise, destination) {
   const fromOnline = Math.min(amountPaise, picture.leftOnline)
-  const fromWallet = Math.min(amountPaise - fromOnline, picture.leftWallet)
-  if (destination === "wallet") return { toGateway: 0, toWallet: fromOnline + fromWallet }
-  return { toGateway: fromOnline, toWallet: fromWallet }
+  const rest = amountPaise - fromOnline
+  if (destination === "wallet") return { toGateway: 0, toWallet: fromOnline + rest }
+  return { toGateway: fromOnline, toWallet: rest }
 }
 
 const LEG_STATUS = {
@@ -54,6 +59,9 @@ const LEG_STATUS = {
 export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, isProcessing }) {
   const [refundAmount, setRefundAmount] = useState("")
   const [destination, setDestination] = useState("original")
+  // Who bears it: the restaurant (comes off its payout) or the company.
+  const [chargedTo, setChargedTo] = useState("platform")
+  const [reason, setReason] = useState("")
   const [error, setError] = useState("")
 
   const picture = useMemo(() => refundPicture(order), [order])
@@ -62,6 +70,8 @@ export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, is
     if (order && isOpen) {
       setRefundAmount((picture.left / 100).toFixed(2))
       setDestination("original")
+      setChargedTo("platform")
+      setReason("")
       setError("")
     }
   }, [order, isOpen, picture.left])
@@ -86,7 +96,7 @@ export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, is
       setError(`Only ${rupees(picture.left / 100)} is left to refund on this order`)
       return
     }
-    onConfirm(amountPaise / 100, destination)
+    onConfirm(amountPaise / 100, destination, { chargedTo, reason: reason.trim() })
   }
 
   const handleClose = () => {
@@ -101,6 +111,7 @@ export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, is
 
   const paidOnline = picture.online > 0
   const paidWallet = picture.wallet > 0
+  const paidCash = picture.cash > 0
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -128,6 +139,12 @@ export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, is
               <div className="flex justify-between text-slate-600">
                 <span>Online (UPI / card)</span>
                 <span>{rupees(picture.online / 100)}</span>
+              </div>
+            )}
+            {paidCash && (
+              <div className="flex justify-between text-slate-600">
+                <span>Cash on delivery (refunded as wallet credit)</span>
+                <span>{rupees(picture.cash / 100)}</span>
               </div>
             )}
             <div className="mt-1 flex justify-between border-t border-slate-100 pt-1 font-medium text-slate-800">
@@ -212,6 +229,51 @@ export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, is
                 </div>
               )}
 
+              <div className="space-y-2 text-sm">
+                <p className="font-medium text-slate-700">Who bears this refund?</p>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="radio"
+                    name="refund-charged-to"
+                    checked={chargedTo === "platform"}
+                    onChange={() => setChargedTo("platform")}
+                    disabled={isProcessing}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800">Company (Minto)</span>
+                    <span className="block text-xs text-slate-500">Rider or company mistake. The restaurant is paid as normal.</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="radio"
+                    name="refund-charged-to"
+                    checked={chargedTo === "restaurant"}
+                    onChange={() => setChargedTo("restaurant")}
+                    disabled={isProcessing}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800">Restaurant</span>
+                    <span className="block text-xs text-slate-500">Restaurant's mistake (e.g. item missing). Deducted from its payout for this order.</span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="space-y-1 text-sm">
+                <label className="font-medium text-slate-700">Reason (optional)</label>
+                <input
+                  type="text"
+                  value={reason}
+                  maxLength={300}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="e.g. 1 Paneer Tikka missing"
+                  disabled={isProcessing}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-200"
+                />
+              </div>
+
               {amountPaise > 0 && amountPaise <= picture.left && (
                 <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm text-purple-800">
                   {preview.toGateway > 0 && <p>{rupees(preview.toGateway / 100)} to the original payment method</p>}
@@ -221,7 +283,9 @@ export default function RefundModal({ isOpen, onOpenChange, order, onConfirm, is
             </>
           ) : (
             <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-              Everything paid on this order has already been refunded.
+              {picture.paid || picture.legs.length
+                ? "Everything paid on this order has already been refunded."
+                : "Nothing has been paid on this order yet (a cash order is paid on delivery), so there is nothing to refund."}
             </p>
           )}
         </div>

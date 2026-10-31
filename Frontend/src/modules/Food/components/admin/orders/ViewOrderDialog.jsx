@@ -54,7 +54,7 @@ const formatDialogMoney = (value) => {
 /** Statuses where an admin can still give the order a rider (before pickup). */
 const RIDER_ASSIGNABLE = ["confirmed", "preparing", "ready_for_pickup"]
 
-export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
+export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged }) {
   const [pickingRider, setPickingRider] = useState(false)
   // Full order detail (statusHistory + transaction split) fetched on open;
   // the `order` prop only carries the mapped list-row fields.
@@ -356,7 +356,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
           </div>
 
           {/* Assign / re-assign a rider: any order not yet accepted by one. */}
-          {RIDER_ASSIGNABLE.includes(String(order.orderStatus || order.status || "")) &&
+          {RIDER_ASSIGNABLE.includes(String(order.status || order.orderStatus || "")) &&
           String(order.dispatch?.status || order.dispatchStatus || "unassigned") !== "accepted" ? (
             <div className="border-t border-slate-200 pt-4 flex items-center justify-between gap-3">
               <div className="text-sm text-slate-600 flex items-center gap-2">
@@ -382,7 +382,10 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                 restaurantName: order.restaurant?.restaurantName || (typeof order.restaurant === "string" ? order.restaurant : ""),
               }}
               onClose={() => setPickingRider(false)}
-              onAssigned={() => setPickingRider(false)}
+              onAssigned={() => {
+                setPickingRider(false)
+                onChanged?.()
+              }}
             />
           ) : null}
 
@@ -634,10 +637,39 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order }) {
                   <span className="text-slate-600">Customer Paid</span>
                   <span className="font-medium text-slate-900">{formatDialogMoney(transaction.amounts.totalCustomerPaid)}</span>
                 </div>
+                {/* What the customer paid is made of: food, and the fees Minto charged. */}
+                {transaction.pricing ? (
+                  <div className="pl-3 space-y-1 border-l-2 border-slate-100">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Food (gross)</span>
+                      <span className="text-slate-700">{formatDialogMoney(transaction.pricing.subtotal)}</span>
+                    </div>
+                    {Number(transaction.pricing.packagingFee) > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Packaging</span>
+                        <span className="text-slate-700">{formatDialogMoney(transaction.pricing.packagingFee)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Delivery fee earned</span>
+                      <span className="text-slate-700">{formatDialogMoney(transaction.pricing.deliveryFee)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500">Platform fee earned</span>
+                      <span className="text-slate-700">{formatDialogMoney(transaction.pricing.platformFee)}</span>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">Restaurant Payout</span>
                   <span className="font-medium text-slate-900">{formatDialogMoney(transaction.amounts.restaurantShare)}</span>
                 </div>
+                {Number(transaction.amounts.restaurantRefundDeduction) > 0 && (
+                  <div className="flex justify-between text-xs pl-3">
+                    <span className="text-slate-500">after customer refund taken off</span>
+                    <span className="text-rose-600">-{formatDialogMoney(transaction.amounts.restaurantRefundDeduction)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">Restaurant Commission</span>
                   <span className="font-medium text-slate-900">{formatDialogMoney(transaction.amounts.restaurantCommission)}</span>

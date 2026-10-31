@@ -491,8 +491,26 @@ export function buildLiveEta(order) {
     };
   }
 
+  // No trip estimate either (none is stored until a rider is found): work one
+  // out from the restaurant to the customer, plus time to cook if it is not
+  // ready yet. The app showed 'Calculating...' until a rider turned up.
+  const from = parseGeoPoint(order?.restaurantId);
+  const to = parseGeoPoint(order?.deliveryAddress);
+  if (from && to) {
+    const straight = geoHaversineKm(from.lat, from.lng, to.lat, to.lng);
+    if (Number.isFinite(straight)) {
+      const km = Number((straight * ROAD_FACTOR).toFixed(2));
+      const ride = Math.ceil((km / AVG_SPEED_KMPH) * 60);
+      const cooking = ['created', 'confirmed', 'preparing'].includes(status) ? ESTIMATE_PREP_MINUTES : 0;
+      return { minutes: Math.max(1, ride + cooking), distanceKm: km, source: 'estimate', target };
+    }
+  }
+
   return { minutes: null, distanceKm: null, source: 'unavailable', target };
 }
+
+/** Cooking time assumed for an estimate before the restaurant marks it ready. */
+const ESTIMATE_PREP_MINUTES = 15;
 
 /** Tables carrying a running (rating, totalRatings) pair. */
 const RATEABLE = {

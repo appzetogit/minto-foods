@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@food/componen
 import { Popover, PopoverContent, PopoverTrigger } from "@food/components/ui/popover"
 import { getFoodDisplayOtherPrice, getFoodDisplayPrice, getFoodVariants } from "@food/utils/foodVariants"
 import { canCurrentAdminAction } from "@food/utils/adminRbac"
+import ImageCropDialog from "@food/components/admin/ImageCropDialog"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -62,6 +63,8 @@ const FOOD_FALLBACK_IMAGE =
   )
 
 export default function FoodsList() {
+  // Images waiting to be cropped, one dialog at a time.
+  const [cropQueue, setCropQueue] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
   // Which restaurant's menu is on screen, kept in the URL.
   //
@@ -881,6 +884,17 @@ export default function FoodsList() {
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
+      <ImageCropDialog
+        file={cropQueue[0] || null}
+        aspect={1}
+        title={cropQueue.length > 1 ? `Crop dish photo (${cropQueue.length} left)` : "Crop dish photo"}
+        outputWidth={1000}
+        onDone={(file) => {
+          addImageFiles([file])
+          setCropQueue((q) => q.slice(1))
+        }}
+        onCancel={() => setCropQueue((q) => q.slice(1))}
+      />
       {/* Header Section */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
         <div className="flex items-center gap-3 mb-4">
@@ -1426,8 +1440,9 @@ export default function FoodsList() {
                   accept="image/*"
                   multiple
                   onChange={(e) => {
-                    const files = Array.from(e.target.files || [])
-                    if (files.length) addImageFiles(files)
+                    // Each picked image is cropped square (as menus show it) before it is added.
+                    const files = Array.from(e.target.files || []).filter((f) => String(f.type || "").startsWith("image/"))
+                    if (files.length) setCropQueue((q) => [...q, ...files])
                     // Reset so picking the same file again still fires onChange —
                     // otherwise removing an image and re-adding it does nothing.
                     e.target.value = ""

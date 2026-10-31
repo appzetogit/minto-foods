@@ -10,6 +10,8 @@ import { guardErrorResponses } from './middleware/guardErrorResponses.js';
 import { stripIncomingSignatures } from './middleware/stripIncomingSignatures.js';
 import shareLinksRoutes from './modules/food/public/shareLinks.routes.js';
 import errorHandler from './middleware/errorHandler.js';
+import notFound from './middleware/notFound.js';
+import { mountDeployWebhook } from './middleware/deployWebhook.js';
 import { apiRateLimiter } from './middleware/rateLimit.js';
 import { responseTimeLogger } from './middleware/responseTimeLogger.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
@@ -131,6 +133,13 @@ app.use('/api/v1', shareLinksRoutes);
 if (config.nodeEnv === 'development') {
     app.use('/uploads', express.static(path.resolve(config.uploadStorageRoot)));
 }
+
+// Mounted here rather than at server start so it is registered before the
+// catch-all 404 below, which would otherwise answer /api/deploy first.
+mountDeployWebhook(app);
+
+// Anything no route matched gets a JSON 404 instead of Express's HTML page.
+app.use(notFound);
 
 // Error Handling
 app.use(errorHandler);

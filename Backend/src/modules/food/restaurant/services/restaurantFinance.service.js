@@ -81,7 +81,7 @@ const earnedWindowSql = (restaurantIds, from, to) => Prisma.sql`
       ${to ? Prisma.sql`AND o."createdAt" <= ${to}` : Prisma.empty}
 `;
 
-const ZERO_TOTALS = { orderCount: 0, payout: 0, gross: 0, tax: 0, net: 0 };
+const ZERO_TOTALS = { orderCount: 0, payout: 0, gross: 0, tax: 0, net: 0, refundDeductions: 0 };
 
 /**
  * The money totals for earned orders, per restaurant, summed in the database.
@@ -101,7 +101,8 @@ async function earnedTotalsByRestaurant(restaurantIds, { from = null, to = null,
                    COUNT(*)::int                                   AS "orderCount",
                    COALESCE(SUM(${RESTAURANT_SHARE}), 0)           AS "payout",
                    COALESCE(SUM(COALESCE(t."total", o."total") - o."priceMarkupAmount"), 0) AS "gross",
-                   COALESCE(SUM(COALESCE(t."tax",   o."tax")),   0) AS "tax"
+                   COALESCE(SUM(COALESCE(t."tax",   o."tax")),   0) AS "tax",
+                   COALESCE(SUM(t."restaurantRefundDeduction"), 0) AS "refundDeductions"
             ${ORDERS_JOINED}
             ${earnedWindowSql(ids, from, to)}
             GROUP BY o."restaurantId"
@@ -128,6 +129,8 @@ async function earnedTotalsByRestaurant(restaurantIds, { from = null, to = null,
             tax,
             // What the restaurant invoices on: gross less the tax collected on it.
             net: Math.max(0, gross - tax),
+            // Customer refunds the restaurant agreed to bear, already off payout.
+            refundDeductions: num(row.refundDeductions),
         }];
     }));
 }
@@ -382,6 +385,7 @@ export async function getRestaurantFinance(restaurantId, query = {}) {
         withdrawableBalance: summary.walletBalance,
         netAvailable: summary.netAvailable, // what can ACTUALLY be withdrawn
         totalOrders: lifetime.orderCount,
+        refundDeductions: lifetime.refundDeductions || 0,
         payoutDate: null,
         orders: currentPage.orders,
         pagination: currentPage.pagination,

@@ -38,11 +38,16 @@ export function paidParts(order) {
     const total = toPaise(order?.total);
     let wallet = toPaise(order?.walletAmount);
     let online = toPaise(order?.onlineAmount);
+    let cash = 0;
     if (wallet === 0 && online === 0) {
         if (method === 'wallet') wallet = total;
         else if (method === 'razorpay') online = total;
+        // Cash counts once it was collected (paid on delivery). It can only go
+        // back to the wallet, and only an admin refunds it -- a short item on
+        // a COD order is made good as wallet credit.
+        else if ((method === 'cash' || method === 'cod') && order?.paymentStatus && ['paid', 'refunded'].includes(order.paymentStatus)) cash = total;
     }
-    return { wallet, online };
+    return { wallet, online, cash };
 }
 
 /** What Razorpay should have charged for this order, in paise. */
@@ -53,16 +58,20 @@ export function onlineAmountDuePaise(order) {
 
 function remainingFrom(order, legs) {
     const paid = paidParts(order);
-    const used = { wallet: 0, online: 0 };
+    const used = { wallet: 0, online: 0, cash: 0 };
     for (const leg of legs) {
-        if (COMMITTED.includes(leg.status)) used[leg.source] += toPaise(leg.amount);
+        if (COMMITTED.includes(leg.status)) used[leg.source] = (used[leg.source] || 0) + toPaise(leg.amount);
     }
     return {
         paid,
         wallet: Math.max(0, paid.wallet - used.wallet),
         online: Math.max(0, paid.online - used.online),
+        cash: Math.max(0, paid.cash - used.cash),
     };
 }
+
+/** Paise left to refund; cash only when the caller may refund cash (admin). */
+const leftOf = (remaining, allowCash) => remaining.wallet + remaining.online + (allowCash ? remaining.cash : 0);
 
 /**
  * Split a refund into legs. Online money first: the customer gets real money
@@ -73,10 +82,11 @@ function remainingFrom(order, legs) {
  * @param {'original'|'wallet'} destination
  * @param {boolean} canUseGateway there is a captured Razorpay payment to refund
  */
-export function planRefundLegs(remaining, requestedPaise, destination, canUseGateway) {
+export function planRefundLegs(remaining, requestedPaise, destination, canUseGateway, allowCash = false) {
     const legs = [];
     const fromOnline = Math.min(requestedPaise, remaining.online);
     const fromWallet = Math.min(requestedPaise - fromOnline, remaining.wallet);
+    const fromCash = allowCash ? Math.min(requestedPaise - fromOnline - fromWallet, remaining.cash || 0) : 0;
     if (fromOnline > 0) {
         legs.push({
             source: 'online',
@@ -85,6 +95,7 @@ export function planRefundLegs(remaining, requestedPaise, destination, canUseGat
         });
     }
     if (fromWallet > 0) legs.push({ source: 'wallet', refundTo: 'wallet', paise: fromWallet });
+    if (fromCash > 0) legs.push({ source: 'cash', refundTo: 'wallet', paise: fromCash });
     return legs;
 }
 
@@ -93,7 +104,7 @@ async function lockOrder(tx, orderId) {
     return tx.foodOrder.findUnique({
         where: { id: orderId },
         select: {
-            id: true, order_id: true, userId: true, total: true,
+            id: true, order_id: true, userId: true, total: true, orderStatus: true,
             paymentMethod: true, paymentStatus: true,
             walletAmount: true, onlineAmount: true, razorpayPaymentId: true,
             refundLegs: true,
@@ -118,8 +129,8 @@ export async function syncOrderRefundSummary(orderId) {
         const processed = sum('processed');
         const pending = sum('pending');
         const remaining = remainingFrom(order, legs);
-        const left = remaining.wallet + remaining.online;
-        const paidTotal = remaining.paid.wallet + remaining.paid.online;
+        const left = remaining.wallet + remaining.online + remaining.cash;
+        const paidTotal = remaining.paid.wallet + remaining.paid.online + remaining.paid.cash;
         const anyFailed = legs.some((l) => l.status === 'failed');
 
         let refundStatus = 'none';
@@ -255,6 +266,10 @@ async function executeGatewayLeg(leg, order) {
  * @param {string} [args.reason]
  * @param {boolean} [args.strict] throw when the amount is more than is left
  *        (admin); otherwise refund what is left
+ * @param {boolean} [args.allowCash] a collected COD payment may be refunded,
+ *        to the wallet (admin only)
+ * @param {'platform'|'restaurant'} [args.chargedTo] who bears the refund:
+ *        the restaurant (taken off its payout) or the platform
  * @returns {Promise<{legs: object[], order: object|null, refundedPaise: number, reason?: string}>}
  */
 export async function refundOrder({
@@ -265,8 +280,13 @@ export async function refundOrder({
     initiatedById = null,
     reason = '',
     strict = false,
+    allowCash = false,
+    chargedTo = 'platform',
 }) {
     const id = String(orderId);
+    if (!['platform', 'restaurant'].includes(chargedTo)) {
+        throw new ValidationError('A refund is charged to the platform or the restaurant');
+    }
     if (!['original', 'wallet'].includes(destination)) {
         throw new ValidationError('Refund destination must be original or wallet');
     }
@@ -277,9 +297,12 @@ export async function refundOrder({
         if (!['paid', 'refunded'].includes(order.paymentStatus)) {
             return { order, legs: [], reason: order.paymentMethod === 'cash' ? 'cash_payment' : `payment_${order.paymentStatus}` };
         }
+        if (order.paymentMethod === 'cash' && !allowCash) {
+            return { order, legs: [], reason: 'cash_payment' };
+        }
 
         const remaining = remainingFrom(order, order.refundLegs);
-        const left = remaining.wallet + remaining.online;
+        const left = leftOf(remaining, allowCash);
         if (left <= 0) return { order, legs: [], reason: 'nothing_left_to_refund' };
 
         let requested = left;
@@ -292,8 +315,10 @@ export async function refundOrder({
             }
         }
 
-        const canUseGateway = Boolean(order.razorpayPaymentId);
-        const plan = planRefundLegs(remaining, requested, destination, canUseGateway);
+        // Without gateway keys an online refund cannot be made; it goes to the
+        // wallet instead of failing and leaving the customer with nothing.
+        const canUseGateway = Boolean(order.razorpayPaymentId) && isRazorpayConfigured();
+        const plan = planRefundLegs(remaining, requested, destination, canUseGateway, allowCash);
         const legs = [];
         for (const step of plan) {
             legs.push(
@@ -309,6 +334,7 @@ export async function refundOrder({
                         reason: String(reason || '').slice(0, 500),
                         initiatedBy: String(initiatedBy || 'system').slice(0, 16),
                         initiatedById: initiatedById ? String(initiatedById) : null,
+                        chargedTo,
                     },
                 }),
             );

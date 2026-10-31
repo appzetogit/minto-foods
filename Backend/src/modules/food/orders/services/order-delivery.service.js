@@ -737,7 +737,8 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
     deliveryStatus: updated.deliveryState?.status,
   });
 
-  return updated;
+  // What the rider app shows next: the recipient, not the account holder.
+  return sanitizeOrderForDeliveryPartner(updated);
 }
 
 export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImageUrl) {
@@ -794,7 +795,7 @@ export async function confirmPickupDelivery(orderId, deliveryPartnerId, billImag
     billImageUrl: billImageUrl || null,
   });
 
-  return updated;
+  return sanitizeOrderForDeliveryPartner(updated);
 }
 
 export async function confirmReachedDropDelivery(orderId, deliveryPartnerId) {

@@ -104,6 +104,66 @@ export const updatePowerScanningSettings = async (payload = {}) => {
 };
 
 /** The restaurant's new-order accept time, in seconds; minutes kept for older admin builds. */
+// ─── Pausing orders ─────────────────────────────────────────────────────────
+
+const DEFAULT_PAUSE_MESSAGE = 'We are not taking orders right now. Please try again a little later.';
+
+const pausePayload = (row) => {
+    const until = row?.ordersPausedUntil ? new Date(row.ordersPausedUntil) : null;
+    const active = Boolean(row?.ordersPaused) && (!until || until.getTime() > Date.now());
+    return {
+        paused: Boolean(row?.ordersPaused),
+        active,
+        zoneIds: Array.isArray(row?.ordersPausedZoneIds) ? row.ordersPausedZoneIds : [],
+        message: row?.ordersPausedMessage || '',
+        until,
+    };
+};
+
+export const getOrderPause = async () => pausePayload(await loadRow());
+
+/**
+ * Turn ordering off (all zones, or the zones given) or back on. While paused,
+ * pricing and placing an order are refused with the message. Nothing else is
+ * touched: restaurants keep their own on/off, and orders already placed go on.
+ */
+export const updateOrderPause = async ({ paused, zoneIds, message, until } = {}) => {
+    const on = paused === true || paused === 'true';
+    const ids = Array.isArray(zoneIds) ? [...new Set(zoneIds.map(String).filter((id) => /^[a-f0-9]{24}$/i.test(id)))] : [];
+    const text = String(message || '').trim().slice(0, 300);
+    let resume = null;
+    if (on && until) {
+        resume = new Date(until);
+        if (Number.isNaN(resume.getTime())) throw new ValidationError('Invalid resume time');
+        if (resume.getTime() <= Date.now()) throw new ValidationError('The resume time must be in the future');
+    }
+    const row = await loadRow();
+    const updated = await prisma.foodBusinessSettings.update({
+        where: { id: row.id },
+        data: {
+            ordersPaused: on,
+            ordersPausedZoneIds: on ? ids : [],
+            ordersPausedMessage: on ? text : '',
+            ordersPausedUntil: on ? resume : null,
+        },
+    });
+    return pausePayload(updated);
+};
+
+/**
+ * Refuse an order while ordering is paused for its zone. Called by pricing,
+ * so the cart shows the message before the customer reaches Place Order.
+ */
+export const assertOrderingNotPaused = async (zoneIds = []) => {
+    const pause = pausePayload(await prisma.foodBusinessSettings.findFirst({
+        select: { ordersPaused: true, ordersPausedZoneIds: true, ordersPausedMessage: true, ordersPausedUntil: true },
+    }));
+    if (!pause.active) return;
+    const zones = (Array.isArray(zoneIds) ? zoneIds : [zoneIds]).filter(Boolean).map(String);
+    const hit = !pause.zoneIds.length || zones.some((z) => pause.zoneIds.includes(z));
+    if (hit) throw new ValidationError(pause.message || DEFAULT_PAUSE_MESSAGE);
+};
+
 export const MIN_ACCEPT_SECONDS = 30;
 export const MAX_ACCEPT_SECONDS = 600;
 

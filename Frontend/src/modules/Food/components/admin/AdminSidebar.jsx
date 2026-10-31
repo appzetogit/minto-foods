@@ -48,6 +48,8 @@ import {
   PiggyBank,
   Lock,
   TrendingUp,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react"
 import { cn } from "@food/utils/utils"
 import { Input } from "@food/components/ui/input"
@@ -136,6 +138,9 @@ const SIDEBAR_LABEL_BY_PATH = buildLabelDictionary(adminSidebarMenu)
 export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange }) {
   const location = useLocation()
   const [searchQuery, setSearchQuery] = useState("")
+  // The admin's own order of the sidebar sections, kept in this browser.
+  const [reordering, setReordering] = useState(false)
+  const [sectionOrder, setSectionOrder] = useState([])
   const [badges, setBadges] = useState({})
   const [restaurantSubscriptionEnabled, setRestaurantSubscriptionEnabled] = useState(true)
   const [codControlEnabled, setCodControlEnabled] = useState(true)
@@ -499,16 +504,59 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
   // expandedSections state is initialized above in getInitialStates consolidation
 
 
+  const orderStorageKey = `admin_sidebar_order_${adminUser?._id || adminUser?.id || "me"}`
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(orderStorageKey) || "[]")
+      setSectionOrder(Array.isArray(saved) ? saved : [])
+    } catch {
+      setSectionOrder([])
+    }
+  }, [orderStorageKey])
+
+  const saveSectionOrder = (next) => {
+    setSectionOrder(next)
+    try {
+      if (next.length) localStorage.setItem(orderStorageKey, JSON.stringify(next))
+      else localStorage.removeItem(orderStorageKey)
+    } catch {
+      // Private mode or storage off: the order lasts this visit only.
+    }
+  }
+
+  // Sections in the saved order; anything new or not yet ordered keeps its place after.
+  const orderedMenuData = useMemo(() => {
+    if (!sectionOrder.length) return menuData
+    const rank = (item) => {
+      const i = item?.type === "section" ? sectionOrder.indexOf(item.label) : -1
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i
+    }
+    return menuData
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => rank(a.item) - rank(b.item) || a.index - b.index)
+      .map(({ item }) => item)
+  }, [menuData, sectionOrder])
+
+  const moveSection = (label, delta) => {
+    const labels = orderedMenuData.filter((i) => i?.type === "section").map((i) => i.label)
+    const from = labels.indexOf(label)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= labels.length) return
+    const next = [...labels]
+    ;[next[from], next[to]] = [next[to], next[from]]
+    saveSectionOrder(next)
+  }
+
   // Filter menu items based on search query
   const filteredMenuData = useMemo(() => {
     if (!searchQuery.trim()) {
-      return menuData
+      return orderedMenuData
     }
 
     const query = searchQuery.toLowerCase().trim()
     const filtered = []
 
-    menuData.forEach((item) => {
+    orderedMenuData.forEach((item) => {
       if (!item) return
       if (item.type === "link") {
         if (item.label.toLowerCase().includes(query)) {
@@ -547,7 +595,7 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
     })
 
     return filtered
-  }, [menuData, searchQuery])
+  }, [orderedMenuData, searchQuery])
 
   // Auto-expand sections with matches when searching
   useEffect(() => {
@@ -986,6 +1034,27 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
           )}
         </div>
 
+        {!isCollapsed && !searchQuery.trim() ? (
+          <div className="px-4 pb-1 flex items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => setReordering((v) => !v)}
+              className="text-neutral-200 hover:text-white underline-offset-2 hover:underline"
+            >
+              {reordering ? "Done reordering" : "Reorder sections"}
+            </button>
+            {reordering && sectionOrder.length ? (
+              <button
+                type="button"
+                onClick={() => saveSectionOrder([])}
+                className="text-neutral-300 hover:text-white underline-offset-2 hover:underline"
+              >
+                Reset
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Navigation Menu */}
         <nav className="admin-sidebar-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-3 space-y-2">
           {filteredMenuData.length === 0 && searchQuery.trim() ? (
@@ -1012,10 +1081,30 @@ export default function AdminSidebar({ isOpen = false, onClose, onCollapseChange
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
                     {!isCollapsed && (
-                      <div className="px-3 py-2 mb-2">
+                      <div className="px-3 py-2 mb-2 flex items-center justify-between gap-2">
                         <span className="text-neutral-200 font-bold text-sm uppercase tracking-wider text-left">
                           {item.label}
                         </span>
+                        {reordering && !searchQuery.trim() ? (
+                          <span className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => moveSection(item.label, -1)}
+                              className="p-1 rounded bg-teal-800/60 text-white hover:bg-teal-900"
+                              aria-label={`Move ${item.label} up`}
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveSection(item.label, 1)}
+                              className="p-1 rounded bg-teal-800/60 text-white hover:bg-teal-900"
+                              aria-label={`Move ${item.label} down`}
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        ) : null}
                       </div>
                     )}
                     <div className="space-y-1">

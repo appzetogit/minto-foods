@@ -38,6 +38,9 @@ const start = async () => {
         if (config.redisEnabled) {
             await connectRedis();
         }
+        // The watchdog and expiry change orders; without this nobody was told live.
+        const { initSocketEmitter } = await import('../src/config/socket.js');
+        await initSocketEmitter();
 
         // Both halves of the order watchdog. This used to be a single call here
         // and nowhere else, so it ran once when the scheduler booted and never

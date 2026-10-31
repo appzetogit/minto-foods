@@ -1,3 +1,4 @@
+import { assertOrderingNotPaused } from '../../admin/services/businessSettings.service.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
@@ -645,6 +646,13 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   const deliveryAddress = normalizeDeliveryAddress(
     await resolveDeliveryAddress(userId, dto),
   );
+
+  // Ordering paused by the admin, everywhere or in this restaurant's zone.
+  // Skipped with the availability check: an order already paid for and only
+  // being confirmed must go through.
+  if (!options.skipAvailabilityCheck) {
+    await assertOrderingNotPaused([restaurant?.zoneId, deliveryAddress?.zoneId]);
+  }
 
   const resolvedItems = await resolveOrderCartItems(dto.restaurantId, dto.items);
   const items = resolvedItems.map((item) => ({

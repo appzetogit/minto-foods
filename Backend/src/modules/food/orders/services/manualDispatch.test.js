@@ -8,6 +8,7 @@ import { createOrder } from './order.service.js';
 import { tryAutoAssign, processDispatchTimeout, getDispatchSettings, updateDispatchSettings } from './order-dispatch.service.js';
 import {
     assignRiderManually,
+    assignExternalRider,
     clearDispatchModeCache,
     listEligibleRiders,
     listManualQueue,
@@ -251,6 +252,26 @@ test('switching the zone back to automatic offers the waiting orders to riders',
     assert.equal(row.awaitingManualAt, null);
     assert.ok(row.dispatchOffers.some((o) => o.action === 'offered'), 'offered to nearby riders');
     await setZoneDispatchMode(zoneId, 'manual');
+});
+
+test('an outside rider (Rapido) can take an order; customers see them as the rider', async () => {
+    const id = await confirmedOrder();
+    await assert.rejects(() => assignExternalRider(id, 'admin-test', { name: 'Ravi', phone: '12345' }), /10-digit/);
+    const res = await assignExternalRider(id, 'admin-test', { provider: 'Rapido', name: 'Ravi Kumar', phone: '+91 98765 43210' });
+    assert.equal(res.assignedTo.phone, '9876543210');
+
+    const row = await orderRow(id);
+    assert.equal(row.dispatchStatus, 'accepted');
+    assert.equal(row.dispatchDeliveryPartnerId, null);
+    assert.equal(row.externalRiderName, 'Ravi Kumar');
+    assert.ok(row.dispatchOffers.every((o) => o.action !== 'offered'), 'nobody else is still asked');
+
+    const { toOrder, orderInclude } = await import('../order.mapper.js');
+    const shaped = toOrder(await prisma.foodOrder.findUnique({ where: { id }, include: orderInclude }));
+    assert.equal(shaped.dispatch.deliveryPartnerId.name, 'Ravi Kumar');
+    assert.equal(shaped.dispatch.deliveryPartnerId.provider, 'Rapido');
+
+    await assert.rejects(() => assignExternalRider(id, 'admin-test', { name: 'X Y', phone: '9876543211' }), /already accepted/);
 });
 
 test('the global setting is saved (it used to always save auto)', async () => {

@@ -480,6 +480,40 @@ export const initSocket = async (server) => {
  * Returns the initialized Socket.IO instance.
  * @returns {Server | null}
  */
+/**
+ * Socket.IO for a process with no socket server of its own -- the BullMQ
+ * worker and the scheduler.
+ *
+ * Without it getIO() was null there, so everything those processes emit was
+ * dropped: a rider's offer timing out, an order expiring, a stalled order
+ * cancelled. The admin panel only saw those changes on a manual refresh. This
+ * server listens on nothing; through the Redis adapter its broadcasts reach
+ * the clients connected to the socket process.
+ */
+export const initSocketEmitter = async () => {
+    if (io) return io;
+    if (!(config.redisEnabled && config.redisUrl)) {
+        logger.warn('Socket emitter not started: Redis is off, so live updates from this process are not sent');
+        return null;
+    }
+    try {
+        const { createAdapter } = await import('@socket.io/redis-adapter');
+        const { createClient } = await import('redis');
+        const pubClient = createClient({ url: config.redisUrl });
+        const subClient = pubClient.duplicate();
+        pubClient.on('error', (err) => logger.error(`Socket emitter Redis pub client: ${err.message}`));
+        subClient.on('error', (err) => logger.error(`Socket emitter Redis sub client: ${err.message}`));
+        await Promise.all([pubClient.connect(), subClient.connect()]);
+        const emitter = new Server();
+        emitter.adapter(createAdapter(pubClient, subClient));
+        io = emitter;
+        logger.info('Socket emitter ready: live updates from this process go out through Redis');
+    } catch (err) {
+        logger.warn(`Socket emitter not started: ${err.message}`);
+    }
+    return io;
+};
+
 export const getIO = () => {
     if (!io) {
         logger.warn('Socket.IO not initialized');

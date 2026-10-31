@@ -14,7 +14,6 @@ import { expireExpiredOffers } from './src/modules/food/admin/services/admin.ser
 import { syncExpiredFssaiNotifications } from './src/modules/food/restaurant/services/fssaiExpiry.service.js';
 
 import { logger } from './src/utils/logger.js';
-import { mountDeployWebhook } from './src/middleware/deployWebhook.js';
 import { initializeFirebaseRealtime } from './src/config/firebase.js';
 import { ensureUploadStorageReady } from './src/services/storage.service.js';
 
@@ -164,8 +163,6 @@ const startServer = async () => {
         } else if (config.bullmqEnabled && !config.serverQueueBootstrapEnabled) {
             logger.info('BullMQ queue bootstrap disabled for this server process.');
         }
-
-        mountDeployWebhook(app);
 
         server = httpServer.listen(config.port, config.host, () => {
             logger.info(`Server running in ${config.nodeEnv} mode on ${config.host}:${config.port}`);

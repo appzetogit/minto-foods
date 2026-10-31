@@ -9,6 +9,7 @@ import { Button } from "@food/components/ui/button"
 import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
 import { toast } from "sonner"
 import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
+import LocationPinMap from "@food/components/admin/restaurant/LocationPinMap"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => { console.warn(...args) }
 const debugError = (...args) => { console.error(...args) }
@@ -434,6 +435,10 @@ export default function AddRestaurant() {
     if (!step1.zoneId?.trim()) errors.push("Service zone is required")
     if (!step1.location?.area?.trim()) errors.push("Area/Sector/Locality is required")
     if (!step1.location?.city?.trim()) errors.push("City is required")
+    // Fees, reach and rider dispatch all measure from this point.
+    if (!Number.isFinite(Number(step1.location?.latitude)) || step1.location?.latitude === "" || !Number.isFinite(Number(step1.location?.longitude)) || step1.location?.longitude === "") {
+      errors.push("Pin the restaurant on the map (or pick an address from search)")
+    }
     return errors
   }
 
@@ -1063,9 +1068,28 @@ export default function AddRestaurant() {
           )}
           
           <p className="text-[11px] text-gray-500 mt-1">
-            Search to auto-fill Area, City, State, Pincode and coordinates.
+            Search to auto-fill Area, City, State, Pincode and coordinates, then fix the pin on the map.
           </p>
         </div>
+        <LocationPinMap
+          latitude={step1.location?.latitude}
+          longitude={step1.location?.longitude}
+          onChange={(spot) =>
+            setStep1((prev) => ({
+              ...prev,
+              location: {
+                ...prev.location,
+                latitude: spot.latitude,
+                longitude: spot.longitude,
+                ...(spot.formattedAddress ? { formattedAddress: spot.formattedAddress, addressLine1: spot.formattedAddress } : {}),
+                ...(spot.area ? { area: spot.area } : {}),
+                ...(spot.city ? { city: spot.city } : {}),
+                ...(spot.state ? { state: spot.state } : {}),
+                ...(spot.pincode ? { pincode: spot.pincode } : {}),
+              },
+            }))
+          }
+        />
         <div>
           <Label className="text-xs text-gray-700">Service zone*</Label>
           <select

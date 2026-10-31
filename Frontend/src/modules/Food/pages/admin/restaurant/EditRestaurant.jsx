@@ -11,6 +11,7 @@ import RestaurantOpeningHours from "@food/components/admin/restaurant/Restaurant
 import RestaurantBusinessEditor from "@food/components/admin/restaurant/RestaurantBusinessEditor"
 import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
 import { HighlightBadgeSelect } from "@food/components/admin/restaurant/HighlightBadges"
+import LocationPinMap from "@food/components/admin/restaurant/LocationPinMap"
 
 const debugError = (..._args) => {}
 
@@ -498,7 +499,7 @@ export default function EditRestaurant() {
       return
     }
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !locationForm.formattedAddress) {
-      alert("Please select a location from dropdown")
+      alert("Pick the location from the search dropdown or drop the pin on the map")
       return
     }
 
@@ -908,8 +909,27 @@ export default function EditRestaurant() {
                     style={{ color: "#000", WebkitTextFillColor: "#000" }}
                   />
                   <p className="text-[11px] text-slate-500 mt-1">
-                    Select a suggestion from the dropdown to fill address + coordinates.
+                    Select a suggestion from the dropdown to fill address + coordinates, or drop the pin on the map.
                   </p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <LocationPinMap
+                    latitude={locationForm.latitude}
+                    longitude={locationForm.longitude}
+                    onChange={(spot) =>
+                      setLocationForm((prev) => ({
+                        ...prev,
+                        latitude: spot.latitude,
+                        longitude: spot.longitude,
+                        ...(spot.formattedAddress ? { formattedAddress: spot.formattedAddress, addressLine1: spot.formattedAddress } : {}),
+                        ...(spot.area ? { area: spot.area } : {}),
+                        ...(spot.city ? { city: spot.city } : {}),
+                        ...(spot.state ? { state: spot.state } : {}),
+                        ...(spot.pincode ? { pincode: spot.pincode } : {}),
+                      }))
+                    }
+                  />
                 </div>
 
                 <div className="md:col-span-2">

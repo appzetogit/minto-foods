@@ -1100,6 +1100,18 @@ const enrichRestaurantProfileWithAvailability = async (profile, doc) => {
 export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingOrders) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
 
+    // An admin took it offline (say its app was not working): only an admin
+    // puts it back.
+    if (isAcceptingOrders) {
+        const row = await prisma.foodRestaurant.findUnique({
+            where: { id: String(restaurantId) },
+            select: { offlineByAdmin: true },
+        });
+        if (row?.offlineByAdmin) {
+            throw new ValidationError('Minto has taken your restaurant offline. Please contact Minto support to go back online.');
+        }
+    }
+
     // Offline = a manual force-offline. Online = clear the override and go back
     // to following the outlet timings.
     const { count } = await prisma.foodRestaurant.updateMany({

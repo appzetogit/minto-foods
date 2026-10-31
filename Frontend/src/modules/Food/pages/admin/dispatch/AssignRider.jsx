@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Loader2, RefreshCw, X, MapPin, Bike, AlertTriangle, Search } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
+import { keepSocketAuthorised } from "@/services/api/axios"
 
 /**
  * Assign Rider: the manual-dispatch queue.
@@ -82,6 +83,7 @@ export default function AssignRider() {
       },
       reconnection: true,
     })
+    keepSocketAuthorised(socket, "admin")
     const refresh = () => fetchRef.current(true)
     socket.on("order_needs_assignment", (p) => {
       if (p?.reason === "declined" || p?.reason === "timeout") toast.warning(p.message)
@@ -214,6 +216,8 @@ export function RiderPicker({ order, onClose, onAssigned }) {
   const [q, setQ] = useState("")
   const [search, setSearch] = useState("")
   const [saving, setSaving] = useState("")
+  // An outside rider (Rapido, Shadowfax...) when no Minto rider can take it.
+  const [outside, setOutside] = useState(null) // null | { provider, name, phone }
   // The server caps the online list and pages the offline one.
   const [onlineCapped, setOnlineCapped] = useState(0)
   const [offline, setOffline] = useState(null)
@@ -279,6 +283,21 @@ export function RiderPicker({ order, onClose, onAssigned }) {
     }
   }
 
+  const assignOutside = async () => {
+    if (!outside?.name?.trim() || outside.name.trim().length < 2) return toast.error("Enter the rider's name")
+    if (!/^[6-9]\d{9}$/.test(outside.phone || "")) return toast.error("Enter a 10-digit mobile number")
+    try {
+      setSaving("outside")
+      const res = await adminAPI.assignExternalRider(order.id, outside)
+      toast.success(res?.data?.message || "Outside rider assigned")
+      onAssigned?.()
+    } catch (e) {
+      toast.error(errText(e, "Could not assign"))
+    } finally {
+      setSaving("")
+    }
+  }
+
   const needle = q.trim().toLowerCase()
   const shown = needle ? riders.filter((r) => `${r.name} ${r.phone}`.toLowerCase().includes(needle)) : riders
 
@@ -307,6 +326,62 @@ export function RiderPicker({ order, onClose, onAssigned }) {
           <label className="text-xs text-slate-600 flex items-center gap-1 whitespace-nowrap">
             <input type="checkbox" checked={showOffline} onChange={(e) => setShowOffline(e.target.checked)} /> Show offline
           </label>
+        </div>
+
+        <div className="rounded-lg border border-dashed border-slate-300 p-3 text-sm">
+          {outside ? (
+            <div className="space-y-2">
+              <p className="font-medium text-slate-800">Outside rider</p>
+              <p className="text-xs text-slate-500">
+                For emergencies. The customer and restaurant see this name and number as the rider. They have no app, so
+                mark the order picked up and delivered from Orders.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input
+                  value={outside.provider}
+                  onChange={(e) => setOutside({ ...outside, provider: e.target.value })}
+                  placeholder="From (Rapido, Shadowfax…)"
+                  maxLength={40}
+                  className="px-3 py-2 rounded-lg border border-slate-300"
+                />
+                <input
+                  value={outside.name}
+                  onChange={(e) => setOutside({ ...outside, name: e.target.value })}
+                  placeholder="Rider name"
+                  maxLength={80}
+                  className="px-3 py-2 rounded-lg border border-slate-300"
+                />
+                <input
+                  value={outside.phone}
+                  onChange={(e) => setOutside({ ...outside, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                  placeholder="10-digit mobile"
+                  inputMode="numeric"
+                  className="px-3 py-2 rounded-lg border border-slate-300"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={saving === "outside"}
+                  onClick={assignOutside}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:bg-slate-300"
+                >
+                  {saving === "outside" ? "…" : "Assign outside rider"}
+                </button>
+                <button type="button" onClick={() => setOutside(null)} className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setOutside({ provider: "", name: "", phone: "" })}
+              className="text-blue-700 font-medium hover:underline"
+            >
+              + Assign an outside rider (Rapido, Shadowfax…)
+            </button>
+          )}
         </div>
 
         {loading ? (

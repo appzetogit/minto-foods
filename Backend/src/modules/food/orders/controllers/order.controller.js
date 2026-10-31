@@ -499,7 +499,12 @@ export async function processRefundAdminController(req, res, next) {
         // 'original' (default): online money back through Razorpay, wallet
         // money to the wallet. 'wallet': all of it to the wallet, instantly.
         const destination = req.body?.destination === 'wallet' ? 'wallet' : 'original';
-        const result = await orderService.processRefundAdmin(orderId, amount, adminId, destination);
+        // chargedTo: 'restaurant' (comes off its payout) or 'platform'.
+        const chargedTo = req.body?.chargedTo === 'restaurant' ? 'restaurant' : 'platform';
+        const result = await orderService.processRefundAdmin(orderId, amount, adminId, destination, {
+            chargedTo,
+            reason: req.body?.reason,
+        });
         return sendResponse(res, 200, 'Refund processed successfully', result);
     } catch (err) {
         next(err);

@@ -120,7 +120,7 @@ export default function SupportChat({
     setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
   }, [])
 
-  useChatSocket({ token, onMessage: handleIncoming })
+  useChatSocket({ token, module: contextModule, onMessage: handleIncoming })
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" })

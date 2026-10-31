@@ -773,6 +773,8 @@ model FoodRestaurant {
 
   /// Manual Online/Offline toggle. false = force offline regardless of outlet timings.
   isAcceptingOrders    Boolean @default(true)
+  /// Taken offline by an admin: the restaurant app cannot turn it back on.
+  offlineByAdmin    Boolean @default(false)
   /// Legacy, no longer honoured. Cleared whenever the toggle is updated.
   outsideHoursOverride Boolean @default(false)
 
@@ -1364,6 +1366,8 @@ model Settlement {
 enum RefundSource {
   wallet
   online
+  /// A COD payment collected on delivery; refunded to the wallet by an admin.
+  cash
 }
 
 /// One movement of refund money for an order. An order can have several: the
@@ -1391,6 +1395,8 @@ model FoodOrderRefund {
   /// user | restaurant | admin | system
   initiatedBy   String  @default("system") @db.VarChar(16)
   initiatedById String? @db.VarChar(24)
+  /// platform | restaurant: who bears it. A restaurant's share comes off its payout.
+  chargedTo     String  @default("platform") @db.VarChar(16)
 
   processedAt DateTime?
   createdAt   DateTime  @default(now())
@@ -1495,6 +1501,11 @@ model FoodOrder {
   // ── dispatch ──
   dispatchStatus            DispatchStatus @default(unassigned)
   dispatchDeliveryPartnerId String?        @db.VarChar(24)
+  /// An outside rider (Rapido, Shadowfax...) an admin gave the order to. No
+  /// rider account: the admin moves the order along by hand.
+  externalRiderProvider String? @db.VarChar(40)
+  externalRiderName     String? @db.VarChar(80)
+  externalRiderPhone    String? @db.VarChar(20)
   dispatchAssignedAt        DateTime?
   dispatchAcceptedAt        DateTime?
   dispatchingAt             DateTime?
@@ -1741,6 +1752,8 @@ model FoodTransaction {
   taxAmount                        Decimal @default(0) @db.Decimal(14, 2)
   adminDiscountShare               Decimal @default(0) @db.Decimal(14, 2)
   restaurantDiscountShare          Decimal @default(0) @db.Decimal(14, 2)
+  /// Refunds the restaurant bears, already taken off restaurantShare.
+  restaurantRefundDeduction        Decimal @default(0) @db.Decimal(14, 2)
   discountAdminBearPercentage      Decimal @default(0) @db.Decimal(5, 2)
   discountRestaurantBearPercentage Decimal @default(0) @db.Decimal(5, 2)
 
@@ -2592,6 +2605,13 @@ model FoodBusinessSettings {
   /// How far a customer may see and order from, in km. Null means no limit.
   /// A restaurant's own deliveryRadiusKm overrides this for that restaurant.
   discoveryRadiusKm Decimal? @db.Decimal(6, 2)
+
+  /// Ordering stopped for a while: every zone, or only ordersPausedZoneIds
+  /// when that is not empty. Lifts by itself at ordersPausedUntil, if set.
+  ordersPaused        Boolean   @default(false)
+  ordersPausedZoneIds String[]  @default([])
+  ordersPausedMessage String    @default("") @db.VarChar(300)
+  ordersPausedUntil   DateTime?
 
   userThemeColor       String @default("#FA0272")
   userFontFamily       String @default("Poppins")

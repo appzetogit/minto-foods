@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { updateDispatchSettings } from '../services/order-dispatch.service.js';
 import {
     assignRiderManually,
+    assignExternalRider,
     listEligibleRiders,
     listManualQueue,
     listZoneDispatchModes,
@@ -58,6 +59,16 @@ export const assignRider = wrap(async (req, res) => {
         { force: body.force === true, reason: body.reason || '' },
     );
     ok(res, result, `Assigned to ${result.assignedTo.name}. Waiting for them to accept.`);
+});
+
+export const assignOutsideRider = wrap(async (req, res) => {
+    const body = req.body || {};
+    const result = await assignExternalRider(requireId(req.params.id, 'order'), req.user?.userId, {
+        provider: body.provider,
+        name: body.name,
+        phone: body.phone,
+    });
+    ok(res, result, `Assigned to ${result.assignedTo.name}`);
 });
 
 export const unassignRider = wrap(async (req, res) =>

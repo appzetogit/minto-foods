@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck } from "lucide-react"
+import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck, UserPlus } from "lucide-react"
+import { refundPicture } from "./RefundModal"
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -40,6 +41,7 @@ export default function OrdersTable({
   onCancelOrder,
   onDeassignAndResend,
   onResendNotification,
+  onAssignRider,
   onMarkDelivered,
   actionLoadingOrderId,
   deletingOrderId,
@@ -517,6 +519,19 @@ export default function OrdersTable({
                           <span>Resend</span>
                         </button>
                       ) : null}
+                      {/* Manual assign next to Resend: give the order to a chosen rider
+                          when nobody accepts. Works in automatic zones too. */}
+                      {onAssignRider && canResendNotification(order) ? (
+                        <button
+                          onClick={() => onAssignRider(order)}
+                          disabled={actionLoadingOrderId === (order.id || order.orderId)}
+                          className="inline-flex items-center justify-center gap-1 rounded px-3 py-1.5 text-xs font-medium transition-colors bg-teal-600 text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          title="Assign this order to a rider yourself"
+                        >
+                          <UserPlus className="h-3.5 w-3.5" />
+                          <span>Assign</span>
+                        </button>
+                      ) : null}
                       {onDeassignAndResend && !isFinished(order) ? (
                         <button
                           onClick={() =>
@@ -656,57 +671,32 @@ export default function OrdersTable({
                           )}
                         </button>
                       )}
-                      {/* Show Refund button or Refunded status for cancelled orders with Online/Wallet payment (restaurant or user cancelled) */}
+                      {/* Refund: any paid order with money left to return -- cancelled or
+                          delivered (an item missing), online, wallet or collected cash. Repeat
+                          partial refunds are allowed until nothing is left. */}
                       {(() => {
-                        // Check if order is cancelled by restaurant or user
-                        const isCancelled = order.orderStatus === "Cancelled by Restaurant" ||
-                          order.orderStatus === "Cancelled" ||
-                          order.orderStatus === "Cancelled by User" ||
-                          (order.status === "cancelled" && (order.cancelledBy === "user" || order.cancelledBy === "restaurant"));
-
-                        // Check if payment type is Online or Wallet (not Cash on Delivery)
-                        const paymentMethod = order.payment?.method || order.paymentMethod;
-                        const isOnlinePayment = order.paymentType === "Online" ||
-                          (order.paymentType !== "Cash on Delivery" &&
-                            order.payment?.method !== "cash" &&
-                            order.payment?.method !== "cod" &&
-                            (order.paymentMethod === "razorpay" ||
-                              order.paymentMethod === "online" ||
-                              order.payment?.paymentMethod === "razorpay" ||
-                              order.payment?.method === "razorpay" ||
-                              order.payment?.method === "online"));
-
-                        const isWalletPayment = order.paymentType === "Wallet" || paymentMethod === "wallet";
-
-                        return isCancelled && (isOnlinePayment || isWalletPayment);
-                      })() && (
-                          <>
-                            {order.refundStatus === 'processed' || order.refundStatus === 'initiated' ? (
-                              <span className={`px-3 py-1.5 rounded-md text-xs font-medium ${order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                  ? "bg-purple-100 text-purple-700"
-                                  : "bg-emerald-100 text-emerald-700"
-                                }`}>
-                                {order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                  ? "Wallet Refunded"
-                                  : "Refunded"}
-                              </span>
-                            ) : onRefund ? (
-                              <button
-                                onClick={() => onRefund(order)}
-                                className={`px-3 py-1.5 rounded-md text-white text-xs font-medium hover:opacity-90 transition-colors shadow-sm flex items-center gap-1.5 ${order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                    ? "bg-purple-600 hover:bg-purple-700"
-                                    : "bg-blue-600 hover:bg-blue-700"
-                                  }`}
-                                title={order.paymentType === "Wallet" || order.payment?.method === "wallet"
-                                  ? "Process Wallet Refund (Add to user wallet)"
-                                  : "Process Refund via Razorpay"}
-                              >
-                                <span className="text-sm">₹</span>
-                                <span>Refund</span>
-                              </button>
-                            ) : null}
-                          </>
-                        )}
+                        const picture = refundPicture(order)
+                        if (picture.left > 0 && onRefund) {
+                          return (
+                            <button
+                              onClick={() => onRefund(order)}
+                              className="px-3 py-1.5 rounded-md text-white text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700"
+                              title="Refund all or part of this order"
+                            >
+                              <span className="text-sm">₹</span>
+                              <span>{picture.legs.length ? "Refund more" : "Refund"}</span>
+                            </button>
+                          )
+                        }
+                        if (picture.legs.some((l) => l.status === "processed" || l.status === "pending")) {
+                          return (
+                            <span className="px-3 py-1.5 rounded-md text-xs font-medium bg-emerald-100 text-emerald-700">
+                              Refunded
+                            </span>
+                          )
+                        }
+                        return null
+                      })()}
                     </div>
                   </td>
                 )}

@@ -11,5 +11,10 @@
  * off, the same calls are silent no-ops. Either way nothing fires unless this
  * runs, so it must be started together with the flag.
  */
+import { initSocketEmitter } from '../../config/socket.js';
 import './order.worker.js';
 import './tracking.worker.js';
+
+// Jobs here change orders (offer timeouts, expiry); the admin panel and apps
+// hear about it only if this process can emit.
+void initSocketEmitter();

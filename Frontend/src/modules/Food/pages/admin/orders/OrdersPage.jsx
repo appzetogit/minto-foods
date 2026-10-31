@@ -4,6 +4,7 @@ import io from "socket.io-client"
 import { FileText, Package } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
+import { keepSocketAuthorised } from "@/services/api/axios"
 import { toast } from "sonner"
 
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
@@ -13,6 +14,7 @@ import FilterPanel from "@food/components/admin/orders/FilterPanel"
 import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import RefundModal from "@food/components/admin/orders/RefundModal"
+import { RiderPicker } from "@food/pages/admin/dispatch/AssignRider"
 import { useOrdersManagement } from "@food/components/admin/orders/useOrdersManagement"
 import { Loader2 } from "lucide-react"
 import { OrdersDashboardSkeleton } from "@food/components/ui/loading-skeletons"
@@ -85,6 +87,8 @@ export default function OrdersPage({ statusKey = "all" }) {
   const [processingActionOrderId, setProcessingActionOrderId] = useState(null)
   const [deletingOrderId, setDeletingOrderId] = useState(null)
   const [refundModalOpen, setRefundModalOpen] = useState(false)
+  // Order whose rider the admin is choosing by hand (Assign next to Resend).
+  const [assigningOrder, setAssigningOrder] = useState(null)
   const [selectedOrderForRefund, setSelectedOrderForRefund] = useState(null)
   const showLoadingSkeleton = useDelayedLoading(isInitialLoading, { delay: 120, minDuration: 360 })
   const seenOrderIdsRef = useRef(new Set())
@@ -920,6 +924,8 @@ export default function OrdersPage({ statusKey = "all" }) {
       reconnectionDelayMax: 5000,
       timeout: 20000,
     })
+    // An expired token got the socket refused, and it never came back.
+    keepSocketAuthorised(socket, "admin")
     socketRef.current = socket
 
     // The city or zone picked in the header: alerts from elsewhere are not
@@ -1257,7 +1263,7 @@ Reason (required, shown to the restaurant and the customer):`,
   }
 
   // Process refund with amount
-  const processRefund = async (order, refundAmount = null, destination = "original") => {
+  const processRefund = async (order, refundAmount = null, destination = "original", extra = {}) => {
     // Try using MongoDB _id first (more reliable for route matching), then fallback to orderId string
     // Backend accepts either MongoDB ObjectId (24 chars) or orderId string
     // Using MongoDB _id is more reliable for route matching (no dashes/special chars)
@@ -1293,6 +1299,8 @@ Reason (required, shown to the restaurant and the customer):`,
       const requestData = {
         ...(refundAmount !== null ? { refundAmount: parseFloat(refundAmount) } : {}),
         destination,
+        chargedTo: extra.chargedTo === "restaurant" ? "restaurant" : "platform",
+        ...(extra.reason ? { reason: extra.reason } : {}),
       }
       debugLog('?? Request data being sent:', requestData)
       const response = await adminAPI.processRefund(orderIdToUse, requestData)
@@ -1362,9 +1370,9 @@ Reason (required, shown to the restaurant and the customer):`,
   }
 
   // Handle refund confirmation from modal
-  const handleRefundConfirm = (amount, destination) => {
+  const handleRefundConfirm = (amount, destination, extra) => {
     if (selectedOrderForRefund) {
-      processRefund(selectedOrderForRefund, amount, destination)
+      processRefund(selectedOrderForRefund, amount, destination, extra)
     }
   }
 
@@ -1425,7 +1433,22 @@ Reason (required, shown to the restaurant and the customer):`,
         isOpen={isViewOrderOpen}
         onOpenChange={setIsViewOrderOpen}
         order={selectedOrder}
+        onChanged={() => fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true })}
       />
+      {assigningOrder ? (
+        <RiderPicker
+          order={{
+            id: assigningOrder.id || assigningOrder._id,
+            displayId: assigningOrder.orderId || assigningOrder.order_id,
+            restaurantName: assigningOrder.restaurant || "",
+          }}
+          onClose={() => setAssigningOrder(null)}
+          onAssigned={() => {
+            setAssigningOrder(null)
+            fetchOrdersRef.current({ silent: true, withRingCheck: false, force: true })
+          }}
+        />
+      ) : null}
       <RefundModal
         isOpen={refundModalOpen}
         onOpenChange={setRefundModalOpen}
@@ -1454,6 +1477,7 @@ Reason (required, shown to the restaurant and the customer):`,
         onMarkDelivered={handleMarkDelivered}
         onDeassignAndResend={handleDeassignAndResend}
         onResendNotification={handleResendNotification}
+        onAssignRider={setAssigningOrder}
         onCancelOrder={
           statusKey === "all" ||
           statusKey === "pending" ||

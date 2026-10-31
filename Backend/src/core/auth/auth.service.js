@@ -989,6 +989,26 @@ export const resetAdminPasswordWithOtp = async (email, otp, newPassword) => {
   return { success: true, message: "Password reset successfully." };
 };
 
+/**
+ * A rider whose session is refused is about to be logged out by the app, which
+ * does not tell the server. Left online, they kept getting order offers on a
+ * phone showing the login screen: tap Accept, land on login. Only reached for a
+ * token we issued (it was found in food_refresh_tokens), so a forged one cannot
+ * take a rider offline.
+ */
+const takeRiderOfflineOnRefusedSession = async (jwtModule, token) => {
+  try {
+    const claims = jwtModule.decode(token);
+    if (claims?.role !== "DELIVERY_PARTNER" || !isId(String(claims.userId || ""))) return;
+    await prisma.foodDeliveryPartner.updateMany({
+      where: { id: String(claims.userId), availabilityStatus: "online" },
+      data: { availabilityStatus: "offline" },
+    });
+  } catch (err) {
+    logger.warn(`Could not take rider offline on refused session: ${err?.message || err}`);
+  }
+};
+
 export const refreshAccessToken = async (token) => {
   if (!token) {
     throw new ValidationError("Refresh token is required");
@@ -1004,6 +1024,7 @@ export const refreshAccessToken = async (token) => {
   try {
     payload = jwt.default.verify(token, config.jwtRefreshSecret);
   } catch {
+    await takeRiderOfflineOnRefusedSession(jwt.default, token);
     throw new AuthError("Invalid refresh token");
   }
 
@@ -1036,6 +1057,7 @@ export const refreshAccessToken = async (token) => {
     if (!owner || owner.deletedAt) throw new AuthError("This account has been deleted");
     const stored = Number(owner?.tokenVersion) || 0;
     if (tokenVersion !== undefined && Number(tokenVersion) !== stored) {
+      await takeRiderOfflineOnRefusedSession(jwt.default, token);
       throw new AuthError(
         'You have been signed out because this account was used on another device',
       );
@@ -1043,12 +1065,30 @@ export const refreshAccessToken = async (token) => {
     tokenVersion = stored;
   }
 
-  const newAccessToken = signAccessToken({
+  const claims = {
     userId: payload.userId,
     role: payload.role,
     ...(tokenVersion !== undefined ? { tokenVersion } : {}),
     ...(payload.adminType ? { adminType: payload.adminType } : {}),
+  };
+  const newAccessToken = signAccessToken(claims);
+
+  // A sliding session: every refresh hands out a fresh refresh token, so
+  // someone who uses the app stays signed in. The same token used to come back,
+  // and it hard-expired 7 days after the OTP login -- riders were logged out
+  // mid-shift (often right as they tapped Accept). The old token is left valid
+  // until its own expiry, so an app that does not store the new one, or two
+  // requests refreshing at once, are not logged out by this.
+  const refreshToken = signRefreshToken(claims);
+  await prisma.foodRefreshToken.create({
+    data: {
+      userId: String(payload.userId),
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + ms(config.jwtRefreshExpiresIn || "7d")),
+      device: stored.device,
+      ipAddress: stored.ipAddress,
+    },
   });
 
-  return { accessToken: newAccessToken, refreshToken: token };
+  return { accessToken: newAccessToken, refreshToken };
 };

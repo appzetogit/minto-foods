@@ -14,6 +14,11 @@ import restaurantIcon from "@food/assets/Dashboard-icons/image2.png"
 import inactiveIcon from "@food/assets/Dashboard-icons/image3.png"
 import { zoneLabel } from "@food/utils/entityLabels"
 import RestaurantBusinessEditor from "@food/components/admin/restaurant/RestaurantBusinessEditor"
+
+/** Phone inputs take digits only, at most 10 (an Indian mobile). */
+const tenDigits = (value) => String(value || "").replace(/\D/g, "").slice(0, 10)
+/** A stored number shown as its 10 digits, without +91. */
+const lastTen = (value) => String(value || "").replace(/\D/g, "").slice(-10)
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -967,8 +972,8 @@ export default function RestaurantsList() {
           : false,
       ownerName: restaurant.ownerName || "",
       ownerEmail: restaurant.ownerEmail || "",
-      ownerPhone: restaurant.ownerPhone || restaurant.phone || "",
-      primaryContactNumber: restaurant.primaryContactNumber || restaurant.ownerPhone || "",
+      ownerPhone: lastTen(restaurant.ownerPhone || restaurant.phone || ""),
+      primaryContactNumber: lastTen(restaurant.primaryContactNumber || restaurant.ownerPhone || ""),
       email: restaurant.email || restaurant.ownerEmail || "",
       estimatedDeliveryTime: estimatedDeliveryTimeValue,
       openingTime: openingTimeValue,
@@ -1746,11 +1751,11 @@ export default function RestaurantsList() {
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Owner Phone</label>
-                      <input type="text" value={detailsForm.ownerPhone} onChange={(e) => setDetailsForm((prev) => ({ ...prev, ownerPhone: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+                      <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile" value={detailsForm.ownerPhone} onChange={(e) => setDetailsForm((prev) => ({ ...prev, ownerPhone: tenDigits(e.target.value) }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">Primary Contact</label>
-                      <input type="text" value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((prev) => ({ ...prev, primaryContactNumber: e.target.value }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+                      <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile" value={detailsForm.primaryContactNumber} onChange={(e) => setDetailsForm((prev) => ({ ...prev, primaryContactNumber: tenDigits(e.target.value) }))} className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
                     </div>
                     <div className="sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                       Opening hours are set day by day (closed days, lunch/dinner slots, past midnight) on the{" "}

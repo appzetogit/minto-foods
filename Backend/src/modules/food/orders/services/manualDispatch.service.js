@@ -568,6 +568,75 @@ export async function assignRiderManually(orderId, partnerId, adminId, { force =
   };
 }
 
+/**
+ * Give an order to a rider from outside -- Rapido, Shadowfax, a temporary hand
+ * -- when no Minto rider can take it. Their name and phone go on the order and
+ * show to the customer and restaurant as the rider. They have no app, so the
+ * admin moves the order on (picked up, delivered) from the Orders page.
+ */
+export async function assignExternalRider(orderId, adminId, { provider = '', name = '', phone = '' } = {}) {
+  const row = await loadOrderForAssign(orderId);
+  if (!ASSIGNABLE.includes(row.orderStatus)) {
+    throw new ValidationError(`An order that is ${row.orderStatus.replace(/_/g, ' ')} can't be assigned a rider`);
+  }
+  if (row.dispatchStatus === 'accepted' || row.dispatchAcceptedAt) {
+    throw new ValidationError('A rider has already accepted this order');
+  }
+  const riderName = String(name || '').trim().slice(0, 80);
+  const digits = String(phone || '').replace(/\D/g, '').slice(-10);
+  const via = String(provider || '').trim().slice(0, 40);
+  if (riderName.length < 2) throw new ValidationError("Enter the rider's name");
+  if (!/^[6-9]\d{9}$/.test(digits)) throw new ValidationError("Enter the rider's 10-digit mobile number");
+
+  const previous = row.dispatchStatus === 'assigned' ? row.dispatchDeliveryPartnerId : null;
+  const { count } = await prisma.foodOrder.updateMany({
+    where: {
+      id: row.id,
+      dispatchAcceptedAt: null,
+      dispatchStatus: row.dispatchStatus,
+      dispatchDeliveryPartnerId: row.dispatchDeliveryPartnerId,
+    },
+    data: {
+      dispatchStatus: 'accepted',
+      dispatchDeliveryPartnerId: null,
+      dispatchAssignedAt: new Date(),
+      dispatchAcceptedAt: new Date(),
+      externalRiderProvider: via || null,
+      externalRiderName: riderName,
+      externalRiderPhone: digits,
+    },
+  });
+  if (!count) throw new ValidationError('This order was just assigned or accepted. Refresh and try again.');
+
+  // Nobody else is asked any more.
+  await prisma.orderDispatchOffer.updateMany({
+    where: { orderId: row.id, action: 'offered' },
+    data: { action: 'withdrawn' },
+  });
+  if (previous) tellRiderWithdrawn(previous, row);
+  await pushStatusHistory(row.id, {
+    byRole: 'ADMIN',
+    byId: adminId,
+    from: row.orderStatus,
+    to: row.orderStatus,
+    note: `Outside rider ${riderName}${via ? ` (${via})` : ''} assigned by admin`,
+  });
+
+  const assignedTo = { id: null, name: riderName, phone: digits, provider: via, isExternal: true };
+  try {
+    const io = getIO();
+    if (io) {
+      const payload = { orderId: row.id, orderMongoId: row.id, orderStatus: row.orderStatus, deliveryPartner: assignedTo };
+      if (row.userId) io.to(rooms.user(row.userId)).emit('order_status_update', payload);
+      if (row.restaurantId) io.to(rooms.restaurant(row.restaurantId)).emit('order_status_update', payload);
+    }
+  } catch (err) {
+    logger.warn(`External rider socket emit failed: ${err?.message || err}`);
+  }
+  emitToAdmins('order_assignment_update', row.zoneId, { orderId: row.id, assignedTo });
+  return { orderId: row.id, assignedTo };
+}
+
 /** Take back an assignment the rider hasn't accepted; the order stays queued. */
 export async function withdrawManualAssignment(orderId, adminId) {
   const row = await loadOrderForAssign(orderId);

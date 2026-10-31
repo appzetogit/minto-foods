@@ -138,7 +138,8 @@ export async function unlockWalletAmount(entityType, entityId, amount) {
 export const toWalletTransaction = (row) => ({
     id: row.id,
     _id: row.id,
-    type: row.type === 'credit' ? 'addition' : 'deduction',
+    // A refund credit is its own type, so the Refunds tab in the wallet lists it.
+    type: row.type === 'credit' ? (row.category === 'order_refund' ? 'refund' : 'addition') : 'deduction',
     amount: Number(row.amount),
     status: row.status === 'completed' ? 'Completed' : row.status,
     description: row.description || '',

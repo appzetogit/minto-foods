@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react"
 import { io } from "socket.io-client"
 
 import { API_BASE_URL } from "@food/api/config"
+import { keepSocketAuthorised, socketAuthFor } from "@/services/api/axios"
 
 /**
  * Live chat events for whoever is signed in.
@@ -16,7 +17,7 @@ import { API_BASE_URL } from "@food/api/config"
  * they would tear the socket down and reconnect on every render of the screen,
  * which loses messages in the gap.
  */
-export function useChatSocket({ token, onMessage, onConversationUpdate, enabled = true }) {
+export function useChatSocket({ token, module = null, onMessage, onConversationUpdate, enabled = true }) {
     const handlers = useRef({ onMessage, onConversationUpdate })
     handlers.current = { onMessage, onConversationUpdate }
 
@@ -45,9 +46,12 @@ export function useChatSocket({ token, onMessage, onConversationUpdate, enabled 
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
-            auth: { token },
+            // With a module the token is read on each reconnect and refreshed
+            // when it expires; a fixed one went stale after 15 minutes.
+            auth: module ? socketAuthFor(module) : { token },
             query: { token },
         })
+        if (module) keepSocketAuthorised(socket, module)
         socketRef.current = socket
 
         socket.on("chat:message", (payload) => handlers.current.onMessage?.(payload))
@@ -61,7 +65,7 @@ export function useChatSocket({ token, onMessage, onConversationUpdate, enabled 
             socket.disconnect()
             socketRef.current = null
         }
-    }, [enabled, token])
+    }, [enabled, token, module])
 
     return socketRef
 }

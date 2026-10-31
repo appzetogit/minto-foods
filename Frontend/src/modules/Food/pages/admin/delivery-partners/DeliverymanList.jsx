@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react"
-import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, AlertTriangle, Ban, ShieldCheck } from "lucide-react"
+import { Link } from "react-router-dom"
+import { Search, Download, ChevronDown, Eye, User, Star, ArrowUpDown, Settings, FileText, FileSpreadsheet, Loader2, Check, Columns, ExternalLink, Calendar, MapPin, CreditCard, Mail, Phone, Bike, FileCheck, Pencil, Save, Trash2, X, AlertTriangle, Ban, ShieldCheck, Plus } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@food/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@food/components/ui/dialog"
@@ -538,6 +539,12 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
             </div>
 
             <div className="flex items-center gap-3">
+              <Link
+                to="/admin/food/delivery-partners/add"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" /> Add Deliveryman
+              </Link>
               <div className="relative flex-1 sm:flex-initial min-w-[250px]">
                 <input
                   type="text"

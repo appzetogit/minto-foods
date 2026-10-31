@@ -164,6 +164,8 @@ export async function updateRestaurantById(id, body = {}) {
         data.isAcceptingOrders = parseBooleanLike(body.isAcceptingOrders, 'isAcceptingOrders');
         // Going back online clears a manual force-offline.
         data.outsideHoursOverride = false;
+        // Offline from here holds until an admin puts it back online.
+        data.offlineByAdmin = !data.isAcceptingOrders;
     }
 
     if (body.cuisines !== undefined) {

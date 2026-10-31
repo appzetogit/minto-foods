@@ -1,4 +1,5 @@
-import { loadAdminScope, applyZoneView } from '../../../../core/roles/adminScope.service.js';
+import { loadAdminScope, applyZoneView, viewedZoneIds } from '../../../../core/roles/adminScope.service.js';
+import { listOrderRefunds } from '../services/adminRefunds.service.js';
 import { runWithAdminScope } from '../../../../core/roles/adminScope.context.js';
 import express from 'express';
 import { AuthError } from '../../../../core/auth/errors.js';
@@ -9,6 +10,7 @@ import * as priceRulesController from '../../pricing/priceRules.controller.js';
 import * as foodApprovalController from '../controllers/foodApproval.controller.js';
 import * as addonsApprovalController from '../controllers/addonsApproval.controller.js';
 import * as businessSettingsController from '../controllers/businessSettings.controller.js';
+import * as businessSettingsService from '../services/businessSettings.service.js';
 import * as feedbackExperienceController from '../controllers/feedbackExperience.controller.js';
 import * as notificationBroadcastController from '../controllers/notificationBroadcast.controller.js';
 import * as diningAdminController from '../../dining/controllers/diningAdmin.controller.js';
@@ -85,6 +87,11 @@ const clearPublicMenus = () => Promise.all([
     invalidateCache('public_foods:*'),
     invalidateCache('restaurants:*'),
     invalidateCache('restaurant_detail:*'),
+    // The home category row and search kept serving the old data for 10 and
+    // 2 minutes after an admin change.
+    invalidateCache('categories:*'),
+    invalidateCache('search_unified:*'),
+    invalidateCache('restaurant_timings:*'),
 ]).catch(() => {
     // A cache that will not clear must not fail the write itself; the entry
     // expires on its own within the TTL.
@@ -99,9 +106,10 @@ const invalidatePublicMenus = async (_req, res, next) => {
 };
 
 // Every admin write that changes what the user app shows or charges: menus,
-// dishes, categories, add-ons, price rules and fees.
+// dishes, categories, add-ons, price rules and fees -- and every restaurant
+// write (status, location, approval, details), which the feed caches too.
 router.use(
-    ['/restaurants/:id/menu', '/foods', '/categories', '/addons', '/price-rules', '/fee-settings', '/highlight-badges'],
+    ['/restaurants', '/foods', '/categories', '/addons', '/price-rules', '/fee-settings', '/highlight-badges'],
     (req, res, next) => (req.method === 'GET' || req.path.endsWith('/preview') ? next() : invalidatePublicMenus(req, res, next)),
 );
 
@@ -139,7 +147,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
     ) return 'restaurant_management';
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
     if (path.startsWith('/offers')) return 'promotions_management';
-    if (path.startsWith('/orders') || path.startsWith('/order-detect-delivery') || path.startsWith('/dispatch')) return 'order_management';
+    if (path.startsWith('/orders') || path.startsWith('/order-refunds') || path.startsWith('/order-detect-delivery') || path.startsWith('/dispatch')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
     // Where a restaurant's payouts go: the same people who handle withdrawals.
@@ -507,6 +515,22 @@ router.put('/referral-settings', adminController.createOrUpdateReferralSettings)
 // ----- Business Settings -----
 router.get('/business-settings/public', businessSettingsController.getBusinessSettings); // Public endpoint
 router.get('/business-settings', businessSettingsController.getBusinessSettings);
+// Pause all ordering (or chosen zones) for a while, e.g. a city outage.
+router.get('/business-settings/order-pause', async (_req, res, next) => {
+    try {
+        res.status(200).json({ success: true, message: 'Order pause', data: await businessSettingsService.getOrderPause() });
+    } catch (error) {
+        next(error);
+    }
+});
+router.put('/business-settings/order-pause', async (req, res, next) => {
+    try {
+        const data = await businessSettingsService.updateOrderPause(req.body || {});
+        res.status(200).json({ success: true, message: data.active ? 'Ordering paused' : 'Ordering resumed', data });
+    } catch (error) {
+        next(error);
+    }
+});
 router.patch('/business-settings', upload.fields([
     { name: 'logo', maxCount: 1 },
     { name: 'favicon', maxCount: 1 },
@@ -588,6 +612,7 @@ router.get('/dispatch/queue', manualDispatchController.getQueue);
 router.get('/orders/:id/eligible-riders', manualDispatchController.getEligibleRiders);
 router.post('/orders/:id/assign-rider', manualDispatchController.assignRider);
 router.post('/orders/:id/unassign-rider', manualDispatchController.unassignRider);
+router.post('/orders/:id/assign-external-rider', manualDispatchController.assignOutsideRider);
 router.get('/delivery/partners', adminController.getDeliveryPartners);
 // Add Deliveryman: an admin-created rider, approved at once.
 router.post('/delivery/partners', upload.any(), createDeliveryPartnerByAdmin);
@@ -749,6 +774,15 @@ router.post(
     orderController.resendDeliveryNotificationAdminController
 );
 router.post('/orders/:orderId/refund', orderController.processRefundAdminController);
+// Refund tracking: every refund movement with totals, for the viewed cities.
+router.get('/order-refunds', async (req, res, next) => {
+    try {
+        const data = await listOrderRefunds(req.query || {}, await viewedZoneIds(req));
+        res.status(200).json({ success: true, message: 'Refunds fetched', data });
+    } catch (error) {
+        next(error);
+    }
+});
 router.delete('/orders/:orderId', orderController.deleteOrderAdminController);
 
 // ----- CMS Pages (About + legal) -----

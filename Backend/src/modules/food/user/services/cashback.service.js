@@ -221,6 +221,7 @@ export const getUserRefundHistory = async (userId, query = {}) => {
                 id: true, order_id: true, orderId: true, total: true,
                 paymentMethod: true, paymentStatus: true,
                 refundStatus: true, refundAmount: true, refundId: true, refundProcessedAt: true,
+                refundLegs: { select: { refundTo: true, amount: true, status: true } },
                 orderStatus: true, createdAt: true, updatedAt: true,
                 restaurant: { select: { id: true, restaurantName: true, profileImage: true } },
             },
@@ -239,7 +240,11 @@ export const getUserRefundHistory = async (userId, query = {}) => {
 
     const refunds = docs.map((o) => {
         const walletRow = refundByOrder.get(o.id);
-        const amount = Number(o.refundAmount) || Number(walletRow?.amount) || Number(o.total) || 0;
+        const amount = Number(o.refundAmount) || Number(walletRow?.amount) || 0;
+        // Where it went, per leg: a split order is partly wallet, partly card.
+        const live = (o.refundLegs || []).filter((l) => l.status !== 'failed');
+        const toWallet = live.filter((l) => l.refundTo === 'wallet').reduce((s, l) => s + Number(l.amount), 0);
+        const toOriginal = live.filter((l) => l.refundTo === 'gateway').reduce((s, l) => s + Number(l.amount), 0);
 
         return {
             orderId: o.id,
@@ -257,7 +262,10 @@ export const getUserRefundHistory = async (userId, query = {}) => {
             // cancellationReason is derived from status history, which this query
             // does not load; the field stays for shape compatibility.
             reason: '',
-            creditedToWallet: Boolean(walletRow),
+            // Only when all of it went to the wallet; split refunds say both.
+            creditedToWallet: live.length ? toOriginal === 0 : Boolean(walletRow),
+            walletAmount: Math.round(toWallet * 100) / 100,
+            originalMethodAmount: Math.round(toOriginal * 100) / 100,
             processedAt: o.refundProcessedAt || null,
             orderStatus: o.orderStatus,
             createdAt: o.createdAt,

@@ -46,7 +46,7 @@ const getDateRangeByPeriod = (periodRaw) => {
 
     if (period === 'week') {
         start.setHours(0, 0, 0, 0);
-        start.setDate(start.getDate() - start.getDay());
+        start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday, as payouts
         end.setTime(start.getTime());
         end.setDate(start.getDate() + 6);
         end.setHours(23, 59, 59, 999);
@@ -191,6 +191,7 @@ export async function getDashboardStats(query = {}) {
         recentDeliveredOrders,
         recentCancelledOrders,
         recentCustomers,
+        refunded,
     ] = await Promise.all([
         prisma.foodOrder.groupBy({ by: ['orderStatus'], where: orderWhere, _count: { _all: true } }),
         prisma.foodOrder.aggregate({
@@ -243,6 +244,12 @@ export async function getDashboardStats(query = {}) {
                 orderBy: { createdAt: 'desc' }, take: 5,
                 select: { name: true, phone: true, createdAt: true },
             }),
+        // Orders with money refunded or on its way back, and how much.
+        prisma.foodOrder.aggregate({
+            where: { ...orderWhere, refundStatus: { in: ['processed', 'pending'] } },
+            _count: { _all: true },
+            _sum: { refundAmount: true },
+        }),
     ]);
 
     const signal = (type, title, detail, timestamp) => ({
@@ -283,7 +290,8 @@ export async function getDashboardStats(query = {}) {
     const adminNetProfit = num(sums.platformProfit);
 
     return {
-        orders: { total: totalOrders, byStatus: { delivered, cancelled, pending } },
+        orders: { total: totalOrders, byStatus: { delivered, cancelled, pending, refunded: refunded._count._all } },
+        refunds: { count: refunded._count._all, amount: num(refunded._sum.refundAmount) },
         revenue: { total: revenueTotal },
         commission: { total: commissionTotal },
         platformFee: { total: platformFeeTotal },

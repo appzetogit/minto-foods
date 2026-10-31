@@ -657,7 +657,9 @@ async function resetDispatchAndRehunt(row, activeStatuses) {
   }
 
   await prisma.$transaction([
-    prisma.orderDispatchOffer.deleteMany({ where: { orderId: row.id } }),
+    // A fresh round for everyone, except riders an admin took the order away
+    // from: those stay excluded, as they are without a resend.
+    prisma.orderDispatchOffer.deleteMany({ where: { orderId: row.id, action: { not: 'deassigned' } } }),
     prisma.foodOrder.update({
       where: { id: row.id },
       data: { dispatchStatus: 'unassigned', dispatchDeliveryPartnerId: null },

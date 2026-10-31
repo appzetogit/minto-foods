@@ -635,7 +635,7 @@ const toEndOfDay = (d) => {
 const getWeekRange = (anchorDate) => {
     const d = new Date(anchorDate);
     const start = toStartOfDay(d);
-    start.setDate(start.getDate() - start.getDay()); // Sunday
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday, as payouts
     const end = toEndOfDay(start);
     end.setDate(start.getDate() + 6);
     return { start, end };

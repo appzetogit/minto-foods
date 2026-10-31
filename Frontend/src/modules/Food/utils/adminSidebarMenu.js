@@ -105,6 +105,12 @@ export const adminSidebarMenu = [
       },
       {
         type: "link",
+        label: "Refunds",
+        path: "/admin/food/order-refunds",
+        icon: "Wallet",
+      },
+      {
+        type: "link",
         label: "Order Detect Delivery",
         path: "/admin/food/order-detect-delivery",
         icon: "Truck",
@@ -197,6 +203,7 @@ export const adminSidebarMenu = [
         subItems: [
           { label: "New Join Request", path: "/admin/food/delivery-partners/join-request" },
           { label: "Deliveryman List", path: "/admin/food/delivery-partners" },
+          { label: "Add Deliveryman", path: "/admin/food/delivery-partners/add" },
           { label: "Live Tracking", path: "/admin/food/delivery-partners/live-tracking" },
           { label: "Duty Log", path: "/admin/food/delivery-partners/duty-log" },
           { label: "Deliveryman Reviews", path: "/admin/food/delivery-partners/reviews" },
@@ -274,6 +281,7 @@ export const adminSidebarMenu = [
     items: [
       { type: "link", label: "Broadcast Notification", path: "/admin/food/broadcast-notification", icon: "Bell" },
       { type: "link", label: "Business Setup", path: "/admin/food/business-setup", icon: "Settings" },
+      { type: "link", label: "Pause Orders", path: "/admin/food/order-pause", icon: "Settings" },
     ],
   },
   {

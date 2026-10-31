@@ -27,6 +27,19 @@ export const runUnscoped = (fn) => storage.exit(fn);
 
 const inZones = (scope) => ({ in: scope.zoneIds });
 
+/**
+ * A rider is in scope by the zone an admin put them in; a rider with no zone
+ * (signed up from the app) by their typed city. By city alone, picking one
+ * zone listed every rider of the whole city, and a rider whose typed city was
+ * spelt differently vanished from every zone.
+ */
+const riderInScope = (s) => ({
+    OR: [
+        { zoneId: inZones(s) },
+        { zoneId: null, city: { in: s.cityNames, mode: 'insensitive' } },
+    ],
+});
+
 /** Models whose rows belong to exactly one zone. Rows with no zone are hidden. */
 const ZONED = {
     foodOrder: (s) => ({ zoneId: inZones(s) }),
@@ -35,8 +48,7 @@ const ZONED = {
     // A restaurant waiting for approval only has a pending zone, and approving
     // it is exactly what a city's sub-admin is for.
     foodRestaurant: (s) => ({ OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] }),
-    // Riders carry a typed city rather than a zone.
-    foodDeliveryPartner: (s) => ({ city: { in: s.cityNames, mode: 'insensitive' } }),
+    foodDeliveryPartner: (s) => riderInScope(s),
     foodRestaurantProfileChange: (s) => ({
         restaurant: { OR: [{ zoneId: inZones(s) }, { pendingZoneId: inZones(s) }] },
     }),
@@ -69,8 +81,8 @@ const ZONED = {
     }),
     // A rider's money requests follow the rider's city. Without these, picking
     // a zone on Delivery Withdrawal still listed every rider in every zone.
-    foodDeliveryWithdrawal: (s) => ({ deliveryPartner: { city: { in: s.cityNames, mode: 'insensitive' } } }),
-    foodDeliveryCashDeposit: (s) => ({ deliveryPartner: { city: { in: s.cityNames, mode: 'insensitive' } } }),
+    foodDeliveryWithdrawal: (s) => ({ deliveryPartner: riderInScope(s) }),
+    foodDeliveryCashDeposit: (s) => ({ deliveryPartner: riderInScope(s) }),
 };
 
 /** Scoped on reads only: these rows are raised by the rider, never by an admin. */

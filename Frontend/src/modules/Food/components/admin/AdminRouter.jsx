@@ -12,7 +12,7 @@ const AdminHome = lazy(() => import("@food/pages/admin/AdminHome"));
 const PointOfSale = lazy(() => import("@food/pages/admin/PointOfSale"));
 const AdminProfile = lazy(() => import("@food/pages/admin/AdminProfile"));
 const AdminSettings = lazy(() => import("@food/pages/admin/AdminSettings"));
-const NewRefundRequests = lazy(() => import("@food/pages/admin/refunds/NewRefundRequests"));
+const RefundTracking = lazy(() => import("@food/pages/admin/refunds/RefundTracking"));
 const FoodApproval = lazy(() => import("@food/pages/admin/restaurant/FoodApproval"));
 const OrdersPage = lazy(() => import("@food/pages/admin/orders/OrdersPage"));
 const UserCarts = lazy(() => import("@food/pages/admin/orders/UserCarts"));
@@ -116,6 +116,7 @@ const EmployeeList = lazy(() => import("@food/pages/admin/employees/EmployeeList
 // Business Settings
 const BusinessSetup = lazy(() => import("@food/pages/admin/settings/BusinessSetup"));
 const FeatureSettings = lazy(() => import("@food/pages/admin/settings/FeatureSettings"));
+const OrderPause = lazy(() => import("@food/pages/admin/settings/OrderPause"));
 const PowerScanning = lazy(() => import("@food/pages/admin/settings/PowerScanning"));
 const EmailTemplate = lazy(() => import("@food/pages/admin/settings/EmailTemplate"));
 const ThemeSettings = lazy(() => import("@food/pages/admin/settings/ThemeSettings"));
@@ -264,7 +265,8 @@ export default function AdminRouter() {
             <Route path="orders/offline-payments" element={<OrdersPage statusKey="offline-payments" />} />
             <Route path="orders/user-carts" element={<UserCarts />} />
             <Route path="order-detect-delivery" element={<OrderDetectDelivery />} />
-            <Route path="order-refunds/new" element={<NewRefundRequests />} />
+            <Route path="order-refunds" element={<RefundTracking />} />
+            <Route path="order-refunds/new" element={<RefundTracking />} />
 
             {/* RESTAURANT MANAGEMENT */}
             <Route path="zone-setup" element={<ZoneSetup />} />
@@ -370,6 +372,7 @@ export default function AdminRouter() {
 
             {/* SYSTEM & BUSINESS SETTINGS */}
             <Route path="business-setup" element={<BusinessSetup />} />
+            <Route path="order-pause" element={<OrderPause />} />
             <Route path="feature-settings" element={<FeatureSettingsRouteGuard />} />
             <Route path="power-scanning" element={<SuperPowersRouteGuard><PowerScanning /></SuperPowersRouteGuard>} />
             <Route path="email-template" element={<EmailTemplate />} />

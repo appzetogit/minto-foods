@@ -144,6 +144,15 @@ export default function Chattings() {
     loadConversations()
   }, [loadConversations])
 
+  // A safety net under the socket: if it drops, the inbox still catches up
+  // within 20 seconds instead of waiting for a page reload.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") loadConversations()
+    }, 20000)
+    return () => clearInterval(id)
+  }, [loadConversations])
+
   const loadOlder = useCallback(async () => {
     if (!olderCursorRef.current) return
     setLoadingOlder(true)
@@ -248,6 +257,7 @@ export default function Chattings() {
 
   useChatSocket({
     token,
+    module: "admin",
     onMessage: handleIncoming,
     onConversationUpdate: handleConversationUpdate,
   })

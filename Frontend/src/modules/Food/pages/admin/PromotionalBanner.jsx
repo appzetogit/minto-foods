@@ -2,6 +2,10 @@ import { useEffect, useState, useCallback } from "react"
 import { Edit, Upload, Info, Trash2, Plus, Calendar, Link as LinkIcon, Save, X, Loader2, Image as ImageIcon } from "lucide-react"
 import api from "@food/api"
 import { resolveMediaUrl } from "../../../../shared/utils/mediaUrl.js"
+import ImageCropDialog from "@food/components/admin/ImageCropDialog"
+
+/** The app shows promotional banners at 5:3 (promo_banner_carousel.dart). */
+const BANNER_ASPECT = 5 / 3
 
 const debugError = (...args) => {}
 
@@ -17,6 +21,8 @@ export default function PromotionalBanner() {
   const [submitting, setSubmitting] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingBanner, setEditingBanner] = useState(null)
+  // The picked image, waiting to be cropped to the banner shape.
+  const [cropFile, setCropFile] = useState(null)
   
   const [formData, setFormData] = useState({
     title: "",
@@ -75,15 +81,24 @@ export default function PromotionalBanner() {
     fetchZones()
   }, [fetchBanners, fetchRestaurants, fetchZones])
 
+  // Every banner is cropped to the shape the app shows before it is used.
   const handleFileChange = (e) => {
     const file = e.target.files?.[0]
+    e.target.value = ""
     if (!file) return
+    if (!String(file.type || "").startsWith("image/")) {
+      alert("Choose an image (JPEG, PNG or WebP)")
+      return
+    }
+    setCropFile(file)
+  }
 
+  const handleCropped = (file) => {
+    setCropFile(null)
     if (file.size > 2 * 1024 * 1024) {
       alert("Image size must be 2MB or less")
       return
     }
-
     setFormData(prev => ({
       ...prev,
       file,
@@ -244,6 +259,14 @@ export default function PromotionalBanner() {
 
   return (
     <div className="p-4 lg:p-6 bg-slate-50 min-h-screen">
+      <ImageCropDialog
+        file={cropFile}
+        aspect={BANNER_ASPECT}
+        title="Crop banner"
+        outputWidth={1200}
+        onDone={handleCropped}
+        onCancel={() => setCropFile(null)}
+      />
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
@@ -292,7 +315,7 @@ export default function PromotionalBanner() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {banners.map((banner) => (
               <div key={banner._id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-shadow group">
-                <div className="relative aspect-[2/1] bg-slate-100 overflow-hidden">
+                <div className="relative aspect-[5/3] bg-slate-100 overflow-hidden">
                   <img src={resolveMediaUrl(banner.imageUrl) || undefined} alt={banner.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                   <div className="absolute top-2 right-2 flex gap-2">
                     <button 
@@ -369,7 +392,7 @@ export default function PromotionalBanner() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <label className="block text-sm font-semibold text-slate-700">Banner Image</label>
-                    <div className="relative aspect-[2/1] rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex flex-col items-center justify-center overflow-hidden group cursor-pointer hover:border-blue-400 transition-colors">
+                    <div className="relative aspect-[5/3] rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 flex flex-col items-center justify-center overflow-hidden group cursor-pointer hover:border-blue-400 transition-colors">
                       {formData.preview ? (
                         <>
                           <img src={formData.preview} className="w-full h-full object-cover" />
@@ -380,7 +403,7 @@ export default function PromotionalBanner() {
                       ) : (
                         <div className="text-center p-4">
                           <ImageIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Upload 5:1 Image</p>
+                          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Upload image · cropped to 5:3</p>
                         </div>
                       )}
                       <input type="file" accept="image/*" onChange={handleFileChange} className="absolute inset-0 opacity-0 cursor-pointer" />

@@ -62,7 +62,9 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/tip-management", section: "delivery_management" },
   { prefix: "/admin/food/surge-pricing", section: "delivery_management" },
   { prefix: "/admin/food/point-of-sale", section: "point_of_sale" },
-  { prefix: "/admin/food/fee-settings", section: "delivery_management" },
+  // The API guards every /fee-settings call with system_settings; mapped to
+  // delivery it showed sub-admins a page that failed on load.
+  { prefix: "/admin/food/fee-settings", section: "system_settings" },
   { prefix: "/admin/food/delivery-cash-limit", section: "delivery_management" },
   { prefix: "/admin/food/cash-limit-settlement", section: "delivery_management" },
   { prefix: "/admin/food/delivery-withdrawal", section: "delivery_management" },
@@ -84,6 +86,9 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/restaurants", section: "restaurant_management" },
   { prefix: "/admin/food/orders", section: "order_management" },
   { prefix: "/admin/food/order-detect-delivery", section: "order_management" },
+  { prefix: "/admin/food/order-refunds", section: "order_management" },
+  // The API guards payout account changes with transaction_management.
+  { prefix: "/admin/food/bank-change-requests", section: "transaction_management" },
   { prefix: "/admin/food/coupons", section: "promotions_management" },
   { prefix: "/admin/food/referral-settings", section: "referral_rewards" },
   { prefix: "/admin/food/customers", section: "customer_management" },
@@ -107,6 +112,7 @@ const PATH_PREFIX_TO_SECTION = [
   { prefix: "/admin/food/feature-settings", section: "system_settings" },
   { prefix: "/admin/food/power-scanning", section: "system_settings" },
   { prefix: "/admin/food/business-setup", section: "system_settings" },
+  { prefix: "/admin/food/order-pause", section: "system_settings" },
   { prefix: "/admin/food/broadcast-notification", section: "system_settings" },
   { prefix: "/admin/food/pages-social-media", section: "pages_social_media" },
   { prefix: "/admin/food/employees", section: "sub_admin_management" },

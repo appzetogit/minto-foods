@@ -308,6 +308,10 @@ function refreshModuleToken(module) {
 
     try {
       localStorage.setItem(`${module}_accessToken`, newAccessToken);
+      // The server slides the session: each refresh returns a new refresh
+      // token. Keeping the old one signed people out 7 days after login.
+      const newRefreshToken = data?.data?.refreshToken || data?.refreshToken;
+      if (newRefreshToken) localStorage.setItem(`${module}_refreshToken`, newRefreshToken);
       window.dispatchEvent(new CustomEvent('authRefreshed', {
         detail: { module, token: newAccessToken },
       }));
@@ -611,5 +615,39 @@ apiClient.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+/**
+ * Socket.IO auth for a module: the token is read on every (re)connect, so a
+ * refreshed one is used.
+ */
+export const socketAuthFor = (module) => (cb) => {
+  let token = "";
+  try {
+    token = localStorage.getItem(`${module}_accessToken`) || "";
+  } catch (_) {}
+  cb({ token });
+};
+
+/**
+ * Keep a socket alive across token expiry.
+ *
+ * The server refuses a socket whose access token has expired (15 minutes), and
+ * Socket.IO does not retry after a refusal from the server -- so after the
+ * first reconnect past expiry (any network blip) the page stopped getting live
+ * updates until it was reloaded. Refresh the token and connect again.
+ */
+export function keepSocketAuthorised(socket, module) {
+  let retrying = false;
+  socket.on("connect_error", async (err) => {
+    if (!/AUTH_(INVALID|MISSING)/.test(String(err?.message || "")) || retrying) return;
+    retrying = true;
+    try {
+      const token = await refreshModuleToken(module);
+      if (token) setTimeout(() => socket.connect(), 300);
+    } finally {
+      retrying = false;
+    }
+  });
+}
 
 export default apiClient;
