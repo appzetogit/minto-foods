@@ -191,7 +191,7 @@ test('a partial refund counts at its real amount, and the status filter narrows 
     const refunded = await getTransactionReport({ search: order.orderId, view: 'refunded' });
     assert.equal(refunded.transactions.length, 1);
     const completed = await getTransactionReport({ search: order.orderId, view: 'completed' });
-    assert.equal(completed.transactions.length, 0, 'it lists under Refunded');
+    assert.equal(completed.transactions.length, 1, 'still a completed sale, as the card counts it');
     assert.equal(completed.summary.refundedTransaction, 100, 'the cards keep their totals');
     assert.equal((await getTransactionReport({ search: order.orderId, view: 'cancelled' })).transactions.length, 0);
 });

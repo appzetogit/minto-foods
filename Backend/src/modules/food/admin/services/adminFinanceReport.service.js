@@ -148,7 +148,9 @@ export async function getTransactionReport(query = {}) {
     const NOT_REFUNDED = { NOT: REFUNDED };
     const CANCELLED = { AND: [{ order: { orderStatus: { in: CANCELLED_STATUSES } } }, NOT_REFUNDED] };
     const VIEWS = {
-        completed: { AND: [COMPLETED, NOT_REFUNDED] },
+        // Exactly what the Completed and earning cards add up, so tapping one lists
+        // what it counts. A delivered order partly refunded is in both lists.
+        completed: COMPLETED,
         refunded: REFUNDED,
         cancelled: CANCELLED,
         in_progress: {
