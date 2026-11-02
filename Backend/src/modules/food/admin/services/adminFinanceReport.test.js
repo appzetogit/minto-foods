@@ -169,6 +169,43 @@ test('a refund is summarised separately', async () => {
     assert.equal(summary.completedTransaction, 0, 'a refund is not a completed sale');
 });
 
+test('a cancelled cash order nobody paid for is not counted as refunded', async () => {
+    const order = await makeOrder({ orderStatus: 'cancelled_by_admin' });
+    await makeTransaction(order, { status: 'failed' });
+
+    const { summary, transactions } = await getTransactionReport({ search: order.orderId });
+    assert.equal(summary.refundedTransaction, 0);
+    assert.equal(transactions[0].statusLabel, 'Cancelled');
+});
+
+test('a partial refund counts at its real amount, and the status filter narrows the rows only', async () => {
+    const order = await makeOrder({ orderStatus: 'delivered', refundAmount: 100, refundStatus: 'processed' });
+    await makeTransaction(order, { status: 'captured' });
+
+    const all = await getTransactionReport({ search: order.orderId });
+    assert.equal(all.summary.refundedTransaction, 100);
+    assert.equal(all.summary.refundedCount, 1);
+    assert.equal(all.transactions[0].statusLabel, 'Partly refunded');
+    assert.equal(all.transactions[0].restaurantEarning, 900);
+
+    const refunded = await getTransactionReport({ search: order.orderId, view: 'refunded' });
+    assert.equal(refunded.transactions.length, 1);
+    const completed = await getTransactionReport({ search: order.orderId, view: 'completed' });
+    assert.equal(completed.transactions.length, 0, 'it lists under Refunded');
+    assert.equal(completed.summary.refundedTransaction, 100, 'the cards keep their totals');
+    assert.equal((await getTransactionReport({ search: order.orderId, view: 'cancelled' })).transactions.length, 0);
+});
+
+test('one end of a date range filters on its own', async () => {
+    const order = await makeOrder({ orderStatus: 'delivered' });
+    await makeTransaction(order, { status: 'captured' });
+    const future = new Date(Date.now() + 864e5).toISOString();
+    const past = new Date(Date.now() - 864e5).toISOString();
+    assert.equal((await getTransactionReport({ search: order.orderId, fromDate: future })).transactions.length, 0);
+    assert.equal((await getTransactionReport({ search: order.orderId, fromDate: past })).transactions.length, 1);
+    assert.equal((await getTransactionReport({ search: order.orderId, toDate: past })).transactions.length, 0);
+});
+
 test('a filter naming something that does not exist returns nothing', async () => {
     const order = await makeOrder();
     await makeTransaction(order);

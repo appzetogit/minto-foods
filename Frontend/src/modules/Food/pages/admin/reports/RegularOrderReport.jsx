@@ -610,8 +610,8 @@ export default function RegularOrderReport() {
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto scrollbar-hide">
-            <table className="w-full" style={{ tableLayout: "fixed", width: "100%" }}>
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ tableLayout: "fixed", width: "100%", minWidth: "1200px" }}>
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: "3%" }}>
@@ -668,7 +668,7 @@ export default function RegularOrderReport() {
                         </span>
                       </td>
                       <td className="px-1.5 py-1">
-                        <span className="text-[10px] text-blue-600 hover:underline cursor-pointer">{order.orderId}</span>
+                        <span className="text-[10px] text-blue-600 hover:underline cursor-pointer whitespace-nowrap">{order.orderId}</span>
                       </td>
                       <td className="px-1.5 py-1">
                         <span className="text-[10px] text-slate-700 truncate block">{restaurantLabel(order.restaurant)}</span>

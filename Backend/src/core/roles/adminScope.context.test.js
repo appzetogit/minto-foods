@@ -36,9 +36,14 @@ test('a restaurant awaiting approval in the city is visible through its pending 
     assert.deepEqual(where, { OR: [{ zoneId: { in: ['z1', 'z2'] } }, { pendingZoneId: { in: ['z1', 'z2'] } }] });
 });
 
-test('riders are matched on their city name', () => {
+test('riders are matched on their zone, and on their city name when they have none', () => {
     const { where } = applyAdminScope('FoodDeliveryPartner', 'findMany', {}, INDORE);
-    assert.deepEqual(where, { city: { in: ['Indore'], mode: 'insensitive' } });
+    assert.deepEqual(where, {
+        OR: [
+            { zoneId: { in: ['z1', 'z2'] } },
+            { zoneId: null, city: { in: ['Indore'], mode: 'insensitive' } },
+        ],
+    });
 });
 
 test('platform-wide banners are visible but only the city\'s own can be changed', () => {

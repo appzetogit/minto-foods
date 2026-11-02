@@ -37,19 +37,48 @@ async function resolveZoneId(zoneRaw) {
     return zone?.id ?? null; // null = named a zone that does not exist
 }
 
+/** A date filter from the query, ignoring anything that is not a date. */
+const validDate = (value) => {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const CANCELLED_STATUSES = ['cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'];
+
+/** What a row reads as in the report, in words rather than ledger states. */
+const transactionStatusLabel = (tx) => {
+    const paid = num(tx.totalCustomerPaid);
+    const refunded = num(tx.order?.refundAmount);
+    if (refunded > 0) return paid > 0 && refunded < paid ? 'Partly refunded' : 'Refunded';
+    if (tx.status === 'refunded') return 'Refunded';
+    if (CANCELLED_STATUSES.includes(tx.order?.orderStatus)) return 'Cancelled';
+    if (tx.status === 'captured' || tx.order?.orderStatus === 'delivered') return 'Completed';
+    return 'In progress';
+};
+
 export async function getTransactionReport(query = {}) {
     const { fromDate, toDate, zone, restaurant, search } = query;
     const where = {};
 
-    if (fromDate && toDate) {
-        where.createdAt = { gte: new Date(fromDate), lte: new Date(toDate) };
+    // Either end alone is a filter too; a custom range with one date was ignored.
+    const from = validDate(fromDate);
+    const to = validDate(toDate);
+    if (from || to) {
+        where.createdAt = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
     }
 
     if (search && String(search).trim()) {
         // The readable id lives on the order, not the transaction. The Mongo
         // version also looked for `orderReadableId` on the transaction, which
         // is not a field there, so that half of the search never matched.
-        where.order = { orderId: { contains: String(search).trim(), mode: 'insensitive' } };
+        const term = String(search).trim();
+        where.order = {
+            OR: [
+                { orderId: { contains: term, mode: 'insensitive' } },
+                { order_id: { contains: term, mode: 'insensitive' } },
+            ],
+        };
     }
 
     if (zone || restaurant) {
@@ -79,7 +108,15 @@ export async function getTransactionReport(query = {}) {
         // A filter that names something that does not exist returns nothing,
         // rather than quietly returning everything.
         if (impossible) where.restaurantId = { in: [] };
-        else if (Object.keys(restaurantWhere).length) where.restaurant = restaurantWhere;
+        else if (Object.keys(restaurantWhere).length) {
+            // The order's own zone as well: a restaurant with no zone set still
+            // has orders in one.
+            const { zoneId, ...rest } = restaurantWhere;
+            if (Object.keys(rest).length) where.restaurant = rest;
+            if (zoneId) {
+                where.AND = [{ OR: [{ restaurant: { zoneId } }, { order: { zoneId } }] }];
+            }
+        }
     }
 
     // A page, not the table. This used to fetch and return every transaction
@@ -100,25 +137,41 @@ export async function getTransactionReport(query = {}) {
             { order: { orderStatus: 'delivered' } },
         ],
     };
+    // Money actually sent back. This used to count every admin-cancelled order
+    // at full value, cash orders nobody had paid for included.
     const REFUNDED = {
         OR: [
             { status: 'refunded' },
-            { order: { orderStatus: 'cancelled_by_admin' } },
+            { order: { refundAmount: { gt: 0 } } },
         ],
     };
+    const NOT_REFUNDED = { NOT: REFUNDED };
+    const CANCELLED = { AND: [{ order: { orderStatus: { in: CANCELLED_STATUSES } } }, NOT_REFUNDED] };
+    const VIEWS = {
+        completed: { AND: [COMPLETED, NOT_REFUNDED] },
+        refunded: REFUNDED,
+        cancelled: CANCELLED,
+        in_progress: {
+            AND: [{ NOT: COMPLETED }, NOT_REFUNDED, { order: { orderStatus: { notIn: CANCELLED_STATUSES } } }],
+        },
+    };
+    // The list narrows to the status picked; the cards above it keep the totals
+    // for the other filters, so the numbers do not vanish on tapping one.
+    const view = VIEWS[String(query.view || '').trim()] || null;
+    const rowsWhere = view ? { AND: [where, view] } : where;
 
-    const [transactionRows, total, completed, refunded] = await Promise.all([
+    const [transactionRows, total, completed, refunded, legacyRefunded] = await Promise.all([
         prisma.foodTransaction.findMany({
-            where,
+            where: rowsWhere,
             orderBy: { createdAt: 'desc' },
             skip: (page - 1) * limit,
             take: limit,
             include: {
-                order: { select: { orderId: true, orderStatus: true } },
+                order: { select: { orderId: true, order_id: true, orderStatus: true, refundAmount: true } },
                 restaurant: { select: { restaurantName: true } },
             },
         }),
-        prisma.foodTransaction.count({ where }),
+        prisma.foodTransaction.count({ where: rowsWhere }),
         // Summed by the database over the whole filter, not over the page.
         prisma.foodTransaction.aggregate({
             where: { AND: [where, COMPLETED] },
@@ -126,10 +179,19 @@ export async function getTransactionReport(query = {}) {
                 totalCustomerPaid: true, platformNetProfit: true,
                 restaurantShare: true, riderShare: true,
             },
+            _count: { _all: true },
         }),
+        // What was refunded, per order, partial refunds at their real amount.
+        prisma.foodOrder.aggregate({
+            where: { refundAmount: { gt: 0 }, foodTransaction: { is: where } },
+            _sum: { refundAmount: true },
+            _count: { _all: true },
+        }),
+        // Refunded before refund amounts were recorded on the order.
         prisma.foodTransaction.aggregate({
-            where: { AND: [where, REFUNDED] },
+            where: { AND: [where, { status: 'refunded' }, { NOT: { order: { refundAmount: { gt: 0 } } } }] },
             _sum: { totalCustomerPaid: true },
+            _count: { _all: true },
         }),
     ]);
 
@@ -162,7 +224,13 @@ export async function getTransactionReport(query = {}) {
 
         return {
             id: tx.id,
-            orderId: tx.order?.orderId || 'N/A',
+            orderId: tx.order?.orderId || tx.order?.order_id || 'N/A',
+            orderStatus: tx.order?.orderStatus || '',
+            statusLabel: transactionStatusLabel(tx),
+            refundAmount: num(tx.order?.refundAmount),
+            adminEarning: num(tx.platformNetProfit),
+            restaurantEarning: num(tx.restaurantShare),
+            deliverymanEarning: num(tx.riderShare),
             restaurant: tx.restaurant?.restaurantName || 'N/A',
             customerName: nameByUserId.get(tx.userId) || 'Guest',
             totalItemAmount: subtotal,
@@ -182,7 +250,9 @@ export async function getTransactionReport(query = {}) {
 
     const summary = {
         completedTransaction: num(completed._sum.totalCustomerPaid),
-        refundedTransaction: num(refunded._sum.totalCustomerPaid),
+        refundedTransaction: num(refunded._sum.refundAmount) + num(legacyRefunded._sum.totalCustomerPaid),
+        completedCount: completed._count._all,
+        refundedCount: refunded._count._all + legacyRefunded._count._all,
         adminEarning: num(completed._sum.platformNetProfit),
         restaurantEarning: num(completed._sum.restaurantShare),
         deliverymanEarning: num(completed._sum.riderShare),

@@ -82,7 +82,18 @@ export default function TransactionReport() {
 
     toDate: "",
 
+    view: "",
+
   })
+
+  // The card tapped: narrows the list, and an earning card adds that column.
+  const [activeCard, setActiveCard] = useState(null)
+
+  // How many match the filters; the list itself stops at the newest 500.
+  const [totalCount, setTotalCount] = useState(0)
+
+  // Bumped by the Filter button, to load again now.
+  const [refreshTick, setRefreshTick] = useState(0)
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
@@ -140,6 +151,9 @@ export default function TransactionReport() {
 
   useEffect(() => {
 
+    // A slower earlier answer must not replace the one for the current filters.
+    let stale = false
+
     const fetchTransactionReport = async () => {
 
       try {
@@ -174,7 +188,7 @@ export default function TransactionReport() {
 
           const dayOfWeek = now.getDay()
 
-          const diff = now.getDate() - dayOfWeek
+          const diff = now.getDate() - ((dayOfWeek + 6) % 7) // Monday to Sunday, as payouts
 
           fromDate = new Date(now.getFullYear(), now.getMonth(), diff)
 
@@ -200,6 +214,8 @@ export default function TransactionReport() {
 
           search: searchQuery || undefined,
 
+          view: filters.view || undefined,
+
           zone: filters.zone !== "All Zones" ? filters.zone : undefined,
 
           restaurant: filters.restaurant !== "All restaurants" ? filters.restaurant : undefined,
@@ -208,7 +224,7 @@ export default function TransactionReport() {
 
           toDate: toDate ? toDate.toISOString() : undefined,
 
-          limit: 1000
+          limit: 500
 
         }
 
@@ -216,11 +232,15 @@ export default function TransactionReport() {
 
         const response = await adminAPI.getTransactionReport(params)
 
+        if (stale) return
+
 
 
         if (response?.data?.success && response.data.data) {
 
           setTransactions(response.data.data.transactions || [])
+
+          setTotalCount(response.data.data.pagination?.total ?? (response.data.data.transactions || []).length)
 
           setSummary(response.data.data.summary || {
 
@@ -270,7 +290,11 @@ export default function TransactionReport() {
 
     fetchTransactionReport()
 
-  }, [searchQuery, filters])
+    return () => {
+      stale = true
+    }
+
+  }, [searchQuery, filters, refreshTick])
 
 
 
@@ -315,7 +339,8 @@ export default function TransactionReport() {
 
   const handleFilterApply = () => {
 
-    // Filters are already applied via useMemo
+    // Filters apply as they change; this loads again now, for the latest orders.
+    setRefreshTick((tick) => tick + 1)
 
   }
 
@@ -335,13 +360,48 @@ export default function TransactionReport() {
 
       toDate: "",
 
+      view: "",
+
     })
+
+    setActiveCard(null)
 
   }
 
+  // Tap a card to list what it counts; tap it again to clear.
+  const CARD_VIEWS = { completed: "completed", refunded: "refunded", admin: "completed", restaurant: "completed", deliveryman: "completed" }
+  const selectCard = (key) => {
+    const next = activeCard === key ? null : key
+    setActiveCard(next)
+    setFilters((prev) => ({ ...prev, view: next ? CARD_VIEWS[next] : "" }))
+  }
+  const cardProps = (key, padding) => ({
+    role: "button",
+    tabIndex: 0,
+    "aria-pressed": activeCard === key,
+    title: activeCard === key ? "Tap to show all" : "Tap to list these orders",
+    onClick: () => selectCard(key),
+    onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault()
+        selectCard(key)
+      }
+    },
+    className: `rounded-lg shadow-sm border ${padding} cursor-pointer transition-all hover:shadow-md ${
+      activeCard === key ? "border-blue-600 ring-2 ring-blue-300" : "border-slate-200 hover:border-blue-300"
+    }`,
+  })
+  const EARNING_COLUMNS = {
+    admin: { label: "Admin Earning", field: "adminEarning" },
+    restaurant: { label: "Restaurant Earning", field: "restaurantEarning" },
+    deliveryman: { label: "Deliveryman Earning", field: "deliverymanEarning" },
+  }
+  const earningColumn = EARNING_COLUMNS[activeCard] || null
+  const VIEW_TITLES = { completed: "Completed Transactions", refunded: "Refunded Transactions", cancelled: "Cancelled Orders", in_progress: "Orders In Progress" }
 
 
-  const activeFiltersCount = (filters.zone !== "All Zones" ? 1 : 0) + (filters.restaurant !== "All restaurants" ? 1 : 0) + (filters.time !== "All Time" ? 1 : 0)
+
+  const activeFiltersCount = (filters.zone !== "All Zones" ? 1 : 0) + (filters.restaurant !== "All restaurants" ? 1 : 0) + (filters.time !== "All Time" ? 1 : 0) + (filters.view ? 1 : 0)
 
 
 
@@ -379,7 +439,7 @@ export default function TransactionReport() {
 
     }
 
-    if (['pending', 'created', 'authorized', 'cod_pending'].includes(normalized)) {
+    if (['pending', 'created', 'authorized', 'cod_pending', 'in progress', 'partly refunded'].includes(normalized)) {
 
       return 'bg-yellow-100 text-yellow-700'
 
@@ -459,7 +519,8 @@ export default function TransactionReport() {
 
                 value={filters.zone}
 
-                onChange={(e) => setFilters(prev => ({ ...prev, zone: e.target.value }))}
+                // A restaurant from another zone would leave the list empty.
+                onChange={(e) => setFilters(prev => ({ ...prev, zone: e.target.value, restaurant: "All restaurants" }))}
 
                 className="w-full px-2.5 py-1.5 pr-5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs appearance-none cursor-pointer"
 
@@ -469,7 +530,7 @@ export default function TransactionReport() {
 
                 {zones.map(zone => (
 
-                  <option key={zone._id} value={zone._id}>{zone.zoneName || zone.name}</option>
+                  <option key={zone._id || zone.id} value={zone._id || zone.id}>{zone.zoneName || zone.name}</option>
 
                 ))}
 
@@ -495,9 +556,11 @@ export default function TransactionReport() {
 
                 <option value="All restaurants">All restaurants</option>
 
-                {restaurants.map(restaurant => (
+                {restaurants
+                  .filter((restaurant) => filters.zone === "All Zones" || !restaurant.zoneId || String(restaurant.zoneId?._id || restaurant.zoneId) === filters.zone)
+                  .map(restaurant => (
 
-                  <option key={restaurant._id} value={restaurant._id}>{restaurant.restaurantName || restaurant.name}</option>
+                  <option key={restaurant._id || restaurant.id} value={restaurant._id || restaurant.id}>{restaurant.restaurantName || restaurant.name}</option>
 
                 ))}
 
@@ -549,7 +612,26 @@ export default function TransactionReport() {
 
 
 
-            <button 
+            <div className="relative flex-1 min-w-0">
+              <select
+                value={filters.view}
+                onChange={(e) => {
+                  setActiveCard(null)
+                  setFilters((prev) => ({ ...prev, view: e.target.value }))
+                }}
+                aria-label="Status"
+                className="w-full px-2.5 py-1.5 pr-5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs appearance-none"
+              >
+                <option value="">All statuses</option>
+                <option value="completed">Completed</option>
+                <option value="refunded">Refunded</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="in_progress">In progress</option>
+              </select>
+              <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500 pointer-events-none" />
+            </div>
+
+            <button
 
               onClick={handleFilterApply}
 
@@ -653,7 +735,7 @@ export default function TransactionReport() {
 
             {/* Completed Transaction - Green */}
 
-            <div className="rounded-lg shadow-sm border border-slate-200 p-4" style={{ backgroundColor: '#f1f5f9' }}>
+            <div {...cardProps("completed", "p-4")} style={{ backgroundColor: '#f1f5f9' }}>
 
               <div className="relative mb-3 flex justify-center">
 
@@ -677,6 +759,8 @@ export default function TransactionReport() {
 
                 <p className="text-sm text-slate-600 leading-tight">Completed Transaction</p>
 
+                <p className="text-xs text-slate-500 mt-0.5">{summary.completedCount ?? 0} orders</p>
+
               </div>
 
             </div>
@@ -685,7 +769,7 @@ export default function TransactionReport() {
 
             {/* Refunded Transaction - Red */}
 
-            <div className="rounded-lg shadow-sm border border-slate-200 p-4" style={{ backgroundColor: '#f1f5f9' }}>
+            <div {...cardProps("refunded", "p-4")} style={{ backgroundColor: '#f1f5f9' }}>
 
               <div className="relative mb-3 flex justify-center">
 
@@ -709,6 +793,8 @@ export default function TransactionReport() {
 
                 <p className="text-sm text-slate-600 leading-tight">Refunded Transaction</p>
 
+                <p className="text-xs text-slate-500 mt-0.5">{summary.refundedCount ?? 0} orders</p>
+
               </div>
 
             </div>
@@ -723,7 +809,7 @@ export default function TransactionReport() {
 
             {/* Admin Earning */}
 
-            <div className="rounded-lg shadow-sm border border-slate-200 p-3" style={{ backgroundColor: '#f1f5f9' }}>
+            <div {...cardProps("admin", "p-3")} style={{ backgroundColor: '#f1f5f9' }}>
 
               <div className="flex items-center justify-between">
 
@@ -759,7 +845,7 @@ export default function TransactionReport() {
 
             {/* Restaurant Earning */}
 
-            <div className="rounded-lg shadow-sm border border-slate-200 p-3" style={{ backgroundColor: '#f1f5f9' }}>
+            <div {...cardProps("restaurant", "p-3")} style={{ backgroundColor: '#f1f5f9' }}>
 
               <div className="flex items-center justify-between">
 
@@ -795,7 +881,7 @@ export default function TransactionReport() {
 
             {/* Deliveryman Earning */}
 
-            <div className="rounded-lg shadow-sm border border-slate-200 p-3" style={{ backgroundColor: '#f1f5f9' }}>
+            <div {...cardProps("deliveryman", "p-3")} style={{ backgroundColor: '#f1f5f9' }}>
 
               <div className="flex items-center justify-between">
 
@@ -839,7 +925,12 @@ export default function TransactionReport() {
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
 
-            <h2 className="text-base font-bold text-slate-900">Order Transactions {filteredTransactions.length}</h2>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">{VIEW_TITLES[filters.view] || "Order Transactions"} {totalCount}</h2>
+              {totalCount > filteredTransactions.length ? (
+                <p className="text-[11px] text-slate-500">Showing the newest {filteredTransactions.length}. Narrow the filters to see older ones.</p>
+              ) : null}
+            </div>
 
 
 
@@ -951,9 +1042,11 @@ export default function TransactionReport() {
 
           {/* Table */}
 
-          <div className="overflow-x-auto scrollbar-hide">
+          <div className="overflow-x-auto">
 
-            <table className="w-full" style={{ tableLayout: 'fixed', width: '100%' }}>
+            {/* A minimum width, so on a small screen the table scrolls sideways
+                instead of squeezing the columns until the order id runs into the next. */}
+            <table className="w-full" style={{ tableLayout: 'fixed', width: '100%', minWidth: '1100px' }}>
 
               <thead className="bg-slate-50 border-b border-slate-200">
 
@@ -961,7 +1054,7 @@ export default function TransactionReport() {
 
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '3%' }}>SI</th>
 
-                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '7%' }}>Order Id</th>
+                  <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '11%' }}>Order Id</th>
 
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '10%' }}>Restaurant</th>
 
@@ -979,6 +1072,10 @@ export default function TransactionReport() {
 
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '9%' }}>Order Amount</th>
 
+                  {earningColumn ? (
+                    <th className="px-1.5 py-1 text-left text-[8px] font-bold text-blue-700 uppercase tracking-wider" style={{ width: '10%' }}>{earningColumn.label}</th>
+                  ) : null}
+
                   <th className="px-1.5 py-1 text-left text-[8px] font-bold text-slate-700 uppercase tracking-wider" style={{ width: '8%' }}>Status</th>
 
                 </tr>
@@ -991,7 +1088,7 @@ export default function TransactionReport() {
 
                   <tr>
 
-                    <td colSpan={11} className="px-6 py-20 text-center">
+                    <td colSpan={earningColumn ? 12 : 11} className="px-6 py-20 text-center">
 
                       <div className="flex flex-col items-center justify-center">
 
@@ -1025,7 +1122,7 @@ export default function TransactionReport() {
 
                       <td className="px-1.5 py-1">
 
-                        <span className="text-[10px] text-slate-700">{transaction.orderId}</span>
+                        <span className="text-[10px] text-slate-700 whitespace-nowrap">{transaction.orderId}</span>
 
                       </td>
 
@@ -1089,11 +1186,17 @@ export default function TransactionReport() {
 
                       </td>
 
+                      {earningColumn ? (
+                        <td className="px-1.5 py-1">
+                          <span className="text-[10px] font-semibold text-blue-700">{formatFullCurrency(Number(transaction[earningColumn.field]) || 0)}</span>
+                        </td>
+                      ) : null}
+
                       <td className="px-1.5 py-1">
 
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${getStatusBadgeClasses(transaction.status || transaction.orderStatus)}`}>
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${getStatusBadgeClasses(transaction.statusLabel || transaction.status || transaction.orderStatus)}`}>
 
-                          {transaction.status || transaction.orderStatus || 'N/A'}
+                          {transaction.statusLabel || transaction.status || transaction.orderStatus || 'N/A'}
 
                         </span>
 
