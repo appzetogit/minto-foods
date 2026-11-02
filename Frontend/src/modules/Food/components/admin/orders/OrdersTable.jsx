@@ -471,7 +471,7 @@ export default function OrdersTable({
                 {visibleColumns.actions && (
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <div className="flex items-center justify-center gap-2">
-                      {onCancelOrder ? (
+                      {onCancelOrder && !isFinished(order) ? (
                         <button
                           onClick={() => canShowCancelAction(order) && onCancelOrder(order)}
                           disabled={
@@ -565,7 +565,7 @@ export default function OrdersTable({
                 {visibleColumns.actions && (
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <div className="flex items-center justify-center gap-2">
-                      {onAcceptOrder && (
+                      {onAcceptOrder && !isFinished(order) && (
                         <button
                           onClick={() => onAcceptOrder(order)}
                           disabled={
@@ -591,7 +591,7 @@ export default function OrdersTable({
                           <span>Accept</span>
                         </button>
                       )}
-                      {onRejectOrder && (
+                      {onRejectOrder && !isFinished(order) && (
                         <button
                           onClick={() => onRejectOrder(order)}
                           disabled={
@@ -617,7 +617,7 @@ export default function OrdersTable({
                           <span>Reject</span>
                         </button>
                       )}
-                      {onMarkDelivered ? (
+                      {onMarkDelivered && !isFinished(order) ? (
                         <button
                           onClick={() => canMarkAsDelivered(order) && onMarkDelivered(order)}
                           disabled={

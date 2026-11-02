@@ -759,7 +759,7 @@ export default function TransactionReport() {
 
                 <p className="text-sm text-slate-600 leading-tight">Completed Transaction</p>
 
-                <p className="text-xs text-slate-500 mt-0.5">{summary.completedCount ?? 0} orders</p>
+                <p className="text-xs text-slate-500 mt-0.5">{summary.completedCount ?? 0} {summary.completedCount === 1 ? "order" : "orders"}</p>
 
               </div>
 
@@ -793,7 +793,7 @@ export default function TransactionReport() {
 
                 <p className="text-sm text-slate-600 leading-tight">Refunded Transaction</p>
 
-                <p className="text-xs text-slate-500 mt-0.5">{summary.refundedCount ?? 0} orders</p>
+                <p className="text-xs text-slate-500 mt-0.5">{summary.refundedCount ?? 0} {summary.refundedCount === 1 ? "order" : "orders"}</p>
 
               </div>
 

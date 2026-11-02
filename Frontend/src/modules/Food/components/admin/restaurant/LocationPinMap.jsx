@@ -34,14 +34,38 @@ const partsOf = (result) => {
   }
 }
 
+/** Resolves with Google Maps once it is usable, or null after `ms`. */
+const waitForMaps = (ms) =>
+  new Promise((resolve) => {
+    const started = Date.now()
+    const tick = () => {
+      if (typeof window.google?.maps?.Map === "function") return resolve(window.google)
+      if (Date.now() - started > ms) return resolve(null)
+      setTimeout(tick, 200)
+    }
+    tick()
+  })
+
 let mapsPromise = null
+/**
+ * The app's page loads Google Maps itself. Starting the Loader on top of that
+ * loaded it twice, and the Loader's promise then never settled: the map stayed
+ * an empty grey box with no error. So wait for the copy already on its way, and
+ * only load one when there is none. Never waits for ever.
+ */
 const loadMaps = async () => {
-  if (window.google?.maps) return window.google
+  if (typeof window.google?.maps?.Map === "function") return window.google
   if (!mapsPromise) {
     mapsPromise = (async () => {
-      const apiKey = await getGoogleMapsApiKey()
-      if (!apiKey) throw new Error("Google Maps key is not set")
-      return new Loader({ apiKey, version: "weekly", libraries: ["places", "geometry"] }).load()
+      const onItsWay = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]')
+      if (!onItsWay) {
+        const apiKey = await getGoogleMapsApiKey()
+        if (!apiKey) throw new Error("Google Maps key is not set")
+        new Loader({ apiKey, version: "weekly", libraries: ["places", "geometry"] }).load().catch(() => {})
+      }
+      const google = await waitForMaps(20000)
+      if (!google) throw new Error("Google Maps did not load")
+      return google
     })().catch((e) => {
       mapsPromise = null
       throw e
