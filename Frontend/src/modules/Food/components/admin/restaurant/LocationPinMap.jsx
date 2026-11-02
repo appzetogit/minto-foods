@@ -57,6 +57,9 @@ const loadMaps = async () => {
   if (typeof window.google?.maps?.Map === "function") return window.google
   if (!mapsPromise) {
     mapsPromise = (async () => {
+      // The page's own loader starts just after this (a child's effect runs
+      // first), so give it a moment before deciding nobody is loading Maps.
+      await new Promise((resolve) => setTimeout(resolve, 1500))
       const onItsWay = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]')
       if (!onItsWay) {
         const apiKey = await getGoogleMapsApiKey()

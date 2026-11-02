@@ -89,7 +89,7 @@ export default function ImageCropDialog({ file, aspect = 1, title = "Crop image"
   const ratioLabel = aspect === 1 ? "square" : `${Math.round(aspect * 3)}:3`
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-2xl rounded-xl bg-white p-4 space-y-3">
         <div>
           <h3 className="text-lg font-semibold text-slate-900">{title}</h3>

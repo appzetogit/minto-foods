@@ -2,7 +2,7 @@ import { config } from '../../../../config/env.js';
 import { logger } from '../../../../utils/logger.js';
 
 /**
- * Fetches driving route metrics from Google Directions API.
+ * Fetches driving route metrics from the Google Routes API.
  * Call sparingly (e.g. once per order) — billed per request.
  * @param {Object} origin - { lat, lng }
  * @param {Object} destination - { lat, lng }
@@ -120,32 +120,41 @@ export async function fetchDrivingRoute(origin, destination) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const originStr = `${origin.lat},${origin.lng}`;
-    const destStr = `${destination.lat},${destination.lng}`;
-    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originStr}&destination=${destStr}&mode=driving&key=${apiKey}`;
+    const waypoint = ({ lat, lng }) => ({
+      location: { latLng: { latitude: Number(lat), longitude: Number(lng) } },
+    });
 
-    const res = await fetch(url, { signal: controller.signal });
+    // The Routes API. The older Directions API is a legacy product Google does
+    // not enable on current projects: it answered REQUEST_DENIED, and every
+    // delivery fee silently fell back to straight-line distance.
+    const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
+      },
+      body: JSON.stringify({
+        origin: waypoint(origin),
+        destination: waypoint(destination),
+        travelMode: 'DRIVE',
+        // Road-following detail: the simplified line visibly cuts corners on a
+        // street-level tracking map.
+        polylineQuality: 'HIGH_QUALITY',
+      }),
+    });
     clearTimeout(timeout);
     const data = await res.json();
 
-    if (data.status === 'OK' && data.routes?.length > 0) {
-      const route = data.routes[0];
-      const legs = route.legs || [];
-      let distanceMeters = 0;
-      let durationSeconds = 0;
-      for (const leg of legs) {
-        distanceMeters += leg.distance?.value || 0;
-        durationSeconds += leg.duration?.value || 0;
-      }
-
-      // overview_polyline is Google's SIMPLIFIED geometry — decimated for drawing a whole
-      // route zoomed out. On a street-level tracking map it visibly cuts corners and drifts
-      // off the road. Stitching the per-step polylines gives full road-following detail,
-      // which is what makes the line look right while following a rider.
-      const detailed = buildDetailedPolyline(legs);
+    const route = data.routes?.[0];
+    if (res.ok && route) {
+      const distanceMeters = Number(route.distanceMeters) || 0;
+      // A protobuf duration: "654s".
+      const durationSeconds = Number.parseInt(route.duration, 10) || 0;
 
       return {
-        polyline: detailed || route.overview_polyline?.points || '',
+        polyline: route.polyline?.encodedPolyline || '',
         distanceMeters: distanceMeters > 0 ? distanceMeters : null,
         durationSeconds: durationSeconds > 0 ? durationSeconds : null,
         distanceKm:
@@ -154,7 +163,7 @@ export async function fetchDrivingRoute(origin, destination) {
     }
 
     logger.warn(
-      `Google Directions API returned status: ${data.status}. Message: ${data.error_message || 'No routes found'}`,
+      `Google Routes API returned status: ${res.status}. Message: ${data.error?.message || 'No routes found'}`,
     );
   } catch (err) {
     logger.error(`Error fetching driving route from Google: ${err.message}`);
@@ -164,7 +173,7 @@ export async function fetchDrivingRoute(origin, destination) {
 }
 
 /**
- * Fetches an encoded polyline from Google Directions API.
+ * Fetches an encoded polyline from the Google Routes API.
  * This should be called ONLY ONCE per order assignment to save costs.
  * @param {Object} origin - { lat, lng }
  * @param {Object} destination - { lat, lng }
