@@ -1,3 +1,4 @@
+import { PlaceAutocomplete, PlaceDetails, PlaceSuggestions } from "@food/utils/placesNew"
 import { useEffect, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Input } from "@food/components/ui/input"
@@ -2387,17 +2388,17 @@ function RestaurantOnboardingForm() {
 
       try {
         if (!placesAutocompleteServiceRef.current && window.google?.maps?.places?.AutocompleteService) {
-          placesAutocompleteServiceRef.current = new window.google.maps.places.AutocompleteService()
+          placesAutocompleteServiceRef.current = new PlaceSuggestions()
         }
         if (!placesDetailsServiceRef.current && window.google?.maps?.places?.PlacesService) {
           const detailsHost = document.createElement("div")
-          placesDetailsServiceRef.current = new window.google.maps.places.PlacesService(detailsHost)
+          placesDetailsServiceRef.current = new PlaceDetails(detailsHost)
         }
         if (!placesSessionTokenRef.current && window.google?.maps?.places?.AutocompleteSessionToken) {
           placesSessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken()
         }
 
-        autocomplete = new window.google.maps.places.Autocomplete(inputElement, {
+        autocomplete = new PlaceAutocomplete(inputElement, {
           fields: ["formatted_address", "address_components", "geometry"],
           componentRestrictions: { country: "in" }
         })

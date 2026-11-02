@@ -144,6 +144,41 @@ export async function processGatewayRefund(refundId) {
 }
 
 /**
+ * The refunds on an order, one row per movement of money. These are what every
+ * refund path writes (food_order_refunds); the `refunds` table the functions
+ * below read is no longer written, so anything reading it was always empty.
+ */
+export async function getRefundLegsByOrder(orderId) {
+    const rows = await prisma.foodOrderRefund.findMany({
+        where: { orderId: String(orderId) },
+        orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((r) => ({ ...r, amount: Number(r.amount) }));
+}
+
+/** Every refund movement, with filters, for the finance endpoints. */
+export async function listRefundLegs({ status, page = 1, limit = 20 } = {}) {
+    const currentPage = Math.max(1, page);
+    const where = status ? { status } : {};
+    const [refunds, total] = await Promise.all([
+        prisma.foodOrderRefund.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            skip: (currentPage - 1) * limit,
+            take: limit,
+        }),
+        prisma.foodOrderRefund.count({ where }),
+    ]);
+    return {
+        refunds: refunds.map((r) => ({ ...r, amount: Number(r.amount) })),
+        total,
+        page: currentPage,
+        limit,
+        totalPages: Math.ceil(total / limit),
+    };
+}
+
+/**
  * Get refunds for an order.
  */
 export async function getRefundsByOrder(orderId) {

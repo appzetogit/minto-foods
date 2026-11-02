@@ -14,6 +14,7 @@ import restaurantIcon from "@food/assets/Dashboard-icons/image2.png"
 import inactiveIcon from "@food/assets/Dashboard-icons/image3.png"
 import { zoneLabel } from "@food/utils/entityLabels"
 import RestaurantBusinessEditor from "@food/components/admin/restaurant/RestaurantBusinessEditor"
+import { PlaceDetails, PlaceSuggestions } from "@food/utils/placesNew"
 
 /** Phone inputs take digits only, at most 10 (an Indian mobile). */
 const tenDigits = (value) => String(value || "").replace(/\D/g, "").slice(0, 10)
@@ -546,11 +547,11 @@ export default function RestaurantsList() {
     }
 
     if (!autocompleteServiceRef.current && window.google.maps.places.AutocompleteService) {
-      autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService()
+      autocompleteServiceRef.current = new PlaceSuggestions()
     }
     if (!placesServiceRef.current && window.google.maps.places.PlacesService) {
       const host = document.createElement("div")
-      placesServiceRef.current = new window.google.maps.places.PlacesService(host)
+      placesServiceRef.current = new PlaceDetails(host)
     }
     if (!placesSessionTokenRef.current && window.google.maps.places.AutocompleteSessionToken) {
       placesSessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken()

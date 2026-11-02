@@ -5,6 +5,7 @@ import RestaurantNavbar from "@food/components/restaurant/RestaurantNavbar"
 import { restaurantAPI, zoneAPI } from "@food/api"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { Loader } from "@googlemaps/js-api-loader"
+import { PlaceAutocomplete, PlaceDetails, PlaceSuggestions } from "@food/utils/placesNew"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -438,15 +439,15 @@ export default function ZoneSetup() {
       if (!isMounted || !placesReady) return
 
       if (window.google?.maps?.places?.AutocompleteService) {
-        autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService()
+        autocompleteServiceRef.current = new PlaceSuggestions()
       }
       if (window.google?.maps?.places?.PlacesService) {
         const host = mapInstanceRef.current || document.createElement("div")
-        placesServiceRef.current = new window.google.maps.places.PlacesService(host)
+        placesServiceRef.current = new PlaceDetails(host)
       }
 
       if (window.google?.maps?.places?.Autocomplete) {
-        const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
+        const autocomplete = new PlaceAutocomplete(autocompleteInputRef.current, {
           componentRestrictions: { country: "in" }
         })
 

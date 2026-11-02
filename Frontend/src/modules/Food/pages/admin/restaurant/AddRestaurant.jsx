@@ -10,6 +10,7 @@ import { adminAPI, uploadAPI, zoneAPI } from "@food/api"
 import { toast } from "sonner"
 import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
 import LocationPinMap from "@food/components/admin/restaurant/LocationPinMap"
+import { PlaceAutocomplete } from "@food/utils/placesNew"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => { console.warn(...args) }
 const debugError = (...args) => { console.error(...args) }
@@ -805,7 +806,7 @@ export default function AddRestaurant() {
       if (inputElement.hasAttribute('data-google-places-initialized')) return
 
       try {
-        autocomplete = new window.google.maps.places.Autocomplete(
+        autocomplete = new PlaceAutocomplete(
           inputElement,
           {
             fields: ["formatted_address", "address_components", "geometry"],
@@ -882,6 +883,11 @@ export default function AddRestaurant() {
   // Hybrid Search Fallback (Nominatim)
   useEffect(() => {
     if (step !== 1) return
+    // Google's list is showing; a second one would sit on top of it.
+    if (placesAutocompleteRef.current) {
+      setLocationSuggestions([])
+      return
+    }
     const q = String(locationSearchValue || "").trim()
     if (q.length < 3) {
       setLocationSuggestions([])

@@ -12,6 +12,7 @@ import RestaurantBusinessEditor from "@food/components/admin/restaurant/Restaura
 import CuisinePicker from "@food/components/admin/restaurant/CuisinePicker"
 import { HighlightBadgeSelect } from "@food/components/admin/restaurant/HighlightBadges"
 import LocationPinMap from "@food/components/admin/restaurant/LocationPinMap"
+import { PlaceAutocomplete } from "@food/utils/placesNew"
 
 const debugError = (..._args) => {}
 
@@ -263,7 +264,7 @@ export default function EditRestaurant() {
         return
       }
 
-      placesAutocompleteRef.current = new window.google.maps.places.Autocomplete(
+      placesAutocompleteRef.current = new PlaceAutocomplete(
         locationSearchInputRef.current,
         {
           fields: ["formatted_address", "address_components", "geometry"],

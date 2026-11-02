@@ -198,7 +198,7 @@ export async function getDashboardStats(query = {}) {
             where: { ...orderWhere, orderStatus: 'delivered' },
             _sum: {
                 total: true, restaurantCommission: true, platformFee: true,
-                deliveryFee: true, tax: true, platformProfit: true,
+                deliveryFee: true, tax: true, platformProfit: true, refundAmount: true,
             },
         }),
         monthlyTrend(orderWhere),
@@ -283,7 +283,8 @@ export async function getDashboardStats(query = {}) {
     const pending = countFor(PENDING_ORDER_STATUSES);
 
     const sums = deliveredTotals._sum;
-    const revenueTotal = num(sums.total);
+    // Net of what was refunded on those orders: that money went back.
+    const revenueTotal = Math.max(0, num(sums.total) - num(sums.refundAmount));
     const commissionTotal = num(sums.restaurantCommission);
     const platformFeeTotal = num(sums.platformFee);
     const gstTotal = num(sums.tax);

@@ -1,3 +1,4 @@
+import { PlaceDetails, PlaceSuggestions } from "@food/utils/placesNew"
 import { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Plus, MapPin, MoreHorizontal, Navigation, Home, Building2, Briefcase, Phone, X, Crosshair, Search } from "lucide-react"
@@ -152,10 +153,10 @@ export default function AddressSelectorPage() {
 
     if (!placesAutocompleteServiceRef.current) {
       placesAutocompleteServiceRef.current =
-        new window.google.maps.places.AutocompleteService()
+        new PlaceSuggestions()
     }
     if (!placesDetailsServiceRef.current) {
-      placesDetailsServiceRef.current = new window.google.maps.places.PlacesService(
+      placesDetailsServiceRef.current = new PlaceDetails(
         document.createElement("div"),
       )
     }

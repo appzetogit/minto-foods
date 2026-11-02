@@ -214,7 +214,7 @@ export const getUserRefundHistory = async (userId, query = {}) => {
         ],
     };
 
-    const [docs, total, walletRefunds] = await Promise.all([
+    const [docs, total, walletRefunds, refundedSum] = await Promise.all([
         prisma.foodOrder.findMany({
             where,
             select: {
@@ -233,6 +233,10 @@ export const getUserRefundHistory = async (userId, query = {}) => {
         prisma.transaction.findMany({
             where: { entityType: 'user', entityId: id, category: 'order_refund' },
             select: { orderId: true, amount: true },
+        }),
+        prisma.foodOrder.aggregate({
+            where: { userId: id, OR: [{ refundStatus: 'processed' }, { paymentStatus: 'refunded' }] },
+            _sum: { refundAmount: true },
         }),
     ]);
 
@@ -274,9 +278,8 @@ export const getUserRefundHistory = async (userId, query = {}) => {
     });
 
     return {
-        totalRefunded: refunds
-            .filter((r) => r.status === 'processed')
-            .reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
+        // Everything refunded to this customer, not just the page on screen.
+        totalRefunded: Number(refundedSum._sum.refundAmount) || 0,
         refunds,
         pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };

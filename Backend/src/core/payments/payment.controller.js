@@ -3,7 +3,7 @@ import { sendResponse } from '../../utils/response.js';
 import { getPaymentsByOrder } from './payment.service.js';
 import { getTransactionsByOrder } from './transaction.service.js';
 import { getWalletBalance, getWalletWithTransactions, getUserWalletForFrontend } from './wallet.service.js';
-import { getRefundsByOrder, listRefunds } from './refund.service.js';
+import { getRefundLegsByOrder, listRefundLegs } from './refund.service.js';
 import { createSettlement, processSettlement, listSettlements } from './settlement.service.js';
 import { logger } from '../../utils/logger.js';
 import { ForbiddenError, NotFoundError } from '../auth/errors.js';
@@ -135,7 +135,7 @@ export const getAdminFinanceSummaryController = async (req, res, next) => {
             where: { entityType_entityId: { entityType: 'admin', entityId: 'platform' } },
         });
         const pendingSettlements = await listSettlements({ status: 'pending', limit: 100 });
-        const pendingRefunds = await listRefunds({ status: 'pending', limit: 100 });
+        const pendingRefunds = await listRefundLegs({ status: 'pending', limit: 100 });
 
         return sendResponse(res, 200, 'Finance summary', {
             platform: {
@@ -200,7 +200,7 @@ export const listRefundsController = async (req, res, next) => {
         const { status } = req.query;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
-        const data = await listRefunds({ status, page, limit });
+        const data = await listRefundLegs({ status, page, limit });
         return sendResponse(res, 200, 'Refunds fetched', data);
     } catch (err) {
         next(err);
@@ -211,7 +211,7 @@ export const getRefundsByOrderController = async (req, res, next) => {
     try {
         const { orderId } = req.params;
         await assertOrderReadable(req, orderId);
-        const refunds = await getRefundsByOrder(orderId);
+        const refunds = await getRefundLegsByOrder(orderId);
         return sendResponse(res, 200, 'Refunds fetched', { refunds });
     } catch (err) {
         next(err);

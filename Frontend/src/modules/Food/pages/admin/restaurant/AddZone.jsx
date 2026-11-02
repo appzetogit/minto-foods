@@ -5,6 +5,7 @@ import { adminAPI } from "@food/api"
 import CityPicker from "@food/components/admin/zones/CityPicker"
 import { getGoogleMapsApiKey } from "@food/utils/googleMapsApiKey"
 import { Loader } from "@googlemaps/js-api-loader"
+import { PlaceDetails, PlaceSuggestions } from "@food/utils/placesNew"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -91,10 +92,10 @@ export default function AddZone() {
   useEffect(() => {
     if (!mapLoading && mapInstanceRef.current && autocompleteInputRef.current && window.google?.maps?.places) {
       if (!autocompleteServiceRef.current && window.google.maps.places.AutocompleteService) {
-        autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService()
+        autocompleteServiceRef.current = new PlaceSuggestions()
       }
       if (!placesServiceRef.current && window.google.maps.places.PlacesService) {
-        placesServiceRef.current = new window.google.maps.places.PlacesService(mapInstanceRef.current)
+        placesServiceRef.current = new PlaceDetails(mapInstanceRef.current)
       }
     }
   }, [mapLoading])
