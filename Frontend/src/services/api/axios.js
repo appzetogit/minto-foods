@@ -616,6 +616,15 @@ apiClient.interceptors.response.use(
   }
 );
 
+/** Where Socket.IO lives: the API's origin, without its /api/v1 path. */
+export const socketOrigin = () => {
+  try {
+    return new URL(baseURL || "/", window.location.origin).origin;
+  } catch (_) {
+    return "";
+  }
+};
+
 /**
  * Socket.IO auth for a module: the token is read on every (re)connect, so a
  * refreshed one is used.

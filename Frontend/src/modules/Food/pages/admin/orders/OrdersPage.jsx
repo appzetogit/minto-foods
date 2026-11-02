@@ -4,7 +4,7 @@ import io from "socket.io-client"
 import { FileText, Package } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
-import { keepSocketAuthorised } from "@/services/api/axios"
+import { keepSocketAuthorised, socketOrigin } from "@/services/api/axios"
 import { toast } from "sonner"
 
 import { usePaginationParams } from "@food/hooks/usePaginationParams"
@@ -900,7 +900,9 @@ export default function OrdersPage({ statusKey = "all" }) {
   }, [statusKey])
 
   useEffect(() => {
-    const backendUrl = API_BASE_URL.replace(/\/api\/?$/, "")
+    // The origin only: the API base ends in /api/v1, and Socket.IO reads a path as
+    // a namespace, which the server refuses. No live update ever arrived here.
+    const backendUrl = socketOrigin()
     // Backend disconnected - do not open Socket.IO (new backend in progress)
     if (!API_BASE_URL || !backendUrl || !backendUrl.startsWith("http")) {
       return undefined

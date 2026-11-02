@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { Loader2, RefreshCw, X, MapPin, Bike, AlertTriangle, Search } from "lucide-react"
 import { adminAPI } from "@food/api"
 import { API_BASE_URL } from "@food/api/config"
-import { keepSocketAuthorised } from "@/services/api/axios"
+import { keepSocketAuthorised, socketOrigin } from "@/services/api/axios"
 
 /**
  * Assign Rider: the manual-dispatch queue.
@@ -70,7 +70,9 @@ export default function AssignRider() {
 
   // Live: a new order needing a rider, a decline, an accept.
   useEffect(() => {
-    const backendUrl = API_BASE_URL.replace(/\/api\/?$/, "")
+    // The origin only: the API base ends in /api/v1, and Socket.IO reads a path as
+    // a namespace, which the server refuses. No live update ever arrived here.
+    const backendUrl = socketOrigin()
     if (!backendUrl.startsWith("http")) return undefined
     const socket = io(backendUrl, {
       transports: ["websocket", "polling"],
