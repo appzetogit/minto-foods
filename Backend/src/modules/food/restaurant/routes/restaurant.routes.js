@@ -83,7 +83,8 @@ import {
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { authMiddleware, optionalAuth } from '../../../../core/auth/auth.middleware.js';
 import { sendError, sendResponse } from '../../../../utils/response.js';
-import { listRestaurantReviews } from '../../orders/services/rating.service.js';
+import { listRestaurantReviews, listPublicRestaurantReviews } from '../../orders/services/rating.service.js';
+import { findApprovedRestaurant } from '../services/restaurantLookup.helper.js';
 import { getRestaurantFinanceController } from '../controllers/restaurantFinance.controller.js';
 import {
     listBannersController,
@@ -304,6 +305,18 @@ router.patch('/menu', authMiddleware, requireRestaurant, async (req, res, next) 
 
 // Feedback (restaurant dashboard)
 router.post('/feedback-experience', authMiddleware, requireRestaurant, feedbackExperienceController.createFeedbackExperience);
+
+// Public: ratings and reviews for a restaurant's page (user app).
+router.get('/restaurants/:id/reviews', cacheResponse(120, 'restaurant_reviews'), async (req, res, next) => {
+    try {
+        const restaurant = await findApprovedRestaurant(req.params.id);
+        if (!restaurant?.id) return sendResponse(res, 404, 'Restaurant not found', null);
+        const data = await listPublicRestaurantReviews(restaurant.id, req.query || {});
+        return sendResponse(res, 200, 'Reviews fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+});
 
 // Public: restaurant add-ons (user app)
 router.get('/restaurants/:id/addons', cacheResponse(600, 'restaurant_addons'), getPublicRestaurantAddonsController);

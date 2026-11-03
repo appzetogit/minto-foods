@@ -84,3 +84,27 @@ export async function listRestaurantReviews(restaurantId, { page = 1, limit = 20
         },
     };
 }
+
+/** "Tanu Chouhan" -> "Tanu C." : enough to read as a person, not to identify. */
+export function publicReviewerName(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length || parts[0].toLowerCase() === 'customer') return 'Customer';
+    return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
+}
+
+/**
+ * Reviews for the customer app's restaurant page. The restaurant's own list,
+ * minus anything private: no order ids, and the reviewer's first name only.
+ */
+export async function listPublicRestaurantReviews(restaurantId, query = {}) {
+    const { reviews, meta } = await listRestaurantReviews(restaurantId, query);
+    return {
+        reviews: reviews.map((r) => ({
+            rating: r.rating,
+            comment: r.comment,
+            customerName: publicReviewerName(r.customerName),
+            ratedAt: r.ratedAt,
+        })),
+        meta,
+    };
+}
