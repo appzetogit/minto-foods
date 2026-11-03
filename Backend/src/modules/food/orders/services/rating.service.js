@@ -89,7 +89,8 @@ export async function listRestaurantReviews(restaurantId, { page = 1, limit = 20
 export function publicReviewerName(name) {
     const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
     if (!parts.length || parts[0].toLowerCase() === 'customer') return 'Customer';
-    return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
+    const first = parts[0][0].toUpperCase() + parts[0].slice(1);
+    return parts.length > 1 ? `${first} ${parts[parts.length - 1][0].toUpperCase()}.` : first;
 }
 
 /**
