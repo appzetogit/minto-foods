@@ -71,6 +71,10 @@ const buildMenuFromFoods = async (foods = []) => {
             approvedAt: food.approvedAt,
             rejectedAt: food.rejectedAt,
             preparationTime: food.preparationTime || '',
+            // The dish's own score from customers' item ratings. Stored on the
+            // row but never sent, so no app could show it.
+            rating: Number(food.rating) || 0,
+            totalRatings: Number(food.totalRatings) || 0,
             createdAt: food.createdAt,
             updatedAt: food.updatedAt,
         });

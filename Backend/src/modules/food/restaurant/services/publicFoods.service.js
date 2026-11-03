@@ -122,6 +122,9 @@ export async function listPublicFoods(query = {}) {
                 // could clear it.
                 variants: serializeFoodVariants(food.variants),
                 variations: serializeFoodVariants(food.variants),
+                // The dish's own rating, as on the restaurant menu.
+                rating: Number(food.rating) || 0,
+                totalRatings: Number(food.totalRatings) || 0,
                 image: food.image || '',
                 // Falls back to the single image so a dish saved before galleries
                 // existed still returns a one-entry list.
