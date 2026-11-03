@@ -138,6 +138,9 @@ export function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt,
     customerName: s(payload?.customerName || riderContact(order).name || ''),
     customerPhone: s(payload?.customerPhone || riderContact(order).phone || ''),
     itemsCount: s(Array.isArray(order?.items) ? order.items.length : ''),
+    // The customer's note for the rider. The popup is built from this push
+    // alone, so without it the note never showed on the offer.
+    deliveryInstructions: s(order?.deliveryInstructions || ''),
   };
 }
 
