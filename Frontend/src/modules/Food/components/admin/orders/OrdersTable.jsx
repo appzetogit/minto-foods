@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck, UserPlus } from "lucide-react"
 import { refundPicture } from "./RefundModal"
+import { stageColor } from "./orderStage"
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -432,11 +433,16 @@ export default function OrdersTable({
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.orderStatus)}`}>
-                          {order.orderStatus}
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${stageColor(order.stageLabel) || getStatusColor(order.orderStatus)}`}>
+                          {order.stageLabel || order.orderStatus}
                         </span>
                         <span className="text-xs text-slate-500">{order.deliveryType}</span>
                       </div>
+                      {order.stageNote ? (
+                        <div className={`text-xs ${order.stageLate ? "font-semibold text-red-600" : "text-slate-500"}`}>
+                          {order.stageNote}
+                        </div>
+                      ) : null}
                       {order.cancellationReason && (
                         <div className="text-xs text-red-600 mt-1">
                           <span className="font-medium">
