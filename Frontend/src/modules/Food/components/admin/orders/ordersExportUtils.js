@@ -37,7 +37,7 @@ export const exportToCSV = (orders, filename = "orders") => {
       order.restaurant,
       order.total || `Rs. ${(order.totalAmount || 0).toFixed(2)}`,
       order.paymentStatus === 'cod_pending' ? 'Cash on Delivery' : (order.paymentStatus || ""),
-      order.orderStatus || "",
+      order.stageLabel || order.orderStatus || "",
       order.deliveryType || ""
     ])
   }
@@ -131,7 +131,7 @@ export const exportToExcel = (orders, filename = "orders") => {
       restaurantLabel(order.restaurant, 'N/A'),
       order.total || `Rs. ${(order.totalAmount || 0).toFixed(2)}`,
       order.paymentStatus === 'cod_pending' ? 'Cash on Delivery' : (order.paymentStatus || 'N/A'),
-      order.orderStatus || 'N/A',
+      order.stageLabel || order.orderStatus || 'N/A',
       order.deliveryType || 'N/A'
     ])
   }
@@ -305,7 +305,7 @@ export const exportToPDF = async (orders, filename = "orders") => {
           restaurantLabel(order.restaurant, 'N/A'),
           amount ? `Rs. ${Number(amount).toFixed(2)}` : 'N/A',
           order.paymentStatus === 'cod_pending' ? 'Cash on Delivery' : (order.paymentStatus || 'N/A'),
-          order.orderStatus || 'N/A',
+          order.stageLabel || order.orderStatus || 'N/A',
           order.deliveryType || 'N/A'
         ]
       })

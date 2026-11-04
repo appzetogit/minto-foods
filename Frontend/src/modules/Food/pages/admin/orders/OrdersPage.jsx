@@ -14,6 +14,7 @@ import FilterPanel from "@food/components/admin/orders/FilterPanel"
 import ViewOrderDialog from "@food/components/admin/orders/ViewOrderDialog"
 import SettingsDialog from "@food/components/admin/orders/SettingsDialog"
 import RefundModal from "@food/components/admin/orders/RefundModal"
+import { orderStage } from "@food/components/admin/orders/orderStage"
 import { RiderPicker } from "@food/pages/admin/dispatch/AssignRider"
 import { useOrdersManagement } from "@food/components/admin/orders/useOrdersManagement"
 import { Loader2 } from "lucide-react"
@@ -755,7 +756,13 @@ export default function OrdersPage({ statusKey = "all" }) {
         totalAmount,
         paymentType,
         paymentStatus,
+        // orderStatus stays the broad group the buttons and tabs go by; the stage
+        // is what the list shows.
         orderStatus: displayStatus,
+        ...(() => {
+          const stage = orderStage(order, backendStatus, deliveryPartnerName)
+          return { stageLabel: stage.label || displayStatus, stageNote: stage.note, stageLate: stage.late }
+        })(),
         deliveryPartnerName,
         deliveryPartnerPhone,
         deliveryType: order.deliveryType || "Home Delivery",
