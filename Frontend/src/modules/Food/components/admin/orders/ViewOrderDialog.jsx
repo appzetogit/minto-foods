@@ -248,7 +248,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Order Status</p>
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(order.orderStatus)}`}>
-                    {order.orderStatus}
+                    {order.stageLabel || order.orderStatus}
                   </span>
                   {order.cancellationReason && (
                     <p className="text-xs text-red-600 mt-1">
