@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BellRing, Loader2, Search, Send, Trash2 } from "lucide-react";
 import { adminAPI, uploadAPI } from "@food/api";
+import { toast } from "sonner";
 
 const TARGET_OPTIONS = [
   { value: "ALL", label: "All" },
@@ -56,6 +57,10 @@ export default function NotificationBroadcast() {
     couponId: "",
     // Optional picture, shown big in the phone tray and in the app's list.
     imageUrl: "",
+    // What tapping it opens in the customer app: "" (home), "offers", or
+    // "restaurant" with openRestaurantId.
+    openTarget: "",
+    openRestaurantId: "",
   });
   const [imageUploading, setImageUploading] = useState(false);
   const [imageError, setImageError] = useState("");
@@ -146,11 +151,12 @@ export default function NotificationBroadcast() {
     loadHistory();
   }, []);
 
+  // Also loaded for the "opens a restaurant" picker, which lists restaurants.
   useEffect(() => {
-    if (form.targetType !== "CUSTOM") return;
+    if (form.targetType !== "CUSTOM" && form.openTarget !== "restaurant") return;
     if (allRecipients.length > 0) return;
     loadRecipients();
-  }, [allRecipients.length, form.targetType]);
+  }, [allRecipients.length, form.targetType, form.openTarget]);
 
   useEffect(() => {
     if (form.targetType !== "CUSTOM") {
@@ -235,9 +241,20 @@ export default function NotificationBroadcast() {
     };
   }, [form.targetType, form.lapsedDays, form.lapsedIncludeNeverOrdered]);
 
+  const openLink =
+    form.openTarget === "offers"
+      ? "/all-offers"
+      : form.openTarget === "restaurant" && form.openRestaurantId
+        ? `/restaurant-detail/${form.openRestaurantId}`
+        : "";
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.title.trim() || !form.message.trim()) return;
+    if (form.openTarget === "restaurant" && !form.openRestaurantId) {
+      toast.error("Choose the restaurant this notification opens");
+      return;
+    }
     if (form.targetType === "CUSTOM" && selectedRecipients.length === 0) return;
     // The API rejects an empty audience anyway; catching it here means the
     // admin is told before the request rather than by a 400.
@@ -251,6 +268,8 @@ export default function NotificationBroadcast() {
         targetType: form.targetType,
         ...(form.couponId ? { couponId: form.couponId } : {}),
         ...(form.imageUrl ? { imageUrl: form.imageUrl } : {}),
+        // In-app route the customer app opens on tap; empty opens the app.
+        ...(openLink ? { link: openLink } : {}),
         ...(form.targetType === "LAPSED"
           ? {
               lapsedDays: Number(form.lapsedDays) || 30,
@@ -271,7 +290,7 @@ export default function NotificationBroadcast() {
               }))
             : [],
       });
-      setForm({ title: "", message: "", targetType: "ALL", imageUrl: "" });
+      setForm({ title: "", message: "", targetType: "ALL", imageUrl: "", openTarget: "", openRestaurantId: "" });
       setSelectedRecipients([]);
       setSearch("");
       window.dispatchEvent(new Event("adminBroadcastUpdated"));
@@ -435,6 +454,38 @@ export default function NotificationBroadcast() {
               {form.couponId
                 ? "Recipients are given access to this code as the campaign sends, so it works the moment they read the message. The code is added to the end of your message unless you have already written it in."
                 : "Optional. A customer-specific coupon is granted to everyone this campaign reaches."}
+            </p>
+          </div>
+
+          <div>
+            <span className="text-sm font-semibold text-slate-700">Opens on tap (customer app)</span>
+            <select
+              value={form.openTarget}
+              onChange={(event) => setForm((prev) => ({ ...prev, openTarget: event.target.value }))}
+              className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">Home</option>
+              <option value="offers">Offers page</option>
+              <option value="restaurant">A restaurant</option>
+            </select>
+            {form.openTarget === "restaurant" ? (
+              <select
+                value={form.openRestaurantId}
+                onChange={(event) => setForm((prev) => ({ ...prev, openRestaurantId: event.target.value }))}
+                className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">Choose a restaurant</option>
+                {allRecipients
+                  .filter((r) => r.ownerType === "RESTAURANT" && r.ownerId)
+                  .map((r) => (
+                    <option key={r.ownerId} value={r.ownerId}>
+                      {r.label}
+                    </option>
+                  ))}
+              </select>
+            ) : null}
+            <p className="mt-1 text-xs text-slate-500">
+              A restaurant or offer campaign should open that restaurant or the offers page, not just the app.
             </p>
           </div>
 
