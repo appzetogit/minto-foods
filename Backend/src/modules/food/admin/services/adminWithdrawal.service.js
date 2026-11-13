@@ -235,6 +235,37 @@ export async function updateDeliveryWithdrawalStatus(
         const locked = Number(wallet?.lockedAmount) || 0;
 
         if (next === 'approved') {
+            // Paid only from what the rider actually has: this request is
+            // already counted in "pending", so it fits when available covers it
+            // again. Five duplicate requests were all approvable before.
+            const { riderBalance } = await import('../../delivery/services/riderBalance.service.js');
+            const balance = await riderBalance(claimed.deliveryPartnerId, tx);
+            const canPay = Math.round((balance.totalEarned - balance.paidOut - (balance.pending - amount)) * 100) / 100;
+            if (amount > canPay) {
+                throw new ValidationError(
+                    `This rider has ₹${canPay} to withdraw, less than this request of ₹${amount}. Reject it, or pay a smaller amount.`,
+                );
+            }
+            // Delivery earnings are not posted to the ledger as they happen, so
+            // it is brought up to the payout before the debit, with a row saying
+            // why. Only the shortfall, once per request.
+            const ledger = await tx.wallet.findUnique({ where: walletKey });
+            const shortfall = Math.round((amount - (Number(ledger?.balance) || 0)) * 100) / 100;
+            if (shortfall > 0) {
+                await recordTransaction(
+                    {
+                        entityType: 'deliveryBoy',
+                        entityId: claimed.deliveryPartnerId,
+                        type: 'credit',
+                        amount: shortfall,
+                        description: 'Delivery earnings brought into the ledger for a payout',
+                        category: 'delivery_earning',
+                        idempotencyKey: `earnings_for_payout:${id}`,
+                        metadata: { withdrawalId: String(id) },
+                    },
+                    { client: tx },
+                );
+            }
             // Release the reservation before the debit. The database refuses a
             // locked amount above the balance, so debiting first failed every
             // payout of a rider's whole balance (locked 500, balance 500 -> 0)

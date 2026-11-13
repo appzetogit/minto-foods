@@ -105,11 +105,21 @@ export async function getBulkDeliveryPartnerStats(partnerIds) {
         if (row.status === 'pending') stats.pendingWithdrawal = num(row._sum.amount);
     }
 
+    // Same numbers as the rider app (riderBalance.service.js): cancelled-order
+    // pay, manual adjustments and balance-sheet payouts were left out here.
+    const { riderBalances } = await import('../../delivery/services/riderBalance.service.js');
+    const balances = await riderBalances(ids);
+    for (const [id, b] of balances) {
+        const stats = at(id);
+        if (!stats) continue;
+        stats.totalEarning = b.earned;
+        stats.bonus = Math.round((b.bonus + b.adjustments) * 100) / 100;
+        stats.totalWithdrawn = b.paidOut;
+        stats.pendingWithdrawal = b.pending;
+        stats.pocketBalance = b.available;
+    }
+
     for (const stats of statsMap.values()) {
-        // What the rider can still withdraw: earned plus bonuses, less what has
-        // been paid out and what is already claimed.
-        stats.pocketBalance =
-            stats.totalEarning + stats.bonus - stats.totalWithdrawn - stats.pendingWithdrawal;
         // Cash they collected on our behalf and have not yet handed in.
         stats.cashInHand = stats.cashCollected - stats.totalDeposited;
     }

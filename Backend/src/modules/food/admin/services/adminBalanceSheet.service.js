@@ -364,6 +364,20 @@ export async function payoutEntity(entityType, entityId, body = {}) {
             throw new ValidationError('Some of these orders were just paid out by someone else. Reload and try again.');
         }
 
+        // A rider can be paid here or through a withdrawal request, and the two
+        // did not know about each other: the same ₹258 went out both ways. Both
+        // now draw on one balance.
+        if (!isRestaurant) {
+            const { riderBalance } = await import('../../delivery/services/riderBalance.service.js');
+            const balance = await riderBalance(String(entityId), tx);
+            if (amount > balance.available) {
+                throw new ValidationError(
+                    `This rider has ₹${balance.available} left to be paid (after withdrawals already paid or waiting). ` +
+                        `Paying ₹${amount} here would pay them twice.`,
+                );
+            }
+        }
+
         const settlement = await tx.settlement.create({
             data: {
                 entityType: isRestaurant ? 'restaurant' : 'deliveryBoy',

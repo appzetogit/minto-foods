@@ -11,8 +11,10 @@ import {
 } from '../../orders/helpers/razorpay.helper.js';
 import { logger } from '../../../../utils/logger.js';
 import { recordTransaction } from '../../../../core/payments/transaction.service.js';
+import { riderBalance } from './riderBalance.service.js';
 
 const num = (v) => Number(v) || 0;
+const money2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 /** The rider's wallet row in the unified wallets table. */
 const walletKey = (deliveryPartnerId) => ({
@@ -114,40 +116,24 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const byStatus = (status) =>
         num(withdrawalsByStatus.find((r) => r.status === status)?._sum?.amount);
 
-    const aggTotalEarned = num(earningsAgg?._sum?.riderEarning);
     const grossCashCollected = num(cashCollectedAgg?._sum?.total);
     const totalDepositedCash = num(cashDepositsAgg?._sum?.amount);
     const computedCashInHand = Math.max(0, grossCashCollected - totalDepositedCash);
-    const aggTotalBonus = num(bonusAgg?._sum?.amount);
-    const aggTotalWithdrawn = byStatus('approved');
-    const pendingWithdrawals = byStatus('pending');
-
-    // Merge computed metrics with wallet ledger values, so admin bonuses and manual
-    // wallet adjustments are not lost behind stale pocket totals.
-    const walletBalance = num(walletDoc?.balance);
-    const walletLockedAmount = num(walletDoc?.lockedAmount);
-    const walletCashInHand = num(walletDoc?.cashInHand);
-    const walletTotalEarnings = num(walletDoc?.totalEarnings);
-    const walletTotalBonus = num(walletDoc?.totalBonus);
-    const walletTotalSettled = num(walletDoc?.totalSettled);
-
-    const totalEarned = Math.max(aggTotalEarned, walletTotalEarnings);
-    const totalBonus = Math.max(aggTotalBonus, walletTotalBonus);
-    const totalWithdrawn = Math.max(aggTotalWithdrawn, walletTotalSettled);
-    const cashInHand = Math.max(computedCashInHand, walletCashInHand);
+    const cashInHand = Math.max(computedCashInHand, num(walletDoc?.cashInHand));
 
     const totalCashLimit = num(cashLimitSettings.deliveryCashLimit);
     const deliveryWithdrawalLimit = num(cashLimitSettings.deliveryWithdrawalLimit) || 100;
 
-    // Pocket balance = (earnings + bonus) − approved withdrawals − pending withdrawals,
-    // floored at the ledger balance so manual adjustments are honoured.
-    const computedPocketBalance = Math.max(
-        0,
-        totalEarned + totalBonus - (totalWithdrawn + pendingWithdrawals),
-    );
-    const effectiveLockedAmount = Math.max(walletLockedAmount, pendingWithdrawals);
-    const availableWalletBalance = Math.max(0, walletBalance - effectiveLockedAmount);
-    const pocketBalance = Math.max(computedPocketBalance, availableWalletBalance);
+    // One calculation for every screen (see riderBalance.service.js). This
+    // took the larger of the order totals and the ledger's lifetime counter,
+    // which already held every bonus, so bonuses and add-ons counted twice.
+    const balance = await riderBalance(partnerId);
+    const totalEarned = balance.earned;
+    const totalBonus = money2(balance.bonus + balance.adjustments);
+    const totalWithdrawn = balance.paidOut;
+    const pendingWithdrawals = balance.pending;
+    const effectiveLockedAmount = pendingWithdrawals;
+    const pocketBalance = balance.available;
 
     const transactions = [
         ...(ordersTx || []).map((o) => {
@@ -215,49 +201,33 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
     if (amount < wallet.deliveryWithdrawalLimit) {
         throw new ValidationError(`Minimum withdrawal amount is ₹${wallet.deliveryWithdrawalLimit}`);
     }
-    if (amount > wallet.pocketBalance) {
-        throw new ValidationError('Insufficient balance for this withdrawal');
-    }
-
+    // The balance is checked inside the lock below, where it cannot change.
     const partnerId = String(deliveryPartnerId);
-    const [partner, walletDoc, pendingAgg] = await Promise.all([
-        prisma.foodDeliveryPartner.findUnique({ where: { id: partnerId } }),
-        prisma.wallet.findUnique({ where: walletKey(partnerId) }),
-        prisma.foodDeliveryWithdrawal.aggregate({
-            where: { deliveryPartnerId: partnerId, status: 'pending' },
-            _sum: { amount: true },
-        }),
-    ]);
-
+    const partner = await prisma.foodDeliveryPartner.findUnique({ where: { id: partnerId } });
     if (!partner) throw new ValidationError('Delivery partner not found');
 
-    const pendingBefore = num(pendingAgg?._sum?.amount);
-    const currentBalance = num(walletDoc?.balance);
-    const currentLocked = num(walletDoc?.lockedAmount);
-    const effectiveLockedBefore = Math.max(currentLocked, pendingBefore);
-    const computedAvailableBalance = num(wallet.pocketBalance);
-    const targetLedgerBalance = Math.max(currentBalance, effectiveLockedBefore + computedAvailableBalance);
-    const availableBalance = Math.max(0, targetLedgerBalance - effectiveLockedBefore);
+    // One rider at a time, checked inside the lock: two taps on Withdraw (or a
+    // retried request) each passed the balance check on their own and each
+    // created a request -- five ₹300 requests in a minute on one account.
+    return prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`rider_withdrawal:${partnerId}`}))`;
 
-    if (amount > availableBalance) {
-        throw new ValidationError('Insufficient balance for this withdrawal');
-    }
+        const waiting = await tx.foodDeliveryWithdrawal.findFirst({
+            where: { deliveryPartnerId: partnerId, status: 'pending' },
+            select: { amount: true },
+        });
+        if (waiting) {
+            throw new ValidationError(
+                `You already have a withdrawal of ₹${num(waiting.amount)} waiting. You can ask again once it is paid.`,
+            );
+        }
 
-    // The rider's money still has two sources of truth here — the wallet ledger,
-    // and aggregates over orders/bonuses/deposits — because organic delivery
-    // earnings are never posted to the ledger as they happen. Reconciling that
-    // properly means crediting every delivered order to the ledger at
-    // completion time, which is a bigger change than this withdrawal path
-    // should carry.
-    //
-    // What this path controls is narrower: it must never move the stored
-    // balance without a transaction row explaining why. So instead of writing
-    // targetLedgerBalance directly, the gap between it and the ledger's current
-    // balance is posted as a real credit through recordTransaction — same
-    // number, but now with a description, a category, and an idempotency key
-    // tied to this withdrawal request, so a retry can't post it twice.
-    const withdrawal = await prisma.$transaction(async (tx) => {
-        const created = await tx.foodDeliveryWithdrawal.create({
+        const balance = await riderBalance(partnerId, tx);
+        if (amount > balance.available) {
+            throw new ValidationError(`You can withdraw up to ₹${balance.available}`);
+        }
+
+        return tx.foodDeliveryWithdrawal.create({
             data: {
                 deliveryPartnerId: partnerId,
                 amount,
@@ -273,41 +243,7 @@ export const requestDeliveryWithdrawal = async (deliveryPartnerId, payload) => {
                 status: 'pending',
             },
         });
-
-        const syncDelta = targetLedgerBalance - currentBalance;
-        if (syncDelta > 0) {
-            await recordTransaction(
-                {
-                    entityType: 'deliveryBoy',
-                    entityId: partnerId,
-                    type: 'credit',
-                    amount: syncDelta,
-                    description: 'Delivery earnings synced to wallet ledger',
-                    category: 'adjustment',
-                    idempotencyKey: `earnings_sync:${created.id}`,
-                    metadata: { withdrawalId: created.id },
-                },
-                { client: tx },
-            );
-        }
-
-        await tx.wallet.upsert({
-            where: walletKey(partnerId),
-            create: {
-                entityType: 'deliveryBoy',
-                entityId: partnerId,
-                balance: targetLedgerBalance,
-                lockedAmount: effectiveLockedBefore + amount,
-            },
-            update: {
-                lockedAmount: effectiveLockedBefore + amount,
-            },
-        });
-
-        return created;
     });
-
-    return withdrawal;
 };
 
 export const createDeliveryCashDepositOrder = async (deliveryPartnerId, amountInr) => {
