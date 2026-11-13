@@ -412,9 +412,16 @@ export async function checkEarningAddonCompletions(deliveryPartnerId, _force = f
                         data: {
                             offerId: offer.id,
                             deliveryPartnerId: partnerId,
-                            ordersCompleted: orderCount,
+                            // The target, not however many orders the sweep
+                            // happened to find by then: the history read "4 / 2"
+                            // as if the offer had kept counting past its goal.
+                            ordersCompleted: offer.criteria === 'online_hours'
+                                ? orderCount
+                                : Math.min(orderCount, offer.requiredOrders || orderCount),
                             ordersRequired: offer.requiredOrders,
-                            onlineMinutesCompleted: onlineMinutes,
+                            onlineMinutesCompleted: offer.criteria === 'online_hours'
+                                ? Math.min(onlineMinutes, offer.requiredOnlineMinutes || onlineMinutes)
+                                : onlineMinutes,
                             onlineMinutesRequired: offer.requiredOnlineMinutes || 0,
                             earningAmount: offer.earningAmount,
                             totalEarning: offer.earningAmount,

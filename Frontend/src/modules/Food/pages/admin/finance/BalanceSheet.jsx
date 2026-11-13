@@ -239,6 +239,7 @@ export default function BalanceSheet() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <Stat label={isRestaurants ? "Restaurants owed" : "Riders"} value={totals.entities ?? 0} />
           <Stat label={isRestaurants ? "Orders" : "Deliveries"} value={(isRestaurants ? totals.orders : totals.deliveries) ?? 0} />
+          {!isRestaurants && <Stat label="Riders earned this period" value={money(totals.weekEarnings ?? 0)} />}
           <Stat
             label={isRestaurants ? "Commission kept" : "Cash held by riders"}
             value={money(isRestaurants ? totals.commission : totals.cashInHand)}
@@ -292,7 +293,9 @@ export default function BalanceSheet() {
                       </>
                     ) : (
                       <>
-                        <Th align="right">Earnings</Th>
+                        <Th align="right">Earned this period</Th>
+                        <Th align="right">Already paid</Th>
+                        <Th align="right">Unpaid earnings</Th>
                         <Th align="right">Bonus</Th>
                         <Th align="right">Cash In Hand</Th>
                       </>
@@ -323,6 +326,8 @@ export default function BalanceSheet() {
                         </>
                       ) : (
                         <>
+                          <td className="px-4 py-3 text-right text-sm text-slate-900 font-medium">{money(row.weekEarnings ?? row.earnings)}</td>
+                          <td className="px-4 py-3 text-right text-sm text-emerald-700">{money(row.alreadyPaid ?? 0)}</td>
                           <td className="px-4 py-3 text-right text-sm text-slate-700">{money(row.earnings)}</td>
                           <td className="px-4 py-3 text-right text-sm text-slate-700">{money(row.bonus)}</td>
                           <td className="px-4 py-3 text-right text-sm text-slate-700">{money(row.cashInHand)}</td>
@@ -369,16 +374,22 @@ export default function BalanceSheet() {
                 <table className="w-full">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
+                      <Th>Paid to</Th>
                       <Th>Period</Th>
                       <Th align="right">Amount</Th>
                       <Th align="right">Orders closed</Th>
                       <Th>Reference</Th>
                       <Th>Paid at</Th>
+                      <Th>Recorded by</Th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {history.map((h) => (
                       <tr key={h.id}>
+                        <td className="px-4 py-3 text-sm text-slate-900">
+                          <span className="font-medium">{h.entityName || "Unknown"}</span>
+                          <span className="block text-xs text-slate-500">{h.entityType === "rider" ? "Rider" : "Restaurant"}</span>
+                        </td>
                         <td className="px-4 py-3 text-sm text-slate-700">
                           {h.periodStart ? new Date(h.periodStart).toLocaleDateString() : "—"} –{" "}
                           {h.periodEnd ? new Date(h.periodEnd).toLocaleDateString() : "—"}
@@ -389,6 +400,7 @@ export default function BalanceSheet() {
                         <td className="px-4 py-3 text-sm text-slate-600">
                           {h.processedAt ? new Date(h.processedAt).toLocaleString() : "—"}
                         </td>
+                        <td className="px-4 py-3 text-sm text-slate-600">{h.processedByName || "—"}</td>
                       </tr>
                     ))}
                   </tbody>

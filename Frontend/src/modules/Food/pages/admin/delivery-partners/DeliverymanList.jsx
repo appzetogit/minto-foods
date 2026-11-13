@@ -502,7 +502,7 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
   }
 
   const DETAIL_FIELDS = [
-    "zoneId", "city", "vehicleType", "vehicleName", "vehicleNumber",
+    "name", "phone", "zoneId", "city", "vehicleType", "vehicleName", "vehicleNumber",
     "bankAccountHolderName", "bankAccountNumber", "bankIfscCode", "bankName", "upiId",
   ]
 
@@ -516,7 +516,10 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
     if (!id) return
     try {
       setSavingDetails(true)
-      const response = await adminAPI.updateDeliveryPartnerProfile(id, detailsForm)
+      const payload = { ...detailsForm }
+      if (String(payload.name ?? "").trim() === String(detailsFor?.name ?? "").trim()) delete payload.name
+      if (String(payload.phone ?? "").trim() === String(detailsFor?.phone ?? "").trim()) delete payload.phone
+      const response = await adminAPI.updateDeliveryPartnerProfile(id, payload)
       const zone = zones.find((z) => String(z.id || z._id) === String(detailsForm.zoneId))
       patchRow(id, { ...detailsForm, zoneName: zone?.name || "", zone: zone?.name || detailsForm.city || "" })
       toast.success(response?.data?.message || "Delivery partner updated")
@@ -884,13 +887,22 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                   </button>
                                 </>
                               ) : (
+                                <>
                                 <button
-                                  onClick={() => startEditingWallet(dm)}
+                                  onClick={() => openDetails(dm)}
                                   className="p-1.5 rounded bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
-                                  title="Edit name, phone and wallet"
+                                  title="Edit rider: name, phone, zone, vehicle, bank / UPI"
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </button>
+                                <button
+                                  onClick={() => startEditingWallet(dm)}
+                                  className="p-1.5 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                                  title="Adjust wallet balance and cash in hand"
+                                >
+                                  <CreditCard className="w-4 h-4" />
+                                </button>
+                                </>
                               )}
                               <button 
                                 onClick={() => handleView(dm)}
@@ -898,13 +910,6 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
                                 title="View Details"
                               >
                                 <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => openDetails(dm)}
-                                className="p-1.5 rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors"
-                                title="Edit zone, vehicle and bank details"
-                              >
-                                <Bike className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleBlockToggle(dm)}
@@ -1338,13 +1343,32 @@ availableCashLimit: deliveryman.availableCashLimit || 0,
         </DialogContent>
       </Dialog>
 
-      {/* Edit details: zone, vehicle, bank / UPI (name and phone edit in the row) */}
+      {/* Edit rider: everything an admin can change, in one place, like a restaurant. */}
       <Dialog open={Boolean(detailsFor)} onOpenChange={(open) => { if (!open) setDetailsFor(null) }}>
         <DialogContent className="max-w-2xl bg-white max-h-[85vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle>Edit {detailsFor?.name || "delivery partner"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-medium text-slate-600">
+                Name
+                <input
+                  value={detailsForm.name ?? ""}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, name: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                Phone
+                <input
+                  value={detailsForm.phone ?? ""}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, phone: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+                />
+                <span className="block text-[11px] text-slate-400 mt-0.5">Changing it signs the rider out; they log in with the new number.</span>
+              </label>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-medium text-slate-600">
                 Zone
