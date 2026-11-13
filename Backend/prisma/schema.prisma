@@ -1547,6 +1547,11 @@ model FoodOrder {
   scheduledAt   DateTime?
 
   riderEarning   Decimal @default(0) @db.Decimal(14, 2)
+  /// What the rider is paid for this order when it was cancelled while they
+  /// were on it. Set by the food_order_rider_cancel_pay trigger; an admin can
+  /// change it. Null: not cancelled with a rider, pays nothing.
+  riderCancelPay       Decimal? @db.Decimal(14, 2)
+  riderCancelPayReason String?
   /// Can be negative when discounts/rider pay exceed platform income.
   platformProfit Decimal @default(0) @db.Decimal(14, 2)
   /// See FoodTransaction.priceMarkupAmount.
@@ -1815,6 +1820,8 @@ model FoodSettings {
   /// How many accepted, unfinished orders one rider may carry at once (peak
   /// time batching). 1 = one trip at a time, the behaviour before this existed.
   maxActiveOrdersPerRider   Int @default(1)
+  /// Rider pay for an order cancelled after they reached the restaurant.
+  riderPayCancelAtRestaurant Decimal @default(10) @db.Decimal(14, 2)
   updatedByRole    String?
   updatedByAdminId String?   @db.VarChar(24)
   updatedAtBy      DateTime?

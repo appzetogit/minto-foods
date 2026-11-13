@@ -367,6 +367,34 @@ test('deassign and resend works at every stage until delivery', async () => {
     await assert.rejects(() => deassignAndResendOrderAdmin(picked, null), /already delivered/);
 });
 
+test('a cancelled order pays the rider by how far they got', async () => {
+    const onIt = async (stage) => {
+        const id = await confirmedOrder();
+        const rider = await makeRider(`Cancel${stage}${Date.now()}`);
+        await assignRiderManually(id, rider.id, null);
+        await acceptOrderDelivery(id, rider.id);
+        const data = { riderEarning: 40 };
+        if (stage !== 'before') data.reachedPickupAt = new Date();
+        if (stage === 'picked') data.pickedUpAt = new Date();
+        await prisma.foodOrder.update({ where: { id }, data });
+        await prisma.foodOrder.update({ where: { id }, data: { orderStatus: 'cancelled_by_admin' } });
+        return prisma.foodOrder.findUnique({ where: { id }, select: { riderCancelPay: true, riderCancelPayReason: true } });
+    };
+    const settings = await prisma.foodSettings.findUnique({ where: { key: 'dispatch' } });
+    const atRestaurant = settings ? Number(settings.riderPayCancelAtRestaurant) : 10;
+
+    assert.equal(Number((await onIt('before')).riderCancelPay), 0, 'not yet at the restaurant: nothing');
+    assert.equal(Number((await onIt('reached')).riderCancelPay), atRestaurant, 'at the restaurant: the set amount');
+    const picked = await onIt('picked');
+    assert.equal(Number(picked.riderCancelPay), 40, 'after pickup: the full trip pay');
+    assert.match(picked.riderCancelPayReason, /after pickup/);
+
+    // No rider on it: nothing is set.
+    const empty = await confirmedOrder();
+    await prisma.foodOrder.update({ where: { id: empty }, data: { orderStatus: 'cancelled_by_admin' } });
+    assert.equal((await prisma.foodOrder.findUnique({ where: { id: empty } })).riderCancelPay, null);
+});
+
 test('a reassignment request on an order that is over closes by itself', async () => {
     const { createOrderEmergencyRequest, listOrderEmergencyRequestsAdmin } = await import('../../delivery/services/orderEmergencyRequest.service.js');
     const id = await confirmedOrder();

@@ -47,10 +47,19 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     ] = await Promise.all([
         getDeliveryCashLimitSettings(),
         // 1. Total earnings from delivered orders
-        prisma.foodOrder.aggregate({
-            where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
-            _sum: { riderEarning: true },
-        }),
+        Promise.all([
+            prisma.foodOrder.aggregate({
+                where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
+                _sum: { riderEarning: true },
+            }),
+            // Pay for orders cancelled while the rider was on them.
+            prisma.foodOrder.aggregate({
+                where: { dispatchDeliveryPartnerId: partnerId, riderCancelPay: { gt: 0 } },
+                _sum: { riderCancelPay: true },
+            }),
+        ]).then(([delivered, cancelled]) => ({
+            _sum: { riderEarning: num(delivered._sum.riderEarning) + num(cancelled._sum.riderCancelPay) },
+        })),
         // 2. Gross cash collected (COD orders)
         prisma.foodOrder.aggregate({
             where: {
@@ -89,11 +98,14 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
         }),
         prisma.wallet.findUnique({ where: walletKey(partnerId) }),
         prisma.foodOrder.findMany({
-            where: { dispatchDeliveryPartnerId: partnerId, orderStatus: 'delivered' },
+            where: {
+                dispatchDeliveryPartnerId: partnerId,
+                OR: [{ orderStatus: 'delivered' }, { riderCancelPay: { gt: 0 } }],
+            },
             orderBy: { createdAt: 'desc' },
             select: {
                 id: true, orderId: true, riderEarning: true, paymentMethod: true,
-                orderStatus: true, createdAt: true,
+                orderStatus: true, createdAt: true, riderCancelPay: true, riderCancelPayReason: true,
             },
             take: 20,
         }),
@@ -138,15 +150,20 @@ export const getDeliveryPartnerWalletEnhanced = async (deliveryPartnerId) => {
     const pocketBalance = Math.max(computedPocketBalance, availableWalletBalance);
 
     const transactions = [
-        ...(ordersTx || []).map((o) => ({
-            id: o.id,
-            type: 'payment',
-            amount: num(o.riderEarning),
-            status: 'Completed',
-            date: o.createdAt,
-            description: o.paymentMethod === 'cash' ? 'COD delivery earning' : 'Online delivery earning',
-            orderId: o.orderId,
-        })),
+        ...(ordersTx || []).map((o) => {
+            const cancelled = o.orderStatus !== 'delivered';
+            return {
+                id: o.id,
+                type: 'payment',
+                amount: cancelled ? num(o.riderCancelPay) : num(o.riderEarning),
+                status: 'Completed',
+                date: o.createdAt,
+                description: cancelled
+                    ? `Cancelled order pay: ${o.riderCancelPayReason || 'cancelled'}`
+                    : o.paymentMethod === 'cash' ? 'COD delivery earning' : 'Online delivery earning',
+                orderId: o.orderId,
+            };
+        }),
         ...(withdrawalsList || []).map((w) => ({
             id: w.id,
             type: 'withdrawal',

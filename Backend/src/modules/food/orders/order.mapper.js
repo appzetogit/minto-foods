@@ -215,6 +215,9 @@ export function toOrder(row) {
             : { name: '', phone: '' },
 
         riderEarning: money(row.riderEarning),
+        // Set when the order was cancelled with a rider on it; null otherwise.
+        riderCancelPay: row.riderCancelPay == null ? null : money(row.riderCancelPay),
+        riderCancelPayReason: row.riderCancelPayReason || null,
         platformProfit: money(row.platformProfit),
         priceMarkupAmount: money(row.priceMarkupAmount),
         tripDistanceKm: num(row.tripDistanceKm)

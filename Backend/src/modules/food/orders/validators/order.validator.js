@@ -250,7 +250,8 @@ export function validateDispatchSettingsDto(body) {
         manualAcceptWindowSeconds: z.number().int().min(30).max(900).optional(),
         manualQueueAlertMinutes: z.number().int().min(1).max(120).optional(),
         riderAcceptWindowSeconds: z.number().int().min(15).max(300).optional(),
-        maxActiveOrdersPerRider: z.number().int().min(1).max(5).optional()
+        maxActiveOrdersPerRider: z.number().int().min(1).max(5).optional(),
+        riderPayCancelAtRestaurant: z.number().min(0).max(500).optional()
     });
     const result = schema.safeParse(body);
     if (!result.success) {

@@ -2573,6 +2573,47 @@ function applyAdminAmountFilter(AND, minAmountRaw, maxAmountRaw) {
   if (Object.keys(total).length > 0) AND.push({ total });
 }
 
+/** Still being worked on: not delivered, cancelled or awaiting payment. */
+const ADMIN_ACTIVE_ORDER_STATUSES = [
+  "created", "confirmed", "preparing", "ready_for_pickup", "reached_pickup", "picked_up", "reached_drop",
+];
+/** An order still open this long after it was placed is delayed. */
+const ADMIN_DELAYED_AFTER_MINUTES = 45;
+
+/**
+ * The admin orders filter's "Order status" choices, on top of the tab. Each
+ * returns a where clause.
+ */
+const ADMIN_ORDER_STAGE_FILTERS = {
+  "waiting-restaurant": () => ({ orderStatus: "created" }),
+  "waiting-rider": () => ({
+    orderStatus: { in: ["confirmed", "preparing", "ready_for_pickup"] },
+    NOT: { dispatchStatus: "accepted" },
+  }),
+  delayed: () => ({
+    orderStatus: { in: ADMIN_ACTIVE_ORDER_STATUSES },
+    createdAt: { lt: new Date(Date.now() - ADMIN_DELAYED_AFTER_MINUTES * 60000) },
+  }),
+  "ready-not-picked": () => ({ orderStatus: { in: ["ready_for_pickup", "reached_pickup"] } }),
+  "on-the-way": () => ({ orderStatus: { in: ["picked_up", "reached_drop"] } }),
+  completed: () => ({ orderStatus: "delivered" }),
+  "cancelled-admin": () => ({ orderStatus: "cancelled_by_admin" }),
+  "cancelled-restaurant": () => ({ orderStatus: "cancelled_by_restaurant" }),
+  "cancelled-customer": () => ({ orderStatus: "cancelled_by_user" }),
+};
+
+/** The column sorts on the admin orders list. Newest first unless asked. */
+const ADMIN_ORDER_SORTS = {
+  newest: [{ createdAt: "desc" }],
+  oldest: [{ createdAt: "asc" }],
+  amount_desc: [{ total: "desc" }, { createdAt: "desc" }],
+  amount_asc: [{ total: "asc" }, { createdAt: "desc" }],
+  restaurant_asc: [{ restaurant: { restaurantName: "asc" } }, { createdAt: "desc" }],
+  restaurant_desc: [{ restaurant: { restaurantName: "desc" } }, { createdAt: "desc" }],
+  status: [{ orderStatus: "asc" }, { createdAt: "desc" }],
+  payment: [{ paymentMethod: "asc" }, { createdAt: "desc" }],
+};
+
 export async function listOrdersAdmin(query) {
   // Unpaid online orders are cleared by the scheduler every few minutes, not
   // here: each one is a Razorpay call, which this page used to wait for.
@@ -2676,13 +2717,15 @@ export async function listOrdersAdmin(query) {
   applyAdminOrderSearchFilter(AND, searchRaw);
   applyAdminPaymentStatusFilter(AND, paymentStatusRaw);
   applyAdminAmountFilter(AND, query.minAmount, query.maxAmount);
+  const stageFilter = ADMIN_ORDER_STAGE_FILTERS[String(query.stage || '').trim()];
+  if (stageFilter) AND.push(stageFilter());
   if (AND.length) where.AND = AND;
 
   const [rows, total] = await Promise.all([
     prisma.foodOrder.findMany({
       where,
       include: withRelations(RESTAURANT_ADMIN, PARTNER_CARD),
-      orderBy: { createdAt: 'desc' },
+      orderBy: ADMIN_ORDER_SORTS[String(query.sort || '').trim()] || ADMIN_ORDER_SORTS.newest,
       skip,
       take: limit,
     }),

@@ -66,6 +66,40 @@ export async function findZonesForPoint(latitude, longitude) {
 }
 
 /**
+ * The zones a customer at lat/lng is inside, for zoneAllowsRestaurant.
+ *
+ * null when no active zone has a boundary yet: then zones limit nothing, so a
+ * platform that has not drawn any keeps working.
+ *
+ * @returns {Promise<Set<string>|null>}
+ */
+export async function customerZoneIds(latitude, longitude) {
+    const [{ drawn }] = await prisma.$queryRaw`
+        SELECT EXISTS (SELECT 1 FROM "food_zones" WHERE "isActive" = true AND "boundary" IS NOT NULL) AS "drawn"
+    `;
+    if (!drawn) return null;
+    const zones = await findZonesForPoint(latitude, longitude);
+    return new Set(zones.map((z) => String(z.id)));
+}
+
+/**
+ * Whether a restaurant delivers to a customer, by zone.
+ *
+ * A restaurant's delivery range only counts inside its own zone. Going by
+ * distance alone, a customer just outside the zone could order from any
+ * restaurant whose range reached across the boundary -- an address the
+ * platform has no riders or fees set up for.
+ *
+ * @param {Set<string>|null} customerZones from customerZoneIds
+ * @param {string|null} restaurantZoneId
+ */
+export function zoneAllowsRestaurant(customerZones, restaurantZoneId) {
+    if (customerZones === null) return true;
+    if (!customerZones.size) return false;
+    return restaurantZoneId ? customerZones.has(String(restaurantZoneId)) : true;
+}
+
+/**
  * Rebuild every zone's boundary from its coordinate ring.
  *
  * The trigger only fires on write, so zones that existed before it did have a
