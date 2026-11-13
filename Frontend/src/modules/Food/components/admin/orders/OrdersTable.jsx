@@ -108,15 +108,14 @@ export default function OrdersTable({
     return s.includes("cancel") || s === "delivered" || s === "completed"
   }
 
+  // Any rider -- offered, accepted, outside, before or after pickup -- can be
+  // taken off until the order is delivered.
   const canDeassignAndResend = (order) => {
     const backendStatus = String(order?.status || "").trim().toLowerCase()
-    const phase = String(order?.deliveryState?.currentPhase || "").trim().toLowerCase()
     return (
-      ["confirmed", "preparing", "ready_for_pickup", "reached_pickup"].includes(backendStatus) &&
-      order?.dispatch?.status === "accepted" &&
-      Boolean(order?.dispatch?.deliveryPartnerId) &&
-      !order?.deliveryState?.pickedUpAt &&
-      !["en_route_to_delivery", "at_drop", "delivered", "completed"].includes(phase)
+      ["confirmed", "preparing", "ready_for_pickup", "reached_pickup", "picked_up", "reached_drop"].includes(backendStatus) &&
+      ["accepted", "assigned"].includes(String(order?.dispatch?.status || "")) &&
+      Boolean(order?.dispatch?.deliveryPartnerId)
     )
   }
 

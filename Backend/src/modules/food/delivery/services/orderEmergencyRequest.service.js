@@ -10,6 +10,8 @@ import { buildOrderIdentityFilter, notifyOwnersSafely } from '../../orders/servi
 const ACTIVE_REQUEST_STATUSES = ['open', 'in_progress'];
 const PRE_PICKUP_ORDER_STATUSES = ['confirmed', 'preparing', 'ready_for_pickup', 'reached_pickup'];
 const POST_PICKUP_PHASES = ['en_route_to_delivery', 'at_drop', 'delivered', 'completed'];
+/** Orders a rider can be taken off and the order handed out again: accepted by the restaurant, not yet delivered. */
+const REASSIGNABLE_ORDER_STATUSES = [...PRE_PICKUP_ORDER_STATUSES, 'picked_up', 'reached_drop'];
 
 /** Works on a raw Prisma order row (flat columns). */
 const isBeforePickup = (row) =>
@@ -67,36 +69,48 @@ async function deassignOrderForRedispatch({
 
     const existingOrder = await prisma.foodOrder.findFirst({ where: identity });
     if (!existingOrder) throw new NotFoundError('Order not found');
-    if (!isBeforePickup(existingOrder)) {
-        throw new ValidationError('Order can no longer be reassigned after pickup');
+
+    // Reassigning works at every stage until the food is delivered: offered and
+    // not yet accepted, accepted, an outside rider, and after pickup too. It used
+    // to work only between a rider accepting and picking up, so a rider who
+    // vanished with the food, or an outside rider, could not be replaced at all.
+    if (existingOrder.orderStatus === 'delivered') {
+        throw new ValidationError('This order is already delivered');
+    }
+    if (String(existingOrder.orderStatus).startsWith('cancelled')) {
+        throw new ValidationError('This order is cancelled');
+    }
+    if (!REASSIGNABLE_ORDER_STATUSES.includes(existingOrder.orderStatus)) {
+        throw new ValidationError('The restaurant has not accepted this order yet, so there is no rider to replace');
     }
 
-    const assignedPartnerId = existingOrder.dispatchDeliveryPartnerId;
-    if (
-        existingOrder.dispatchStatus !== 'accepted' ||
-        !assignedPartnerId ||
-        (deliveryPartnerId && String(assignedPartnerId) !== String(deliveryPartnerId))
-    ) {
-        throw new ValidationError('Order assignment changed or pickup was completed before reassignment');
+    const assignedPartnerId = existingOrder.dispatchDeliveryPartnerId || null;
+    if (deliveryPartnerId && String(assignedPartnerId) !== String(deliveryPartnerId)) {
+        // An emergency request from a rider who no longer holds the order.
+        throw new ValidationError('This rider is no longer on the order');
     }
 
+    const afterPickup = !isBeforePickup(existingOrder);
+    // After pickup the new rider collects from the restaurant again: the old
+    // rider brings the food back, or the restaurant remakes it.
     const nextOrderStatus =
-        existingOrder.orderStatus === 'reached_pickup' ? 'ready_for_pickup' : existingOrder.orderStatus;
+        afterPickup || existingOrder.orderStatus === 'reached_pickup' ? 'ready_for_pickup' : existingOrder.orderStatus;
     const now = new Date();
 
-    // The full guard stays in the WHERE clause, so a pickup landing in this instant
-    // wins instead of being rolled back by the reassignment.
+    // Guarded on the state just read, so a delivery or another reassignment
+    // landing in this instant wins instead of being overwritten.
     const { count } = await prisma.foodOrder.updateMany({
         where: {
             id: existingOrder.id,
             orderStatus: existingOrder.orderStatus,
-            dispatchStatus: 'accepted',
+            dispatchStatus: existingOrder.dispatchStatus,
             dispatchDeliveryPartnerId: assignedPartnerId,
-            pickedUpAt: null,
-            deliveryPhase: { notIn: POST_PICKUP_PHASES },
         },
         data: {
             orderStatus: nextOrderStatus,
+            externalRiderProvider: null,
+            externalRiderName: null,
+            externalRiderPhone: null,
             dispatchStatus: 'unassigned',
             dispatchDeliveryPartnerId: null,
             dispatchAssignedAt: null,
@@ -112,22 +126,34 @@ async function deassignOrderForRedispatch({
     });
 
     if (count === 0) {
-        throw new ValidationError('Order assignment changed or pickup was completed before reassignment');
+        throw new ValidationError('This order just changed. Refresh and try again.');
     }
 
-    // The 'deassigned' offer row permanently excludes this rider from re-offers.
-    await prisma.orderDispatchOffer.create({
-        data: { orderId: existingOrder.id, partnerId: assignedPartnerId, at: now, action: 'deassigned' },
-    });
+    if (assignedPartnerId) {
+        // An offer still open to that rider is closed, and the 'deassigned' row
+        // permanently excludes them from re-offers.
+        await prisma.orderDispatchOffer.updateMany({
+            where: { orderId: existingOrder.id, partnerId: assignedPartnerId, action: 'offered' },
+            data: { action: 'withdrawn' },
+        });
+        await prisma.orderDispatchOffer.create({
+            data: { orderId: existingOrder.id, partnerId: assignedPartnerId, at: now, action: 'deassigned' },
+        });
+    }
 
+    const who = assignedPartnerId
+        ? ''
+        : existingOrder.externalRiderName
+            ? ` (outside rider ${existingOrder.externalRiderName})`
+            : ' (no rider was on it)';
     await prisma.orderStatusHistory.create({
         data: {
             orderId: existingOrder.id,
             byRole: 'ADMIN',
             byId: adminId ? String(adminId) : null,
-            from: 'accepted',
+            from: existingOrder.dispatchStatus || 'unassigned',
             to: 'unassigned',
-            note: historyNote,
+            note: `${historyNote}${who}${afterPickup ? ' -- after pickup; the new rider collects from the restaurant' : ''}`,
             at: now,
         },
     });
@@ -162,7 +188,7 @@ async function deassignOrderForRedispatch({
 
     const io = getIO();
     if (io) {
-        io.to(rooms.delivery(assignedPartnerId)).emit('order_deassigned', payload);
+        if (assignedPartnerId) io.to(rooms.delivery(assignedPartnerId)).emit('order_deassigned', payload);
         io.to(rooms.restaurant(order.restaurantId)).emit('order_status_update', {
             ...payload,
             dispatchStatus: 'unassigned',
@@ -175,7 +201,7 @@ async function deassignOrderForRedispatch({
 
     await notifyOwnersSafely(
         [
-            { ownerType: 'DELIVERY_PARTNER', ownerId: assignedPartnerId },
+            ...(assignedPartnerId ? [{ ownerType: 'DELIVERY_PARTNER', ownerId: assignedPartnerId }] : []),
             { ownerType: 'RESTAURANT', ownerId: order.restaurantId },
             // Not the customer: they hear "Rider {name} is assigned" when the
             // new rider accepts.
@@ -223,7 +249,7 @@ export async function deassignAndResendOrderAdmin(orderId, adminId) {
 
     return {
         orderId: result.order.id,
-        deliveryPartnerId: String(result.deliveryPartnerId),
+        deliveryPartnerId: result.deliveryPartnerId ? String(result.deliveryPartnerId) : null,
         dispatchStarted: Boolean(dispatchResult),
     };
 }
@@ -243,14 +269,16 @@ export async function createOrderEmergencyRequest(deliveryPartnerId, payload = {
             ...(identity || {}),
             dispatchDeliveryPartnerId: partnerId,
             dispatchStatus: 'accepted',
-            orderStatus: { in: PRE_PICKUP_ORDER_STATUSES },
+            // After pickup too: a breakdown or accident with the food on board is
+            // exactly when a rider needs someone else to take over.
+            orderStatus: { in: REASSIGNABLE_ORDER_STATUSES },
         },
         orderBy: { dispatchAcceptedAt: 'desc' },
     });
 
-    if (!order || !isBeforePickup(order)) {
+    if (!order) {
         throw new ValidationError(
-            'Emergency reassignment is available only for an accepted order before pickup',
+            'Reassignment can be asked for on an order you have accepted and not yet delivered',
         );
     }
 
@@ -289,7 +317,29 @@ export async function createOrderEmergencyRequest(deliveryPartnerId, payload = {
     }
 }
 
+/**
+ * A request about an order that has since been delivered or cancelled has
+ * nothing left to act on, but it stayed "open" on the admin page for good. Run
+ * before listing, so the page only ever shows requests that still matter; the
+ * closed ones stay in the history.
+ */
+async function closeRequestsForFinishedOrders() {
+    await prisma.deliveryOrderEmergencyRequest.updateMany({
+        where: {
+            status: { in: ACTIVE_REQUEST_STATUSES },
+            order: { orderStatus: { in: ['delivered', 'cancelled_by_user', 'cancelled_by_restaurant', 'cancelled_by_admin'] } },
+        },
+        data: {
+            status: 'closed',
+            activeKey: null,
+            resolvedAt: new Date(),
+            adminResponse: 'Closed automatically: the order was delivered or cancelled.',
+        },
+    });
+}
+
 export async function listOrderEmergencyRequestsByPartner(deliveryPartnerId) {
+    await closeRequestsForFinishedOrders();
     const list = await prisma.deliveryOrderEmergencyRequest.findMany({
         where: { deliveryPartnerId: String(deliveryPartnerId) },
         include: requestInclude,
@@ -308,6 +358,7 @@ export async function getOrderEmergencyRequestByPartner(requestId, deliveryPartn
 }
 
 export async function listOrderEmergencyRequestsAdmin(query = {}) {
+    await closeRequestsForFinishedOrders();
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.max(1, Math.min(200, Number(query.limit) || 50));
     const where = {};
@@ -381,6 +432,33 @@ export async function updateOrderEmergencyRequestAdmin(requestId, body = {}) {
         data,
         include: requestInclude,
     });
+
+    // The reply was saved and never sent: the rider only saw it by reopening
+    // the request. Pushed now, and on the socket for an open app.
+    const replied = data.adminResponse && data.adminResponse !== request.adminResponse;
+    const statusChanged = data.status && data.status !== request.status;
+    if (replied || statusChanged) {
+        const STATUS_WORDS = { open: 'Open', in_progress: 'Being handled', resolved: 'Resolved', closed: 'Closed' };
+        const body = replied
+            ? data.adminResponse
+            : `Your reassignment request is now: ${STATUS_WORDS[data.status] || data.status}`;
+        const message = {
+            requestId: request.id,
+            orderId: request.orderId,
+            status: updated.status,
+            adminResponse: updated.adminResponse || '',
+        };
+        try {
+            getIO()?.to(rooms.delivery(request.deliveryPartnerId)).emit('order_reassignment_update', message);
+        } catch (err) {
+            logger.warn(`Reassignment update socket failed: ${err?.message || err}`);
+        }
+        void notifyOwnersSafely([{ ownerType: 'DELIVERY_PARTNER', ownerId: request.deliveryPartnerId }], {
+            title: 'Update on your reassignment request',
+            body: String(body).slice(0, 200),
+            data: { type: 'order_reassignment_update', requestId: request.id, orderId: request.orderId, status: updated.status },
+        });
+    }
     return serializeRequest(updated);
 }
 

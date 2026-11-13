@@ -1183,8 +1183,11 @@ Reason (required, shown to the restaurant and the customer):`,
       return
     }
 
+    const pickedUp = ["picked_up", "reached_drop"].includes(String(order.status || "").toLowerCase())
     const confirmed = window.confirm(
-      `Deassign the current delivery partner from order ${order.orderId} and resend it to other eligible delivery partners?`,
+      pickedUp
+        ? `Order ${order.orderId} is already picked up. Taking the rider off sends it back to "Ready for pickup", and the new rider collects from the restaurant: the old rider must return the food, or the restaurant remakes it. Continue?`
+        : `Deassign the current delivery partner from order ${order.orderId} and resend it to other eligible delivery partners?`,
     )
     if (!confirmed) return
 

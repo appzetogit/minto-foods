@@ -178,8 +178,18 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] bg-white p-0 overflow-y-auto">
+      {/* The built-in close sat under this sticky header and scrolled away with
+          the order, so on a phone there was no way to close it but the back key. */}
+      <DialogContent showCloseButton={false} className="max-w-4xl max-h-[90vh] bg-white p-0 overflow-y-auto">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200 sticky top-0 bg-white z-10">
+          <button
+            type="button"
+            onClick={() => onOpenChange?.(false)}
+            aria-label="Close"
+            className="absolute right-4 top-4 rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          >
+            <X className="h-5 w-5" />
+          </button>
           <DialogTitle className="flex items-center gap-2">
             <Eye className="w-5 h-5 text-orange-600" />
             Order Details
