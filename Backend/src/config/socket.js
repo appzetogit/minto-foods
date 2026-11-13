@@ -99,7 +99,25 @@ async function joinAdminOrderRooms(socket, adminId) {
  * @param {import('http').Server} server
  * @returns {Promise<Server>}
  */
+/**
+ * The Flutter apps' Socket.IO client opens a websocket but labels it
+ * `transport=polling`. Engine.IO closes an upgrade whose transport does not
+ * handle upgrades, without a word, so the rider, customer and restaurant apps
+ * opened a socket every 25 seconds and never once logged in: no live offers,
+ * status changes or chat on any phone. Relabelled before Engine.IO reads it,
+ * so the apps already installed work; browsers send `websocket` and are
+ * untouched.
+ */
+export function relabelWebsocketUpgrade(req) {
+    const url = String(req?.url || '');
+    if (url.startsWith('/socket.io/') && /[?&]transport=polling(&|$)/.test(url)) {
+        req.url = url.replace(/([?&])transport=polling(?=&|$)/, '$1transport=websocket');
+    }
+}
+
 export const initSocket = async (server) => {
+    // First in line, ahead of Engine.IO's own upgrade listener.
+    server.prependListener('upgrade', relabelWebsocketUpgrade);
     io = new Server(server, {
         cors: {
             // Same list as the HTTP API. Empty means any origin.
