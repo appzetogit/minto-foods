@@ -28,3 +28,16 @@ test('batching: with nobody on a trip the order is unchanged (nearest first)', (
   const ranked = rankRidersForBatching(partners, new Map(), order);
   assert.deepEqual(ranked.map((r) => r.partner.partnerId), partners.map((p) => p.partnerId));
 });
+
+import { enrichPayloadWithTripRoadDistance, estimateTripMins } from './order-dispatch.service.js';
+
+test('trip estimate: at least a minute, ~25 km/h', () => {
+  assert.equal(estimateTripMins(0), 1);
+  assert.equal(estimateTripMins(5), 12);
+});
+
+test('a stored 0 km is not reused; a known distance gets a time even without one', async () => {
+  const known = await enrichPayloadWithTripRoadDistance({ pricing: { roadDistanceKm: 4 } }, {});
+  assert.equal(known.tripDistanceKm, 4);
+  assert.equal(known.tripDurationMins, 10);
+});
