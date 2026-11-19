@@ -141,6 +141,9 @@ export function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt,
     // The customer's note for the rider. The popup is built from this push
     // alone, so without it the note never showed on the offer.
     deliveryInstructions: s(order?.deliveryInstructions || ''),
+    // 'quick' when the customer paid for quick delivery; the offer popup
+    // badges it.
+    deliveryMode: s(order?.deliveryMode || order?.pricing?.deliveryMode || 'basic'),
   };
 }
 
