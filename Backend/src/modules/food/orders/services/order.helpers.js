@@ -144,6 +144,13 @@ export function toRestaurantContact(order) {
   return out;
 }
 
+/** Food at the restaurant's prices + packaging + food GST; never delivery, tip or platform fee. */
+export function restaurantBillTotal(pricing) {
+  const p = pricing || {};
+  const n = (v) => Number(v) || 0;
+  return Math.round((n(p.subtotal) + n(p.packagingFee) + n(p.tax)) * 100) / 100;
+}
+
 /** Everything a restaurant is shown: its own prices, and gift orders tidied. */
 export function toRestaurantView(order) {
   return toRestaurantContact(toRestaurantPrices(order));
@@ -794,7 +801,11 @@ export async function notifyRestaurantNewOrder(orderDoc) {
       : "";
     // What the restaurant may see: its own prices, the receiver's name.
     const view = toRestaurantView(orderDoc);
-    const total = view.pricing?.total ?? 0;
+    // The restaurant's own bill: its food at its prices, packaging and the
+    // food GST. The customer's total also carries the delivery fee, the tip
+    // and the platform fee, none of which is the restaurant's -- showing it
+    // (Rs 153.25 for Rs 100 of food) read as the restaurant's order value.
+    const total = restaurantBillTotal(view.pricing);
     const customerLabel = view.customerName
       ? `${view.customerName}${view.isForSomeoneElse ? " (order for someone else)" : ""}`
       : "";

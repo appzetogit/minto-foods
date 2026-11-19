@@ -30,6 +30,70 @@ export default function FilterPanel({
         <div className="p-4 space-y-4">
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Order Status
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                ["", "All"],
+                ["waiting-restaurant", "Waiting for restaurant"],
+                ["waiting-rider", "Waiting for a rider"],
+                ["ready-not-picked", "Ready, not picked up"],
+                ["on-the-way", "On the way"],
+                ["delayed", "Delayed (open 45+ min)"],
+                ["completed", "Completed"],
+                ["cancelled-admin", "Cancelled by admin"],
+                ["cancelled-restaurant", "Cancelled by restaurant"],
+                ["cancelled-customer", "Cancelled by customer"],
+              ].map(([value, label]) => (
+                <button
+                  key={value || "all"}
+                  type="button"
+                  onClick={() => setFilters((prev) => ({ ...prev, stage: value }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    (filters.stage || "") === value
+                      ? "bg-emerald-500 text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Sort By
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                ["", "Newest first"],
+                ["oldest", "Oldest first"],
+                ["amount_desc", "Amount: high to low"],
+                ["amount_asc", "Amount: low to high"],
+                ["restaurant_asc", "Restaurant: A to Z"],
+                ["restaurant_desc", "Restaurant: Z to A"],
+                ["status", "Order status"],
+                ["payment", "Payment type"],
+              ].map(([value, label]) => (
+                <button
+                  key={value || "all"}
+                  type="button"
+                  onClick={() => setFilters((prev) => ({ ...prev, sort: value }))}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    (filters.sort || "") === value
+                      ? "bg-emerald-500 text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
               Payment Status
             </label>
             <div className="flex flex-wrap gap-1.5">

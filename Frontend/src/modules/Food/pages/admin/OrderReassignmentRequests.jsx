@@ -27,20 +27,20 @@ const orderLabel = (request) =>
   request?.orderId ||
   "N/A";
 
+/** A rider id whether the API sent the id or the rider itself. */
+const idOf = (value) => String(value?._id || value?.id || value || "");
+
+// Any time until delivery, after pickup too. The rider used to be compared as
+// "[object Object]" against an id, so the button could stay disabled for good.
 const canDeassign = (request) => {
   const order = request?.order;
-  const phase = String(order?.deliveryState?.currentPhase || "");
   return (
     ["open", "in_progress"].includes(request?.status) &&
     order?.dispatch?.status === "accepted" &&
-    String(order?.dispatch?.deliveryPartnerId || "") ===
-      String(request?.deliveryPartner?._id || request?.deliveryPartnerId || "") &&
-    ["confirmed", "preparing", "ready_for_pickup", "reached_pickup"].includes(
+    idOf(order?.dispatch?.deliveryPartnerId) ===
+      idOf(request?.deliveryPartner || request?.deliveryPartnerId) &&
+    ["confirmed", "preparing", "ready_for_pickup", "reached_pickup", "picked_up", "reached_drop"].includes(
       String(order?.orderStatus || ""),
-    ) &&
-    !order?.deliveryState?.pickedUpAt &&
-    !["en_route_to_delivery", "at_drop", "delivered", "completed"].includes(
-      phase,
     )
   );
 };

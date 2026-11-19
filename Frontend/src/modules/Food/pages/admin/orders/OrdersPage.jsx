@@ -59,6 +59,8 @@ const statusConfig = {
 const PAGE_SIZE = 50
 
 const EMPTY_ORDER_FILTERS = {
+  stage: "",
+  sort: "",
   paymentStatus: "",
   minAmount: "",
   maxAmount: "",
@@ -430,6 +432,8 @@ export default function OrdersPage({ statusKey = "all" }) {
       startDate: filters.fromDate || undefined,
       endDate: filters.toDate || undefined,
       restaurantId: filters.restaurantId || undefined,
+      stage: filters.stage || undefined,
+      sort: filters.sort || undefined,
     }
   }, [])
 
@@ -659,23 +663,21 @@ export default function OrdersPage({ statusKey = "all" }) {
 
       const backendStatus = String(order.orderStatus || "").toLowerCase()
 
-      const paymentStatusRaw = order.payment?.status || ""
-      let paymentStatus = order.paymentStatus
-      if (!paymentStatus) {
-        const s = String(paymentStatusRaw || "").toLowerCase()
-        
-        if (s === "refunded") {
-          paymentStatus = "Refunded"
-        } else if (s === "paid" || s === "authorized" || s === "captured" || s === "settled") {
-          paymentStatus = (paymentType === "Cash on Delivery") ? "Collected" : "Paid"
-        } else if (paymentType === "Cash on Delivery" && backendStatus === "delivered") {
-          paymentStatus = "Collected"
-        } else if (s === "failed") {
-          paymentStatus = "Failed"
-        } else {
-          paymentStatus = "Pending"
-        }
-      }
+      // Always a readable label. The raw value came through whenever the API
+      // sent one, so a cancelled cash order read "cod_pending".
+      const paymentStatus = (() => {
+        const s = String(order.paymentStatus || order.payment?.status || "").toLowerCase()
+        const cancelled = backendStatus.startsWith("cancelled")
+        const cod = paymentType === "Cash on Delivery"
+        if (s === "refunded") return "Refunded"
+        if (s === "partially_refunded") return "Partly refunded"
+        if (["paid", "authorized", "captured", "settled", "collected"].includes(s)) return cod ? "Collected" : "Paid"
+        if (cod && backendStatus === "delivered") return "Collected"
+        if (s === "failed") return "Failed"
+        if (cancelled) return cod ? "Not collected (cancelled)" : "Not paid (cancelled)"
+        if (cod) return "To collect on delivery"
+        return "Pending"
+      })()
 
       let displayStatus = order.orderStatus
       if (backendStatus === "pending_payment") {
@@ -715,6 +717,12 @@ export default function OrdersPage({ statusKey = "all" }) {
             quantity: item.quantity || 1,
             name: item.name || item.foodName || item.title || "Item",
             price: item.price || 0,
+            // Kept for the details popup: the add-ons the customer paid for
+            // were dropped here, so the admin never saw them.
+            variantName: item.variantName || "",
+            addons: Array.isArray(item.addons) ? item.addons : [],
+            notes: item.notes || "",
+            isVeg: item.isVeg,
           }))
         : []
 
@@ -1183,8 +1191,11 @@ Reason (required, shown to the restaurant and the customer):`,
       return
     }
 
+    const pickedUp = ["picked_up", "reached_drop"].includes(String(order.status || "").toLowerCase())
     const confirmed = window.confirm(
-      `Deassign the current delivery partner from order ${order.orderId} and resend it to other eligible delivery partners?`,
+      pickedUp
+        ? `Order ${order.orderId} is already picked up. Taking the rider off sends it back to "Ready for pickup", and the new rider collects from the restaurant: the old rider must return the food, or the restaurant remakes it. Continue?`
+        : `Deassign the current delivery partner from order ${order.orderId} and resend it to other eligible delivery partners?`,
     )
     if (!confirmed) return
 
@@ -1477,6 +1488,11 @@ Reason (required, shown to the restaurant and the customer):`,
         pageSizeOptions={limitOptions}
         onPageSizeChange={setPageSize}
         onPageChange={setApiPage}
+        sort={appliedFilters.sort || "newest"}
+        onSort={(sort) => {
+          setDraftFilters((f) => ({ ...f, sort }))
+          setAppliedFilters((f) => ({ ...f, sort }))
+        }}
         onViewOrder={handleViewOrder}
         onPrintOrder={handlePrintOrder}
         onRefund={handleRefund}

@@ -35,6 +35,11 @@ export default function DeliveryWithdrawal() {
   const [processingAction, setProcessingAction] = useState(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [showRejectModal, setShowRejectModal] = useState(false)
+  // Paying a rider: the request being paid, and the bank/UPI reference of the
+  // transfer. Approving used to flip the status with nothing recorded.
+  const [payRequest, setPayRequest] = useState(null)
+  const [payRef, setPayRef] = useState("")
+  const [payNote, setPayNote] = useState("")
 
   useEffect(() => {
     fetchRequests()
@@ -101,12 +106,22 @@ export default function DeliveryWithdrawal() {
   }
 
   const handleApprove = async (id) => {
-    if (!confirm("Are you sure you want to approve this withdrawal request?")) return
+    if (!payRef.trim()) {
+      toast.error("Enter the payment reference (UTR / UPI reference) of the transfer")
+      return
+    }
     try {
       setProcessingAction(id)
-      const response = await adminAPI.updateDeliveryWithdrawalStatus(id, { status: "Approved" })
+      const response = await adminAPI.updateDeliveryWithdrawalStatus(id, {
+        status: "Approved",
+        transactionId: payRef.trim(),
+        adminNote: payNote.trim() || undefined,
+      })
       if (response?.data?.success) {
-        toast.success("Withdrawal request approved successfully")
+        toast.success("Marked as paid")
+        setPayRequest(null)
+        setPayRef("")
+        setPayNote("")
         fetchRequests()
       }
  else {
@@ -304,10 +319,14 @@ export default function DeliveryWithdrawal() {
                             {req.status === "Pending" && (
                               <>
                                 <button
-                                  onClick={() => handleApprove(req.id)}
+                                  onClick={() => {
+                                    setPayRequest(req)
+                                    setPayRef("")
+                                    setPayNote("")
+                                  }}
                                   disabled={processingAction === req.id}
                                   className="p-2 rounded-lg bg-green-50 hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Approve"
+                                  title="Pay"
                                 >
                                   {processingAction === req.id ? (
                                     <Loader2 className="w-4 h-4 text-green-600 animate-spin" />
@@ -429,6 +448,18 @@ export default function DeliveryWithdrawal() {
                     </span>
                   </p>
                 </div>
+                {selectedRequest.transactionId && (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Payment reference</label>
+                    <p className="text-sm font-medium text-slate-900 mt-1 break-all">{selectedRequest.transactionId}</p>
+                  </div>
+                )}
+                {selectedRequest.adminNote && (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Note</label>
+                    <p className="text-sm font-medium text-slate-900 mt-1">{selectedRequest.adminNote}</p>
+                  </div>
+                )}
                 {selectedRequest.rejectionReason && (
                   <div>
                     <label className="text-xs font-semibold text-slate-500 uppercase">Rejection reason</label>
@@ -443,6 +474,72 @@ export default function DeliveryWithdrawal() {
                 className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all"
               >
                 Close
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Pay modal: where to send the money, and the reference once sent. */}
+        <Dialog open={Boolean(payRequest)} onOpenChange={(open) => !open && setPayRequest(null)}>
+          <DialogContent className="max-w-md bg-white p-0">
+            <DialogHeader className="px-6 pt-6 pb-2">
+              <DialogTitle>Pay {payRequest?.deliveryName}</DialogTitle>
+            </DialogHeader>
+            {payRequest && (
+              <div className="px-6 pb-4 space-y-4">
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3">
+                  <p className="text-xs text-emerald-700 uppercase font-semibold">Amount to send</p>
+                  <p className="text-2xl font-bold text-emerald-800">₹{Number(payRequest.amount || 0).toFixed(2)}</p>
+                  <p className="text-xs text-slate-600 mt-1">{payRequest.deliveryPhone} · {payRequest.deliveryIdString}</p>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <p className="text-xs font-semibold text-slate-500 uppercase">Send to</p>
+                  {payRequest.upiId && <p><span className="text-slate-500">UPI:</span> <span className="font-semibold select-all">{payRequest.upiId}</span></p>}
+                  {payRequest.bankDetails?.accountNumber && (
+                    <>
+                      <p><span className="text-slate-500">Account:</span> <span className="font-semibold select-all">{payRequest.bankDetails.accountNumber}</span></p>
+                      <p><span className="text-slate-500">IFSC:</span> <span className="font-semibold select-all uppercase">{payRequest.bankDetails.ifscCode || "—"}</span></p>
+                      <p><span className="text-slate-500">Name:</span> {payRequest.bankDetails.accountHolderName || "—"} {payRequest.bankDetails.bankName ? `· ${payRequest.bankDetails.bankName}` : ""}</p>
+                    </>
+                  )}
+                  {!payRequest.upiId && !payRequest.bankDetails?.accountNumber && (
+                    <p className="text-red-600">This rider has no bank account or UPI saved. Ask them to add one in the app, or pay another way and note it below.</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Payment reference (UTR / UPI ref) *</label>
+                  <input
+                    value={payRef}
+                    onChange={(e) => setPayRef(e.target.value)}
+                    placeholder="e.g. 431812345678"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Note (optional)</label>
+                  <input
+                    value={payNote}
+                    onChange={(e) => setPayNote(e.target.value)}
+                    placeholder="e.g. Paid by PhonePe from company account"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <p className="text-xs text-slate-500">Send the money first, from your bank or UPI app, then enter its reference here. This records the payout; it does not move money by itself.</p>
+              </div>
+            )}
+            <DialogFooter className="px-6 pb-6 flex gap-2">
+              <button
+                onClick={() => setPayRequest(null)}
+                className="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => payRequest && handleApprove(payRequest.id)}
+                disabled={!payRef.trim() || processingAction === payRequest?.id}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {processingAction === payRequest?.id ? "Saving…" : "Mark as paid"}
               </button>
             </DialogFooter>
           </DialogContent>

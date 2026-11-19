@@ -8,6 +8,7 @@ import {
   parseGeoPoint,
 } from '../../shared/geo.utils.js';
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
+import { customerZoneIds, zoneAllowsRestaurant } from '../../shared/zone.service.js';
 import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
 import { getRestaurantAvailabilityStatus } from '../../restaurant/helpers/restaurantAvailability.helper.js';
 import { resolveOrderCartItems } from '../helpers/order-cart-items.helper.js';
@@ -716,6 +717,22 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
         1,
       )} km away and delivers within ${coverage.limitKm} km. Please choose a closer restaurant or a different address.`,
     );
+  }
+
+  // The restaurant's range only counts inside its zone; the lists apply the
+  // same rule, and this catches a cart from before the address changed.
+  // Not on confirming an order already paid for.
+  const addrLat = Number(deliveryAddress?.latitude ?? deliveryAddress?.location?.latitude);
+  const addrLng = Number(deliveryAddress?.longitude ?? deliveryAddress?.location?.longitude);
+  if (!options.skipAvailabilityCheck && Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
+    const zones = await customerZoneIds(addrLat, addrLng);
+    if (!zoneAllowsRestaurant(zones, restaurant?.zoneId)) {
+      throw new ValidationError(
+        zones && !zones.size
+          ? 'We do not deliver to this address yet. Please choose an address inside our service area.'
+          : `${restaurant?.restaurantName || 'This restaurant'} does not deliver to this area. Please choose a restaurant near you.`,
+      );
+    }
   }
 
   const deliveryFeeResult = resolveUserDeliveryFee(feeSettings, {

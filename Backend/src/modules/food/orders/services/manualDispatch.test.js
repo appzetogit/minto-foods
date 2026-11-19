@@ -326,6 +326,89 @@ test('a rider asks to give up an order; the admin approves and it goes back out'
     assert.ok(row.dispatchOffers.some((o) => o.partnerId === rider.id && o.action === 'deassigned') || row.dispatchDeliveryPartnerId !== rider.id);
 });
 
+test('deassign and resend works at every stage until delivery', async () => {
+    const { deassignAndResendOrderAdmin } = await import('../../delivery/services/orderEmergencyRequest.service.js');
+
+    // Offered and not yet accepted.
+    const offered = await confirmedOrder();
+    const r1 = await makeRider(`Offered${Date.now()}`);
+    await assignRiderManually(offered, r1.id, null);
+    await deassignAndResendOrderAdmin(offered, null);
+    let row = await orderRow(offered);
+    assert.notEqual(row.dispatchDeliveryPartnerId, r1.id, 'the offered rider is taken off');
+    assert.ok(row.dispatchOffers.some((o) => o.partnerId === r1.id && o.action === 'deassigned'));
+    assert.ok(!row.dispatchOffers.some((o) => o.partnerId === r1.id && o.action === 'offered'), 'their offer is closed');
+
+    // An outside rider.
+    const outside = await confirmedOrder();
+    await assignExternalRider(outside, null, { name: 'Outside One', phone: '9876500001' });
+    await deassignAndResendOrderAdmin(outside, null);
+    row = await orderRow(outside);
+    assert.equal(row.externalRiderName, null);
+    assert.notEqual(row.dispatchStatus === 'accepted' && row.dispatchDeliveryPartnerId === null, true);
+
+    // After pickup: back to ready for pickup, for the new rider to collect.
+    const picked = await confirmedOrder();
+    const r2 = await makeRider(`Picked${Date.now()}`);
+    await assignRiderManually(picked, r2.id, null);
+    await acceptOrderDelivery(picked, r2.id);
+    await prisma.foodOrder.update({
+        where: { id: picked },
+        data: { orderStatus: 'picked_up', pickedUpAt: new Date(), deliveryPhase: 'en_route_to_delivery' },
+    });
+    await deassignAndResendOrderAdmin(picked, null);
+    row = await orderRow(picked);
+    assert.equal(row.orderStatus, 'ready_for_pickup');
+    assert.equal(row.pickedUpAt, null);
+    assert.notEqual(row.dispatchDeliveryPartnerId, r2.id);
+
+    // Delivered: refused.
+    await prisma.foodOrder.update({ where: { id: picked }, data: { orderStatus: 'delivered' } });
+    await assert.rejects(() => deassignAndResendOrderAdmin(picked, null), /already delivered/);
+});
+
+test('a cancelled order pays the rider by how far they got', async () => {
+    const onIt = async (stage) => {
+        const id = await confirmedOrder();
+        const rider = await makeRider(`Cancel${stage}${Date.now()}`);
+        await assignRiderManually(id, rider.id, null);
+        await acceptOrderDelivery(id, rider.id);
+        const data = { riderEarning: 40 };
+        if (stage !== 'before') data.reachedPickupAt = new Date();
+        if (stage === 'picked') data.pickedUpAt = new Date();
+        await prisma.foodOrder.update({ where: { id }, data });
+        await prisma.foodOrder.update({ where: { id }, data: { orderStatus: 'cancelled_by_admin' } });
+        return prisma.foodOrder.findUnique({ where: { id }, select: { riderCancelPay: true, riderCancelPayReason: true } });
+    };
+    const settings = await prisma.foodSettings.findUnique({ where: { key: 'dispatch' } });
+    const atRestaurant = settings ? Number(settings.riderPayCancelAtRestaurant) : 10;
+
+    assert.equal(Number((await onIt('before')).riderCancelPay), 0, 'not yet at the restaurant: nothing');
+    assert.equal(Number((await onIt('reached')).riderCancelPay), atRestaurant, 'at the restaurant: the set amount');
+    const picked = await onIt('picked');
+    assert.equal(Number(picked.riderCancelPay), 40, 'after pickup: the full trip pay');
+    assert.match(picked.riderCancelPayReason, /after pickup/);
+
+    // No rider on it: nothing is set.
+    const empty = await confirmedOrder();
+    await prisma.foodOrder.update({ where: { id: empty }, data: { orderStatus: 'cancelled_by_admin' } });
+    assert.equal((await prisma.foodOrder.findUnique({ where: { id: empty } })).riderCancelPay, null);
+});
+
+test('a reassignment request on an order that is over closes by itself', async () => {
+    const { createOrderEmergencyRequest, listOrderEmergencyRequestsAdmin } = await import('../../delivery/services/orderEmergencyRequest.service.js');
+    const id = await confirmedOrder();
+    const rider = await makeRider(`Closing${Date.now()}`);
+    await assignRiderManually(id, rider.id, null);
+    await acceptOrderDelivery(id, rider.id);
+    const request = await createOrderEmergencyRequest(rider.id, { orderId: id, reason: 'Bike stopped on the way' });
+    await prisma.foodOrder.update({ where: { id }, data: { orderStatus: 'delivered' } });
+    await listOrderEmergencyRequestsAdmin({});
+    const after = await prisma.deliveryOrderEmergencyRequest.findUnique({ where: { id: request._id || request.id } });
+    assert.equal(after.status, 'closed');
+    assert.equal(after.activeKey, null);
+});
+
 test('the global setting is saved (it used to always save auto)', async () => {
     await updateDispatchSettings('manual', null, { manualAcceptWindowSeconds: 90 });
     clearDispatchModeCache();

@@ -800,7 +800,9 @@ const toTripDto = (order) => {
     const paymentMethod = order?.paymentMethod || '';
     const pricingTotal = num(order?.total);
 
-    const earningAmount = num(order?.riderEarning);
+    // A cancelled trip pays only its cancellation pay (often nothing); it used
+    // to show the full trip earning, which the wallet never credited.
+    const earningAmount = isCancelled ? num(order?.riderCancelPay) : num(order?.riderEarning);
     const codAmount = paymentMethod === 'cash' ? num(order?.paymentAmountDue) : 0;
     const codCollectedAmount = paymentMethod === 'cash' && order?.paymentStatus === 'paid' ? codAmount : 0;
 

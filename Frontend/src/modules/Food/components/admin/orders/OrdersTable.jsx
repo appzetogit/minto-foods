@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { Eye, Printer, ArrowUpDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck, UserPlus } from "lucide-react"
+import { Eye, Printer, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck, UserPlus } from "lucide-react"
 import { refundPicture } from "./RefundModal"
 import { stageColor } from "./orderStage"
 
@@ -26,6 +26,8 @@ const getPaymentStatusColor = (paymentStatus) => {
   if (paymentStatus === "Paid" || paymentStatus === "Collected") return "text-emerald-600"
   if (paymentStatus === "Refunded") return "text-sky-600"
   if (paymentStatus === "Unpaid" || paymentStatus === "Failed") return "text-red-600"
+  if (String(paymentStatus || "").includes("cancelled")) return "text-slate-500"
+  if (paymentStatus === "To collect on delivery") return "text-amber-600"
   return "text-slate-600"
 }
 
@@ -55,7 +57,35 @@ export default function OrdersTable({
   pageSizeOptions,
   onPageSizeChange,
   onPageChange,
+  sort = "newest",
+  onSort,
 }) {
+  // A column's arrow flips between its two orders; only the columns the
+  // server can sort by have one. The arrows used to be drawn on every column
+  // and did nothing.
+  const SORT_PAIRS = {
+    date: ["newest", "oldest"],
+    amount: ["amount_desc", "amount_asc"],
+    restaurant: ["restaurant_asc", "restaurant_desc"],
+    status: ["status", "newest"],
+    payment: ["payment", "newest"],
+  }
+  const SortArrow = ({ column }) => {
+    if (!onSort) return null
+    const [first, second] = SORT_PAIRS[column]
+    const active = sort === first || (sort === second && second !== "newest")
+    const Icon = !active ? ArrowUpDown : sort === first && column !== "restaurant" ? ArrowDown : ArrowUp
+    return (
+      <button
+        type="button"
+        title="Sort"
+        onClick={() => onSort(sort === first ? second : first)}
+        className={`p-0.5 rounded hover:bg-slate-200 ${active ? "text-emerald-600" : "text-slate-400"}`}
+      >
+        <Icon className="w-3 h-3" />
+      </button>
+    )
+  }
   const [internalCurrentPage, setInternalCurrentPage] = useState(1)
   const currentPage = serverPagination ? externalCurrentPage || 1 : internalCurrentPage
   const itemsPerPage = serverPagination ? pageSize : 10
@@ -108,15 +138,14 @@ export default function OrdersTable({
     return s.includes("cancel") || s === "delivered" || s === "completed"
   }
 
+  // Any rider -- offered, accepted, outside, before or after pickup -- can be
+  // taken off until the order is delivered.
   const canDeassignAndResend = (order) => {
     const backendStatus = String(order?.status || "").trim().toLowerCase()
-    const phase = String(order?.deliveryState?.currentPhase || "").trim().toLowerCase()
     return (
-      ["confirmed", "preparing", "ready_for_pickup", "reached_pickup"].includes(backendStatus) &&
-      order?.dispatch?.status === "accepted" &&
-      Boolean(order?.dispatch?.deliveryPartnerId) &&
-      !order?.deliveryState?.pickedUpAt &&
-      !["en_route_to_delivery", "at_drop", "delivered", "completed"].includes(phase)
+      ["confirmed", "preparing", "ready_for_pickup", "reached_pickup", "picked_up", "reached_drop"].includes(backendStatus) &&
+      ["accepted", "assigned"].includes(String(order?.dispatch?.status || "")) &&
+      Boolean(order?.dispatch?.deliveryPartnerId)
     )
   }
 
@@ -185,7 +214,6 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>SI</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}
@@ -193,7 +221,7 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Order ID</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                    <SortArrow column="date" />
                   </div>
                 </th>
               )}
@@ -201,7 +229,7 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Order Date</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                    <SortArrow column="date" />
                   </div>
                 </th>
               )}
@@ -209,7 +237,6 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Order OTP</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}
@@ -217,7 +244,6 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Customer Information</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}
@@ -225,7 +251,7 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Restaurant</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                    <SortArrow column="restaurant" />
                   </div>
                 </th>
               )}
@@ -233,7 +259,6 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider min-w-[200px]">
                   <div className="flex items-center gap-2">
                     <span>Food Items / Item Price</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}
@@ -241,7 +266,7 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-right text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center justify-end gap-2">
                     <span>Total Amount</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                    <SortArrow column="amount" />
                   </div>
                 </th>
               )}
@@ -249,7 +274,7 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Payment Type</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                    <SortArrow column="payment" />
                   </div>
                 </th>
               )}
@@ -257,7 +282,6 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Payment Status</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}
@@ -265,7 +289,7 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Order Status</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
+                    <SortArrow column="status" />
                   </div>
                 </th>
               )}
@@ -273,7 +297,6 @@ export default function OrdersTable({
                 <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     <span>Assigned Delivery Partner</span>
-                    <ArrowUpDown className="w-3 h-3 text-slate-400 cursor-pointer hover:text-slate-600" />
                   </div>
                 </th>
               )}

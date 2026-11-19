@@ -2,6 +2,7 @@ import { prisma } from '../../../config/prisma.js';
 import { checkDeliveryRadius, serviceableRadiusKm } from '../orders/services/order-pricing.service.js';
 import { calculateDistanceKm } from './geo.utils.js';
 import { restaurantsNearPoint } from './restaurantQuery.util.js';
+import { customerZoneIds, zoneAllowsRestaurant } from './zone.service.js';
 
 /**
  * Who may see a restaurant, for every list a customer browses.
@@ -112,7 +113,13 @@ export async function restaurantsInReach({ lat, lng, radiusKm } = {}) {
         return { requiresLocation: true, distanceById: new Map() };
     }
 
-    const [serviceable, radius] = await Promise.all([loadServiceableRadii(), loadRadiusSettings()]);
+    const [serviceable, radius, zones] = await Promise.all([
+        loadServiceableRadii(),
+        loadRadiusSettings(),
+        customerZoneIds(latitude, longitude),
+    ]);
+    // Outside every zone: nothing delivers here.
+    if (zones !== null && !zones.size) return { requiresLocation: false, outOfService: true, distanceById: new Map() };
     const asked = positiveKm(radiusKm);
     const boundKm = Math.min(
         asked ?? Infinity,
@@ -128,6 +135,8 @@ export async function restaurantsInReach({ lat, lng, radiusKm } = {}) {
     for (const row of near) {
         const { id, distanceInKm } = row;
         if (asked !== null && distanceInKm > asked) continue;
+        // A restaurant's range only counts inside its own zone.
+        if (!zoneAllowsRestaurant(zones, row.zoneId)) continue;
         const bandKm = serviceable.forZone(row.zoneId);
         if (bandKm !== null && distanceInKm > bandKm) continue;
         const { withinRadius } = checkDeliveryRadius({

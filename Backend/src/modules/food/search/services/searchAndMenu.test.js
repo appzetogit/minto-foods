@@ -22,7 +22,19 @@ let available;
 let soldOut;
 let backNow;
 
+const squareAround = (p, half) => [
+    { latitude: p.lat - half, longitude: p.lng - half },
+    { latitude: p.lat - half, longitude: p.lng + half },
+    { latitude: p.lat + half, longitude: p.lng + half },
+    { latitude: p.lat + half, longitude: p.lng - half },
+];
+
 test.before(async () => {
+    // Restaurants only reach customers inside a zone.
+    const zone = await prisma.foodZone.create({
+        data: { name: `Search Zone ${Date.now()}`, isActive: true, coordinates: squareAround(HERE, 0.55) },
+    });
+    created.zoneId = zone.id;
     tag = uniqueTag('Srch');
     restaurant = await prisma.foodRestaurant.create({
         data: {
@@ -48,6 +60,7 @@ test.before(async () => {
 test.after(async () => {
     await prisma.foodItem.deleteMany({ where: { id: { in: created.foods } } });
     await prisma.foodRestaurant.deleteMany({ where: { id: { in: created.restaurants } } });
+    if (created.zoneId) await prisma.foodZone.deleteMany({ where: { id: created.zoneId } });
     await prisma.$disconnect();
 });
 

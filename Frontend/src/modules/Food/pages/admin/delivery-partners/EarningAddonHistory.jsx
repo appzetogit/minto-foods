@@ -48,14 +48,17 @@ const addonProgress = (item) => {
       unit: "online",
     }
   }
-  const done = Number(item?.ordersCompleted) || 0
   const need = Number(item?.ordersRequired) || 0
+  // Rows granted before the cap stored however many orders the sweep found.
+  const done = need > 0 ? Math.min(Number(item?.ordersCompleted) || 0, need) : Number(item?.ordersCompleted) || 0
   return { label: `${done} / ${need}`, done, need, unit: "orders" }
 }
 
 export default function EarningAddonHistory() {
   // From/to days (India time on the server); blank = no limit.
-  const [dateRange, setDateRange] = useState({ from: "", to: "" })
+  // Today by default, as in India: the whole history at once buried the day's grants.
+  const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10)
+  const [dateRange, setDateRange] = useState({ from: today, to: today })
   const [searchQuery, setSearchQuery] = useState("")
   const [history, setHistory] = useState([])
   const [isLoading, setIsLoading] = useState(true)

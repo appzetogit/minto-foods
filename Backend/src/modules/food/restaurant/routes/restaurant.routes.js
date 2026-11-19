@@ -102,6 +102,10 @@ import {
 import { listBannersForRestaurantAppController } from '../../admin/controllers/restaurantAppBanner.controller.js';
 
 import { cacheResponse, invalidateCache } from '../../../../middleware/cache.js';
+import { prisma } from '../../../../config/prisma.js';
+import { buildOrderIdentityFilter, pushStatusHistory } from '../../orders/services/order.helpers.js';
+
+const CANCEL_ACK_NOTE = 'Restaurant acknowledged the cancellation';
 
 const router = express.Router();
 
@@ -346,6 +350,31 @@ router.get('/orders', authMiddleware, requireRestaurant, orderController.listOrd
 // Before /orders/:orderId, or Express reads "rejection-reasons" as an order id.
 router.get('/orders/rejection-reasons', authMiddleware, requireRestaurant, orderController.listRejectionReasonsRestaurantController);
 router.get('/orders/:orderId', authMiddleware, requireRestaurant, orderController.getOrderByIdRestaurantController);
+// The owner pressed OK on the "cancelled by admin" buzzer: on the order's
+// timeline, so the admin knows the restaurant saw it.
+router.post('/orders/:orderId/cancellation-acknowledged', authMiddleware, requireRestaurant, async (req, res, next) => {
+    try {
+        const restaurantId = req.user?.userId;
+        const order = await prisma.foodOrder.findFirst({
+            where: { ...(buildOrderIdentityFilter(req.params.orderId) || { id: '' }), restaurantId: String(restaurantId) },
+            select: { id: true, orderStatus: true, statusHistory: { where: { note: CANCEL_ACK_NOTE }, select: { id: true } } },
+        });
+        if (!order) return sendError(res, 404, 'Order not found');
+        if (!String(order.orderStatus).startsWith('cancelled')) return sendError(res, 400, 'This order is not cancelled');
+        if (!order.statusHistory.length) {
+            await pushStatusHistory(order.id, {
+                byRole: 'RESTAURANT',
+                byId: restaurantId,
+                from: order.orderStatus,
+                to: order.orderStatus,
+                note: CANCEL_ACK_NOTE,
+            });
+        }
+        return sendResponse(res, 200, 'Acknowledged', { orderId: order.id });
+    } catch (error) {
+        next(error);
+    }
+});
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 

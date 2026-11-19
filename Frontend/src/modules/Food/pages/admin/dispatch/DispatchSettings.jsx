@@ -20,7 +20,7 @@ const MANUAL_WARNING = (where) =>
 
 export default function DispatchSettings() {
   const [data, setData] = useState(null)
-  const [form, setForm] = useState({ dispatchMode: "auto", riderAcceptWindowSeconds: 45, manualAcceptWindowSeconds: 120, manualQueueAlertMinutes: 5, maxActiveOrdersPerRider: 1 })
+  const [form, setForm] = useState({ dispatchMode: "auto", riderAcceptWindowSeconds: 45, manualAcceptWindowSeconds: 120, manualQueueAlertMinutes: 5, maxActiveOrdersPerRider: 1, riderPayCancelAtRestaurant: 10 })
   const [saving, setSaving] = useState("")
 
   const load = async () => {
@@ -33,6 +33,7 @@ export default function DispatchSettings() {
         manualAcceptWindowSeconds: d.manualAcceptWindowSeconds || 120,
         manualQueueAlertMinutes: d.manualQueueAlertMinutes || 5,
         maxActiveOrdersPerRider: d.maxActiveOrdersPerRider || 1,
+        riderPayCancelAtRestaurant: d.riderPayCancelAtRestaurant ?? 10,
       })
     } catch (e) {
       toast.error(errText(e, "Could not load dispatch settings"))
@@ -52,6 +53,7 @@ export default function DispatchSettings() {
         manualAcceptWindowSeconds: Number(form.manualAcceptWindowSeconds),
         manualQueueAlertMinutes: Number(form.manualQueueAlertMinutes),
         maxActiveOrdersPerRider: Number(form.maxActiveOrdersPerRider),
+        riderPayCancelAtRestaurant: Number(form.riderPayCancelAtRestaurant),
       })))
       toast.success("Dispatch settings saved")
     } catch (e) {
@@ -157,6 +159,18 @@ export default function DispatchSettings() {
                 className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
               />
               <span className="block text-xs text-slate-400 mt-1">1 = one trip at a time. Raise it at peak time so a rider on a trip can still be offered or assigned another order (needs the latest rider app).</span>
+            </label>
+            <label className="text-sm text-slate-700">
+              Rider pay when an order is cancelled after the rider reached the restaurant (₹)
+              <input
+                type="number"
+                min="0"
+                max="500"
+                value={form.riderPayCancelAtRestaurant}
+                onChange={(e) => setForm((f) => ({ ...f, riderPayCancelAtRestaurant: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 text-sm rounded-lg border border-slate-300"
+              />
+              <span className="block text-xs text-slate-400 mt-1">Paid by the platform. Cancelled before the rider reached the restaurant: nothing. After pickup: the full trip pay, which you can change on the order (₹0 if it was the rider's fault).</span>
             </label>
           </div>
           <div className="flex justify-end">

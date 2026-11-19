@@ -33,6 +33,22 @@ const FAR = { lat: HERE.lat - 20, lng: HERE.lng - 20 };
 
 const created = { restaurants: [], offers: [], zones: [], invoices: [] };
 const stamp = () => `${Date.now()}${Math.floor(performance.now() * 1000) % 1000}`;
+const squareAround = (p, half) => [
+    { latitude: p.lat - half, longitude: p.lng - half },
+    { latitude: p.lat - half, longitude: p.lng + half },
+    { latitude: p.lat + half, longitude: p.lng + half },
+    { latitude: p.lat + half, longitude: p.lng - half },
+];
+
+// A restaurant's range only counts inside a zone, so the customer here needs
+// one. A little larger than HERE.ring, so a test's own zone over the same patch
+// is still the tightest match, and short of the neighbouring patches' centres.
+test.before(async () => {
+    const zone = await prisma.foodZone.create({
+        data: { name: `Feed Zone ${stamp()}`, isActive: true, coordinates: squareAround(HERE, 0.55) },
+    });
+    created.zones.push(zone.id);
+});
 
 const makeRestaurant = async (overrides = {}) => {
     const restaurant = await prisma.foodRestaurant.create({
@@ -388,9 +404,9 @@ test('the public detail has no owner, bank, PAN or UPI fields, and GST is masked
     assert.equal(plain.gstLegalName, null);
 });
 
-test('the feed goes by distance, not zone: a restaurant 5 km away across a zone line is listed', async () => {
-    // The restaurant sits in a small zone; the customer is 5 km north, outside
-    // every zone -- the Kongaon / Bhiwandi case, which used to list nothing.
+test('a restaurant delivers only inside its own zone, by distance within it', async () => {
+    // The restaurant sits in a small zone. A customer 5 km north, outside every
+    // zone, used to see it anyway: a restaurant's range now stops at its zone.
     const AREA = testPatch(12);
     const zone = await prisma.foodZone.create({
         data: {
@@ -412,20 +428,21 @@ test('the feed goes by distance, not zone: a restaurant 5 km away across a zone 
 
     try {
         const r = await makeRestaurant({ zoneId: zone.id, latitude: AREA.lat, longitude: AREA.lng });
-        const customer = { lat: AREA.lat + 0.045, lng: AREA.lng };
 
-        const { restaurants } = await listApprovedRestaurants({ ...customer, zoneId: zone.id, limit: 1000 });
+        // Outside the zone, though well inside the restaurant's range: not listed.
+        const outside = await listApprovedRestaurants({ lat: AREA.lat + 0.045, lng: AREA.lng, zoneId: zone.id, limit: 1000 });
+        assert.ok(!outside.restaurants.some((x) => x.id === r.id), 'not listed outside the zone');
+
+        // Inside the zone, about 0.9 km away: listed, with its distance.
+        const customer = { lat: AREA.lat + 0.008, lng: AREA.lng };
+        const { restaurants } = await listApprovedRestaurants({ ...customer, limit: 1000 });
         const row = restaurants.find((x) => x.id === r.id);
-        assert.ok(row, 'listed although the customer is in no zone');
-        assert.ok(row.distanceInKm > 4.5 && row.distanceInKm < 5.5, `distance ${row.distanceInKm}`);
+        assert.ok(row, 'listed inside the zone');
+        assert.ok(row.distanceInKm > 0.7 && row.distanceInKm < 1.1, `distance ${row.distanceInKm}`);
         assert.ok('nextOpeningAt' in row, 'the open-status fields come with it');
 
-        // Beyond the zone's widest band (10 km) it is not offered.
-        const far = await listApprovedRestaurants({ lat: AREA.lat + 0.12, lng: AREA.lng, limit: 1000 });
-        assert.ok(!far.restaurants.some((x) => x.id === r.id), '13 km is past every band');
-
         // A radius the app passes narrows it.
-        const narrow = await listApprovedRestaurants({ ...customer, radiusKm: 3, limit: 1000 });
+        const narrow = await listApprovedRestaurants({ ...customer, radiusKm: 0.5, limit: 1000 });
         assert.ok(!narrow.restaurants.some((x) => x.id === r.id));
     } finally {
         await prisma.foodFeeSettings.delete({ where: { id: fees.id } });

@@ -776,6 +776,45 @@ router.post(
     orderController.resendDeliveryNotificationAdminController
 );
 router.post('/orders/:orderId/refund', orderController.processRefundAdminController);
+// What the rider is paid for a cancelled order: 0 when the rider was at fault
+// after pickup, the full trip pay when the customer was, or any amount.
+router.patch(
+    '/orders/:orderId/rider-cancel-pay',
+    requireAdminPermission('order_management', 'edit'),
+    async (req, res, next) => {
+        try {
+            const { buildOrderIdentityFilter, pushStatusHistory } = await import('../../orders/services/order.helpers.js');
+            const amount = Number(req.body?.amount);
+            if (!Number.isFinite(amount) || amount < 0 || amount > 2000) {
+                return sendError(res, 400, 'Enter an amount from ₹0 to ₹2000');
+            }
+            const reason = String(req.body?.reason || '').trim().slice(0, 200);
+            const order = await prisma.foodOrder.findFirst({
+                where: buildOrderIdentityFilter(req.params.orderId) || { id: '' },
+                select: { id: true, orderStatus: true, dispatchDeliveryPartnerId: true, riderCancelPay: true },
+            });
+            if (!order) return sendError(res, 404, 'Order not found');
+            if (!String(order.orderStatus).startsWith('cancelled')) return sendError(res, 400, 'This order is not cancelled');
+            if (!order.dispatchDeliveryPartnerId) return sendError(res, 400, 'No rider was on this order');
+            const rounded = Math.round(amount * 100) / 100;
+            const note = reason ? `Set by admin: ${reason}` : 'Set by admin';
+            await prisma.foodOrder.update({
+                where: { id: order.id },
+                data: { riderCancelPay: rounded, riderCancelPayReason: note },
+            });
+            await pushStatusHistory(order.id, {
+                byRole: 'ADMIN',
+                byId: req.user?.userId,
+                from: order.orderStatus,
+                to: order.orderStatus,
+                note: `Rider pay for the cancelled order: ₹${Number(order.riderCancelPay || 0)} → ₹${rounded}${reason ? ` (${reason})` : ''}`,
+            });
+            res.status(200).json({ success: true, message: 'Rider pay updated', data: { riderCancelPay: rounded, riderCancelPayReason: note } });
+        } catch (error) {
+            next(error);
+        }
+    },
+);
 // Refund tracking: every refund movement with totals, for the viewed cities.
 router.get('/order-refunds', async (req, res, next) => {
     try {

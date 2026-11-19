@@ -96,6 +96,7 @@ export async function getDeliveryEarnings(query = {}) {
             select: {
                 id: true, orderId: true, orderStatus: true, createdAt: true,
                 riderEarning: true, deliveryFee: true, total: true,
+                riderCancelPay: true, riderCancelPayReason: true,
                 deliveryPartner: { select: { id: true, name: true, phone: true } },
                 restaurant: { select: { restaurantName: true } },
             },
@@ -105,14 +106,21 @@ export async function getDeliveryEarnings(query = {}) {
         // both columns over all rows would double-count an order that has a
         // recorded earning, and applying the fallback to the totals would be
         // wrong for any page mixing the two.
+        // Only what was earned: delivered orders, and the cancellation pay of
+        // cancelled ones. Every order the rider was on used to count, a
+        // cancelled one at its full trip pay.
         Promise.all([
             prisma.foodOrder.aggregate({
-                where: { ...where, riderEarning: { gt: 0 } },
+                where: { ...where, orderStatus: 'delivered', riderEarning: { gt: 0 } },
                 _sum: { riderEarning: true },
             }),
             prisma.foodOrder.aggregate({
-                where: { ...where, riderEarning: { lte: 0 } },
+                where: { ...where, orderStatus: 'delivered', riderEarning: { lte: 0 } },
                 _sum: { deliveryFee: true },
+            }),
+            prisma.foodOrder.aggregate({
+                where: { ...where, riderCancelPay: { gt: 0 } },
+                _sum: { riderCancelPay: true },
             }),
         ]),
         // GROUP BY in the database: Prisma's distinct loads every order.
@@ -126,7 +134,14 @@ export async function getDeliveryEarnings(query = {}) {
         deliveryPartnerName: order.deliveryPartner?.name || 'N/A',
         deliveryPartnerPhone: order.deliveryPartner?.phone || 'N/A',
         restaurantName: order.restaurant?.restaurantName || 'N/A',
-        amount: num(order.riderEarning) || num(order.deliveryFee),
+        amount: order.orderStatus === 'delivered'
+            ? num(order.riderEarning) || num(order.deliveryFee)
+            : String(order.orderStatus).startsWith('cancelled')
+                ? num(order.riderCancelPay)
+                : 0,
+        // Not delivered yet: what it will pay, shown apart from the earned amount.
+        expectedAmount: num(order.riderEarning) || num(order.deliveryFee),
+        cancelPayReason: order.riderCancelPayReason || null,
         orderTotal: num(order.total),
         deliveryFee: num(order.deliveryFee),
         orderStatus: order.orderStatus || 'N/A',
@@ -137,7 +152,8 @@ export async function getDeliveryEarnings(query = {}) {
         earnings,
         summary: {
             totalDeliveryPartners: partners.filter((p) => p.dispatchDeliveryPartnerId).length,
-            totalEarnings: num(totals[0]._sum.riderEarning) + num(totals[1]._sum.deliveryFee),
+            totalEarnings: num(totals[0]._sum.riderEarning) + num(totals[1]._sum.deliveryFee)
+                + num(totals[2]._sum.riderCancelPay),
             totalOrders: total,
         },
         pagination: {

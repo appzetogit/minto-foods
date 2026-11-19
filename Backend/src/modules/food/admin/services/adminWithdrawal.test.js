@@ -8,6 +8,7 @@ import {
     getDeliveryWithdrawals,
     updateDeliveryWithdrawalStatus,
 } from './adminWithdrawal.service.js';
+import { recordTransaction } from '../../../../core/payments/transaction.service.js';
 import { uniquePhone } from '../../../../utils/testIds.js';
 
 /**
@@ -31,9 +32,28 @@ const makePartner = async (balance = 0, lockedAmount = 0) => {
     });
     created.partners.push(partner.id);
 
+    // The rider's money, recorded the way an admin credit is: a ledger row
+    // (which is what the payout debit draws on) that the rider's balance
+    // also counts. A bare wallet balance is no longer anyone's money.
     await prisma.wallet.create({
-        data: { entityType: 'deliveryBoy', entityId: partner.id, balance, lockedAmount },
+        data: { entityType: 'deliveryBoy', entityId: partner.id, balance: 0, lockedAmount: 0 },
     });
+    if (balance > 0) {
+        await recordTransaction({
+            entityType: 'deliveryBoy',
+            entityId: partner.id,
+            type: 'credit',
+            amount: balance,
+            description: 'Test credit',
+            category: 'adjustment',
+        });
+    }
+    if (lockedAmount > 0) {
+        await prisma.wallet.update({
+            where: { entityType_entityId: { entityType: 'deliveryBoy', entityId: partner.id } },
+            data: { lockedAmount },
+        });
+    }
     return partner;
 };
 
@@ -123,7 +143,7 @@ test('a payout larger than the balance is refused and moves nothing', async () =
 
     await assert.rejects(
         () => updateDeliveryWithdrawalStatus(w.id, { status: 'approved' }),
-        /balance is lower/,
+        /less than this request/,
     );
 
     // The whole thing is one transaction, so the request stays pending too —

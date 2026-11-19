@@ -141,6 +141,11 @@ export function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt,
     // The customer's note for the rider. The popup is built from this push
     // alone, so without it the note never showed on the offer.
     deliveryInstructions: s(order?.deliveryInstructions || ''),
+    // 'quick' when the customer paid for quick delivery; the offer popup
+    // badges it.
+    deliveryMode: s(order?.deliveryMode || order?.pricing?.deliveryMode || 'basic'),
+    // Part of riderEarning, shown to the rider on its own.
+    tipAmount: s(Number(order?.pricing?.tip ?? order?.tipAmount ?? 0) || 0),
   };
 }
 
@@ -240,13 +245,30 @@ async function listNearbyOnlineDeliveryPartners(restaurant, { maxKm = 15, limit 
         FROM "food_delivery_partners"
         WHERE "availabilityStatus"::text = 'online' AND "status"::text = ANY(${allowedStatuses})
     `;
-    if (stale > 0) {
-      logger.warn(
-        `[Dispatch] ${stale}/${online} online riders skipped for missing/stale GPS ` +
-          `(restaurant ${restaurant.id}, maxKm ${maxKm}). 0 eligible.`,
-      );
-    }
-    return { partners: [] };
+    if (stale === 0) return { partners: [] };
+
+    // Every online rider nearby had gone quiet: Android puts the app to sleep
+    // and the location upload stops, while the rider is still "online" and
+    // waiting. Offering to nobody kept it that way, since only an offer's push
+    // wakes the app. So the order goes to them by their last known position,
+    // nearest first, and the push wakes them up.
+    const quiet = await prisma.$queryRaw`
+        SELECT "id", "status"::text AS "status",
+               ST_Distance("lastLocation", ST_MakePoint(${rLng}, ${rLat})::geography) / 1000 AS "distanceKm"
+        FROM "food_delivery_partners"
+        WHERE "availabilityStatus"::text = 'online'
+          AND "status"::text = ANY(${allowedStatuses})
+          AND "lastLocation" IS NOT NULL
+          AND ST_DWithin("lastLocation", ST_MakePoint(${rLng}, ${rLat})::geography, ${radiusMeters})
+        ORDER BY "lastLocation" <-> ST_MakePoint(${rLng}, ${rLat})::geography
+        LIMIT ${take}
+    `;
+    logger.warn(
+      `[Dispatch] ${stale}/${online} online riders had no GPS for ${Math.round(STALE_GPS_MS / 60000)} min (restaurant ${restaurant.id}, maxKm ${maxKm}); offered to ${quiet.length} of them by last known position.`,
+    );
+    return {
+      partners: quiet.map((r) => ({ partnerId: r.id, distanceKm: Number(r.distanceKm), status: r.status, staleGps: true })),
+    };
   }
 
   return {
@@ -265,6 +287,7 @@ export async function getDispatchSettings() {
       Number(row?.riderAcceptWindowSeconds) || DRIVER_ACCEPT_WINDOW_MS / 1000)),
     maxActiveOrdersPerRider: Math.min(MAX_ORDERS_PER_RIDER_CAP, Math.max(1,
       Math.trunc(Number(row?.maxActiveOrdersPerRider)) || 1)),
+    riderPayCancelAtRestaurant: row ? Number(row.riderPayCancelAtRestaurant) : 10,
   };
 }
 
@@ -304,6 +327,11 @@ export async function updateDispatchSettings(dispatchMode, adminId, extra = {}) 
       throw new ValidationError(`Orders per rider must be 1 to ${MAX_ORDERS_PER_RIDER_CAP}`);
     }
     data.maxActiveOrdersPerRider = Math.round(maxOrders);
+  }
+  const cancelPay = Number(extra.riderPayCancelAtRestaurant);
+  if (extra.riderPayCancelAtRestaurant !== undefined && Number.isFinite(cancelPay)) {
+    if (cancelPay < 0 || cancelPay > 500) throw new ValidationError('Rider pay on a cancelled order must be ₹0 to ₹500');
+    data.riderPayCancelAtRestaurant = Math.round(cancelPay * 100) / 100;
   }
   const before = await getDispatchSettings();
   await prisma.foodSettings.upsert({

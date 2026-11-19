@@ -7,7 +7,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@food/components/ui/dialog"
-import { adminAPI } from "@/services/api"
+import apiClient, { adminAPI } from "@/services/api"
 import { getTimelineStatusLabel, getTimelineRoleLabel } from "@food/utils/orderStatus"
 import { formatDeliveryFeeBreakdownSubtext, getDeliveryFeeTotal, resolveDeliveryFeeGst } from "@food/utils/deliveryFeeDisplay"
 import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/foodVariants"
@@ -54,8 +54,66 @@ const formatDialogMoney = (value) => {
 /** Statuses where an admin can still give the order a rider (before pickup). */
 const RIDER_ASSIGNABLE = ["confirmed", "preparing", "ready_for_pickup"]
 
+/**
+ * What the rider is paid for a cancelled order, and changing it: nothing when
+ * the rider was at fault, the full trip pay when the customer was.
+ */
+function RiderCancelPay({ order, detail, onSaved }) {
+  const pay = detail?.riderCancelPay ?? order?.riderCancelPay
+  const reason = detail?.riderCancelPayReason ?? order?.riderCancelPayReason
+  const tripPay = Number(detail?.riderEarning ?? order?.riderEarning) || 0
+  const [amount, setAmount] = useState("")
+  const [note, setNote] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  if (pay === null || pay === undefined) return null
+
+  const save = async (value) => {
+    setSaving(true)
+    setError("")
+    try {
+      await apiClient.patch(`/admin/orders/${order._id || order.id}/rider-cancel-pay`, { amount: Number(value), reason: note })
+      setAmount("")
+      setNote("")
+      onSaved?.()
+    } catch (err) {
+      setError(err?.response?.data?.message || "Could not save")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+      <p className="text-sm text-slate-800">
+        Rider pay for this cancelled order: <span className="font-semibold">₹{Number(pay).toFixed(2)}</span>
+      </p>
+      {reason && <p className="text-xs text-slate-600">{reason}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={saving} onClick={() => save(0)} className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60">
+          Pay nothing (rider's fault)
+        </button>
+        {tripPay > 0 && (
+          <button type="button" disabled={saving} onClick={() => save(tripPay)} className="px-3 py-1.5 text-xs rounded-md border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60">
+            Full trip pay ₹{tripPay.toFixed(2)} (customer's issue)
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="number" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Other amount" className="w-28 px-2 py-1.5 text-xs rounded-md border border-slate-300" />
+        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason (optional)" className="flex-1 min-w-[140px] px-2 py-1.5 text-xs rounded-md border border-slate-300" />
+        <button type="button" disabled={saving || amount === ""} onClick={() => save(amount)} className="px-3 py-1.5 text-xs rounded-md bg-blue-600 text-white disabled:opacity-60">
+          Save
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  )
+}
+
 export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged }) {
   const [pickingRider, setPickingRider] = useState(false)
+  const [detailVersion, setDetailVersion] = useState(0)
   // Full order detail (statusHistory + transaction split) fetched on open;
   // the `order` prop only carries the mapped list-row fields.
   const [detail, setDetail] = useState(null)
@@ -80,7 +138,7 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
     return () => {
       active = false
     }
-  }, [isOpen, detailOrderId])
+  }, [isOpen, detailOrderId, detailVersion])
 
   if (!order) return null
 
@@ -178,8 +236,18 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] bg-white p-0 overflow-y-auto">
+      {/* The built-in close sat under this sticky header and scrolled away with
+          the order, so on a phone there was no way to close it but the back key. */}
+      <DialogContent showCloseButton={false} className="max-w-4xl max-h-[90vh] bg-white p-0 overflow-y-auto">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-200 sticky top-0 bg-white z-10">
+          <button
+            type="button"
+            onClick={() => onOpenChange?.(false)}
+            aria-label="Close"
+            className="absolute right-4 top-4 rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          >
+            <X className="h-5 w-5" />
+          </button>
           <DialogTitle className="flex items-center gap-2">
             <Eye className="w-5 h-5 text-orange-600" />
             Order Details
@@ -429,6 +497,24 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                       {item.description && (
                         <p className="text-xs text-slate-500 mt-1 ml-8">{item.description}</p>
                       )}
+                      {/* Variant, add-ons and cooking notes: an "extra cheese" the
+                          customer paid for showed nowhere here. */}
+                      {item.variantName && (
+                        <p className="text-xs text-slate-600 mt-1 ml-8">Size: {item.variantName}</p>
+                      )}
+                      {Array.isArray(item.addons) && item.addons.length > 0 && (
+                        <ul className="mt-1 ml-8 space-y-0.5">
+                          {item.addons.map((addon, i) => (
+                            <li key={addon?.addonId || addon?.id || i} className="text-xs text-slate-600">
+                              + {addon?.name || "Add-on"}
+                              {Number(addon?.price) > 0 ? ` (₹${Number(addon.price).toFixed(2)})` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {item.notes && (
+                        <p className="text-xs text-amber-700 mt-1 ml-8">Note: {item.notes}</p>
+                      )}
                     </div>
                     <DualMoney
                       amount={price * qty}
@@ -540,6 +626,14 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                   </div>
                 )}
               </div>
+              <RiderCancelPay
+                order={order}
+                detail={detail}
+                onSaved={() => {
+                  setDetailVersion((v) => v + 1)
+                  onChanged?.()
+                }}
+              />
             </div>
           )}
 

@@ -138,22 +138,45 @@ const emptyTotals = () => ({ entities: 0, orders: 0, grossSales: 0, commission: 
 export async function getRiderBalances(query = {}) {
     const { start, end } = parsePeriod(query);
 
-    const grouped = await prisma.foodTransaction.groupBy({
-        by: ['deliveryPartnerId'],
-        where: {
-            ...periodWhere(start, end),
-            isRiderSettled: false,
-            deliveryPartnerId: { not: null },
-        },
-        _sum: { riderShare: true },
-        _count: { _all: true },
-    });
+    // The whole week, paid and unpaid. Only unpaid orders were counted, so a
+    // rider paid mid-week vanished from it, and a week with everything paid
+    // read as a week with no earnings at all.
+    const [byPaid, bonusRiders] = await Promise.all([
+        prisma.foodTransaction.groupBy({
+            by: ['deliveryPartnerId', 'isRiderSettled'],
+            where: { ...periodWhere(start, end), deliveryPartnerId: { not: null } },
+            _sum: { riderShare: true },
+            _count: { _all: true },
+        }),
+        // A rider whose only money this week is a bonus or an add-on.
+        prisma.deliveryBonusTransaction.findMany({
+            where: { createdAt: { gte: start, lte: end } },
+            select: { deliveryPartnerId: true },
+            distinct: ['deliveryPartnerId'],
+        }),
+    ]);
 
-    if (!grouped.length) {
+    const tally = new Map();
+    const at = (id) => {
+        if (!tally.has(id)) tally.set(id, { deliveries: 0, earned: 0, unpaid: 0, paid: 0 });
+        return tally.get(id);
+    };
+    for (const g of byPaid) {
+        const t = at(g.deliveryPartnerId);
+        const share = num(g._sum.riderShare);
+        t.deliveries += g._count._all;
+        t.earned += share;
+        if (g.isRiderSettled) t.paid += share;
+        else t.unpaid += share;
+    }
+    for (const b of bonusRiders) at(b.deliveryPartnerId);
+
+    if (!tally.size) {
         return { period: { from: start, to: end }, rows: [], totals: emptyRiderTotals() };
     }
 
-    const partnerIds = grouped.map((g) => g.deliveryPartnerId).filter(Boolean);
+    const partnerIds = [...tally.keys()];
+    const grouped = partnerIds.map((id) => ({ deliveryPartnerId: id }));
 
     const [partners, cashCollected, cashDeposited, bonuses] = await Promise.all([
         prisma.foodDeliveryPartner.findMany({
@@ -201,7 +224,10 @@ export async function getRiderBalances(query = {}) {
         .map((g) => {
             const id = g.deliveryPartnerId;
             const partner = byId.get(id);
-            const earnings = money(g._sum.riderShare);
+            const t = tally.get(id);
+            // What is still owed comes from the unpaid orders; the week's
+            // earnings and what was already paid are shown beside it.
+            const earnings = money(t.unpaid);
             const bonus = money(bonusById.get(id) || 0);
             const collected = money(cashById.get(id) || 0);
             const deposited = money(depositById.get(id) || 0);
@@ -212,7 +238,9 @@ export async function getRiderBalances(query = {}) {
                 entityId: id,
                 name: partner?.name || 'Unknown rider',
                 contact: partner?.phone || '',
-                deliveries: g._count._all,
+                deliveries: t.deliveries,
+                weekEarnings: money(t.earned),
+                alreadyPaid: money(t.paid),
                 earnings,
                 bonus,
                 cashCollected: collected,
@@ -235,7 +263,7 @@ export async function getRiderBalances(query = {}) {
                     : null,
             };
         })
-        .filter((row) => row.payable !== 0 || row.cashInHand !== 0)
+        .filter((row) => row.payable !== 0 || row.cashInHand !== 0 || row.weekEarnings !== 0 || row.bonus !== 0)
         .sort((a, b) => b.payable - a.payable);
 
     return {
@@ -245,6 +273,8 @@ export async function getRiderBalances(query = {}) {
             entities: rows.length,
             deliveries: rows.reduce((sum, r) => sum + r.deliveries, 0),
             earnings: money(rows.reduce((sum, r) => sum + r.earnings, 0)),
+            weekEarnings: money(rows.reduce((sum, r) => sum + r.weekEarnings, 0)),
+            alreadyPaid: money(rows.reduce((sum, r) => sum + r.alreadyPaid, 0)),
             bonus: money(rows.reduce((sum, r) => sum + r.bonus, 0)),
             cashInHand: money(rows.reduce((sum, r) => sum + r.cashInHand, 0)),
             payable: money(rows.reduce((sum, r) => sum + r.payable, 0)),
@@ -364,6 +394,20 @@ export async function payoutEntity(entityType, entityId, body = {}) {
             throw new ValidationError('Some of these orders were just paid out by someone else. Reload and try again.');
         }
 
+        // A rider can be paid here or through a withdrawal request, and the two
+        // did not know about each other: the same ₹258 went out both ways. Both
+        // now draw on one balance.
+        if (!isRestaurant) {
+            const { riderBalance } = await import('../../delivery/services/riderBalance.service.js');
+            const balance = await riderBalance(String(entityId), tx);
+            if (amount > balance.available) {
+                throw new ValidationError(
+                    `This rider has ₹${balance.available} left to be paid (after withdrawals already paid or waiting). ` +
+                        `Paying ₹${amount} here would pay them twice.`,
+                );
+            }
+        }
+
         const settlement = await tx.settlement.create({
             data: {
                 entityType: isRestaurant ? 'restaurant' : 'deliveryBoy',
@@ -425,11 +469,30 @@ export async function getSettlementHistory(query = {}) {
         prisma.settlement.count({ where }),
     ]);
 
+    // Who was paid and who recorded it. The list showed only an amount and a
+    // period, so nobody could tell whose payout a row was.
+    const idsOf = (type) => [...new Set(rows.filter((r) => r.entityType === type).map((r) => r.entityId))];
+    const adminIds = [...new Set(rows.map((r) => r.processedBy).filter(Boolean))];
+    const [restaurants, riders, admins] = await Promise.all([
+        prisma.foodRestaurant.findMany({ where: { id: { in: idsOf('restaurant') } }, select: { id: true, restaurantName: true } }),
+        prisma.foodDeliveryPartner.findMany({ where: { id: { in: idsOf('deliveryBoy') } }, select: { id: true, name: true, phone: true } }),
+        adminIds.length
+            ? prisma.foodAdmin.findMany({ where: { id: { in: adminIds } }, select: { id: true, name: true, email: true } })
+            : [],
+    ]);
+    const nameOf = new Map([
+        ...restaurants.map((r) => [r.id, r.restaurantName]),
+        ...riders.map((r) => [r.id, r.phone ? `${r.name} (${r.phone})` : r.name]),
+    ]);
+    const adminName = new Map(admins.map((a) => [a.id, a.name || a.email]));
+
     return {
         settlements: rows.map((row) => ({
             id: row.id,
             entityType: row.entityType === 'deliveryBoy' ? 'rider' : row.entityType,
             entityId: row.entityId,
+            entityName: nameOf.get(row.entityId) || null,
+            processedByName: row.processedBy ? adminName.get(row.processedBy) || null : null,
             amount: money(row.amount),
             status: row.status,
             payoutRef: row.payoutRef,
