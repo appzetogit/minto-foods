@@ -154,3 +154,9 @@ test('an empty patch is refused, so a bad post cannot look like a save', () => {
     assert.ok(parseZoneCodSettings(null).error);
     assert.ok(parseZoneCodSettings({ somethingElse: true }).error);
 });
+
+test('the new-customer message counts the orders still needed', () => {
+    assert.match(codMessage('new-customer', { required: 1, delivered: 0 }), /after your first delivered order/);
+    assert.match(codMessage('new-customer', { required: 2, delivered: 0 }), /after 2 more delivered orders/);
+    assert.match(codMessage('new-customer', { required: 3, delivered: 2 }), /after 1 more delivered order\./);
+});
