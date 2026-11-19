@@ -18,6 +18,8 @@ import {
   getDispatchSettings,
   orderCollectsCash,
   tryAutoAssign,
+  activeOrdersByRider,
+  rankRidersForBatching,
 } from './order-dispatch.service.js';
 
 /**
@@ -390,6 +392,16 @@ export async function listEligibleRiders(orderId, { includeOffline = false, sear
     }),
   ]);
   const cash = new Map(wallets.map((w) => [w.entityId, Number(w.cashInHand) || 0]));
+  // Riders already going this way (same restaurant / nearby drop), as auto
+  // dispatch prefers them.
+  const busyIds = ids.filter((rid) => (activeCounts.get(rid) || 0) > 0);
+  const batchReasons = new Map(
+    rankRidersForBatching(
+      busyIds.map((partnerId) => ({ partnerId })),
+      await activeOrdersByRider(busyIds),
+      { restaurantId: row.restaurantId, dropLat: row.addrLat, dropLng: row.addrLng },
+    ).map((x) => [String(x.partner.partnerId), x.reason]),
+  );
   const today = new Map(todayCounts.map((c) => [c.dispatchDeliveryPartnerId, c._count._all]));
   const declined = new Set(
     (row.dispatchOffers || []).filter((o) => ['rejected', 'timeout'].includes(o.action)).map((o) => o.partnerId),
@@ -427,6 +439,7 @@ export async function listEligibleRiders(orderId, { includeOffline = false, sear
       distanceKm,
       lastLocationAt: p.lastLocationAt,
       declinedThisOrder: declined.has(p.id),
+      batchReason: batchReasons.get(p.id) || '',
       currentlyAssigned: row.dispatchDeliveryPartnerId === p.id && row.dispatchStatus === 'assigned',
       assignable: reasons.length === 0,
       // Outside the zone is allowed only with an override and a reason.
@@ -435,7 +448,7 @@ export async function listEligibleRiders(orderId, { includeOffline = false, sear
     };
   });
 
-  const rank = (r) => (r.assignable ? 0 : 2) + (r.insideZone ? 0 : 1);
+  const rank = (r) => (r.assignable ? 0 : 2) + (r.insideZone ? 0 : 1) - (r.assignable && r.batchReason ? 0.5 : 0);
   riders.sort(
     (a, b) => rank(a) - rank(b) || (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9) || a.name.localeCompare(b.name),
   );
