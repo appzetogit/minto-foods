@@ -541,6 +541,23 @@ export async function calculateOrder(userId, dto) {
       logger.warn(`Wallet preview failed for user ${userId}: ${err?.message || err}`);
     }
   }
+
+  // Whether this customer may pay cash here (platform switch, the zone's own
+  // switch and its minimum delivered orders) — the same check createOrder
+  // enforces, so checkout can grey COD out instead of refusing it at the end.
+  try {
+    const { isCodAvailable } = await import("./codAvailability.service.js");
+    const restaurant = dto.restaurantId
+      ? await prisma.foodRestaurant.findUnique({
+          where: { id: String(dto.restaurantId) },
+          select: { zoneId: true },
+        })
+      : null;
+    const cod = await isCodAvailable({ userId, zoneId: dto.zoneId || restaurant?.zoneId || null });
+    result.cod = { allowed: cod.allowed, message: cod.message };
+  } catch (err) {
+    logger.warn(`COD check failed in calculate: ${err?.message || err}`);
+  }
   return result;
 }
 
