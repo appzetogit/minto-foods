@@ -87,20 +87,29 @@ const dispatchInclude = { ...orderInclude, restaurant: true, user: true };
  * Resolve restaurant → customer road distance once per dispatch broadcast.
  * Falls back to pricing Haversine when Directions is unavailable.
  */
+/** Minutes for a trip of `km` at ~25 km/h urban riding; at least 1. */
+export const estimateTripMins = (km) => Math.max(1, Math.ceil((Math.max(0, Number(km) || 0) * 60) / 25));
+
 export async function enrichPayloadWithTripRoadDistance(order, payload) {
+  const withEta = (p) =>
+    p.tripDistanceKm != null && p.tripDurationMins == null
+      ? { ...p, tripDurationMins: estimateTripMins(p.tripDistanceKm) }
+      : p;
   const existingRoadKm = order?.tripDistanceKm ?? order?.pricing?.roadDistanceKm;
-  if (Number.isFinite(Number(existingRoadKm))) {
+  // 0 is what an unroutable order was stored with, not a real distance:
+  // reusing it left the offer's distance and time blank. Route it again.
+  if (Number(existingRoadKm) > 0) {
     const km = Number(Number(existingRoadKm).toFixed(2));
     const minsRaw = order?.tripDurationMins ?? order?.pricing?.roadDurationMins;
     const tripDurationMins = Number.isFinite(Number(minsRaw))
       ? Math.ceil(Number(minsRaw))
       : payload.tripDurationMins;
-    return { ...payload, tripDistanceKm: km, tripDurationMins: tripDurationMins ?? null, distanceKm: km };
+    return withEta({ ...payload, tripDistanceKm: km, tripDurationMins: tripDurationMins ?? null, distanceKm: km });
   }
 
   const restaurantPoint = parseGeoPoint(order?.restaurantId);
   const customerPoint = parseGeoPoint(order?.deliveryAddress);
-  if (!restaurantPoint || !customerPoint) return payload;
+  if (!restaurantPoint || !customerPoint) return withEta(payload);
 
   try {
     const route = await fetchDrivingRoute(restaurantPoint, customerPoint);
@@ -129,7 +138,14 @@ export async function enrichPayloadWithTripRoadDistance(order, payload) {
     logger.warn(`Trip road distance enrichment failed: ${err?.message || err}`);
   }
 
-  return payload;
+  // No route (or the two points are practically the same spot): the straight
+  // line, so the rider still sees a distance and a time.
+  const pts = [restaurantPoint.lat, restaurantPoint.lng, customerPoint.lat, customerPoint.lng].map(Number);
+  if (pts.every(Number.isFinite)) {
+    const km = Number(haversineKm(...pts).toFixed(2));
+    return { ...payload, tripDistanceKm: km, tripDurationMins: estimateTripMins(km), distanceKm: km };
+  }
+  return withEta(payload);
 }
 
 /**
