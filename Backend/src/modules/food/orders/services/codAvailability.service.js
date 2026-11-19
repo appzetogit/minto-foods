@@ -141,9 +141,13 @@ export const parseZoneCodSettings = (body = {}) => {
 };
 
 /** What the customer is told. Never the internal reason. */
-export const codMessage = (reason) => {
+export const codMessage = (reason, { required = 1, delivered = 0 } = {}) => {
     if (reason === 'new-customer') {
-        return 'Cash on delivery becomes available after your first delivered order. Please pay online this time.';
+        const left = Math.max(1, Number(required) - Number(delivered));
+        const when = Number(delivered) === 0 && left === 1
+            ? 'after your first delivered order'
+            : `after ${left} more delivered order${left === 1 ? '' : 's'}`;
+        return `Cash on delivery becomes available ${when}. Please pay online this time.`;
     }
     if (reason === 'zone-off') {
         return 'Cash on delivery is not available in this area. Please pay online.';
@@ -192,5 +196,5 @@ export async function isCodAvailable({ userId, zoneId }) {
     const delivered = required > 0 ? await countDeliveredOrders(userId) : 0;
 
     const decision = decideCod(zone, delivered, true);
-    return { ...decision, message: decision.allowed ? '' : codMessage(decision.reason) };
+    return { ...decision, message: decision.allowed ? '' : codMessage(decision.reason, { required, delivered }) };
 }
