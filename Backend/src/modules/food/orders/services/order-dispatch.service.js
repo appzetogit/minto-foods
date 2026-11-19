@@ -144,6 +144,8 @@ export function buildIncomingOrderPushData(order, payload, acceptanceDeadlineAt,
     // 'quick' when the customer paid for quick delivery; the offer popup
     // badges it.
     deliveryMode: s(order?.deliveryMode || order?.pricing?.deliveryMode || 'basic'),
+    // Part of riderEarning, shown to the rider on its own.
+    tipAmount: s(Number(order?.pricing?.tip ?? order?.tipAmount ?? 0) || 0),
   };
 }
 

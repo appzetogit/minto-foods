@@ -18,3 +18,8 @@ test('the offer push says when the customer paid for quick delivery', () => {
     assert.equal(buildIncomingOrderPushData(quick, {}, new Date()).deliveryMode, 'quick');
     assert.equal(buildIncomingOrderPushData({ id: 'o4', items: [] }, {}, new Date()).deliveryMode, 'basic');
 });
+
+test('the offer push carries the customer\'s tip', () => {
+    assert.equal(buildIncomingOrderPushData({ id: 'o5', items: [], pricing: { tip: 20 } }, {}, new Date()).tipAmount, '20');
+    assert.equal(buildIncomingOrderPushData({ id: 'o6', items: [] }, {}, new Date()).tipAmount, '0');
+});
