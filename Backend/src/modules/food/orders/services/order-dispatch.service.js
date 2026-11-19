@@ -13,7 +13,70 @@ import {
   notifyOwnersActionableAlert,
   notifyOwnersSafely,
   TERMINAL_ORDER_STATUSES,
+  haversineKm,
 } from './order.helpers.js';
+
+/** Drops this close together count as the same way (peak-time batching). */
+export const BATCH_SAME_ROUTE_KM = 2.5;
+
+/**
+ * Orders the riders who may be offered `order`, for peak-time batching.
+ *
+ * `partners` comes nearest-first and stays that way inside each tier:
+ *   0  already carrying an order from the same restaurant, not yet picked up —
+ *      one stop collects both;
+ *   1  carrying an order whose drop is within BATCH_SAME_ROUTE_KM of this one's;
+ *   2  carrying nothing;
+ *   3  carrying orders going elsewhere — only when nobody better is around,
+ *      since this order would be a detour for them.
+ *
+ * @param {Array<{partnerId: string}>} partners
+ * @param {Map<string, Array<{restaurantId: string, orderStatus: string, addrLat: number|null, addrLng: number|null}>>} activeByRider
+ * @param {{restaurantId: string, dropLat: number|null, dropLng: number|null}} order
+ * @returns {Array<{partner: object, tier: number, reason: string}>}
+ */
+export function rankRidersForBatching(partners, activeByRider, order) {
+  const pickedUp = new Set(['picked_up', 'reached_drop']);
+  const near = (a) =>
+    a.addrLat != null && a.addrLng != null && order.dropLat != null && order.dropLng != null &&
+    haversineKm(a.addrLat, a.addrLng, order.dropLat, order.dropLng) <= BATCH_SAME_ROUTE_KM;
+  const ranked = partners.map((partner, i) => {
+    const actives = activeByRider.get(String(partner.partnerId)) || [];
+    let tier = 3;
+    let reason = '';
+    if (!actives.length) tier = 2;
+    else if (actives.some((a) => String(a.restaurantId) === String(order.restaurantId) && !pickedUp.has(a.orderStatus))) {
+      tier = 0;
+      reason = 'same_restaurant';
+    } else if (actives.some(near)) {
+      tier = 1;
+      reason = 'same_route';
+    }
+    return { partner, tier, reason, i };
+  });
+  ranked.sort((a, b) => a.tier - b.tier || a.i - b.i);
+  return ranked.map(({ partner, tier, reason }) => ({ partner, tier, reason }));
+}
+
+/** Each rider's accepted, unfinished orders, for rankRidersForBatching. */
+export async function activeOrdersByRider(partnerIds) {
+  if (!partnerIds.length) return new Map();
+  const rows = await prisma.foodOrder.findMany({
+    where: {
+      dispatchStatus: 'accepted',
+      dispatchDeliveryPartnerId: { in: partnerIds.map(String) },
+      orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
+    },
+    select: { dispatchDeliveryPartnerId: true, restaurantId: true, orderStatus: true, addrLat: true, addrLng: true },
+  });
+  const map = new Map();
+  for (const row of rows) {
+    const key = String(row.dispatchDeliveryPartnerId);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  }
+  return map;
+}
 import { fetchDrivingRoute } from '../utils/googleMaps.js';
 import { parseGeoPoint } from '../../shared/geo.utils.js';
 
@@ -545,7 +608,18 @@ export async function tryAutoAssign(orderId, options = {}) {
       const key = String(p.partnerId);
       return !neverAgain.has(key) && !busy.has(key) && !holdingOffer.has(key) && !cashBlocked.has(key);
     });
-    const next = free.find((p) => !askedThisRound.has(String(p.partnerId)));
+    // Peak-time batching: riders already going this way come first.
+    const ranked = maxActiveOrdersPerRider > 1
+      ? rankRidersForBatching(free, await activeOrdersByRider(free.map((p) => p.partnerId)), {
+          restaurantId: row.restaurantId,
+          dropLat: row.addrLat,
+          dropLng: row.addrLng,
+        })
+      : free.map((partner) => ({ partner, tier: 2, reason: '' }));
+    const pick = ranked.find(({ partner }) => !askedThisRound.has(String(partner.partnerId)));
+    const next = pick?.partner;
+    const batchReason = pick?.reason || '';
+    if (batchReason) logger.info(`[Dispatch] ${id}: offering to ${next.partnerId} (${batchReason})`);
 
     if (!next) {
       // Nobody left to ask this round. Look again in one window; if free riders
@@ -604,6 +678,7 @@ export async function tryAutoAssign(orderId, options = {}) {
         ...payload,
         ...offerFields,
         pickupDistanceKm: next.distanceKm,
+        batchReason,
       });
     }
 
@@ -628,6 +703,8 @@ export async function tryAutoAssign(orderId, options = {}) {
           offerId: offer.id,
           offerExpiresAt: expiresAt.toISOString(),
           pickupDistanceKm: String(Number(next.distanceKm.toFixed(2))),
+          // Why a rider already on a trip is offered this one, if they are.
+          batchReason,
         },
       });
     } catch (err) {
