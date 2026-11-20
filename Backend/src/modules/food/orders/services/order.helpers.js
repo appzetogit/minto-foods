@@ -817,6 +817,17 @@ export async function notifyRestaurantNewOrder(orderDoc) {
     if (customerLabel) bodyText += `\nCustomer: ${customerLabel}`;
     if (addressStr) bodyText += `\nAddress: ${addressStr}`;
 
+    // The popup's starting prep time, which the restaurant can change with
+    // - / + before accepting: the slowest dish's, or the default. Without it
+    // the popup hid its prep-time row altogether.
+    let prepMinutes = 0;
+    try {
+      const { dishPrepMinutes } = await import("./eta.service.js");
+      prepMinutes = await dishPrepMinutes((orderDoc.items || []).map((i) => i?.itemId));
+    } catch {
+      // The popup falls back to its own default.
+    }
+
     // Two messages, not one — see notifyOwnersActionableAlert.
     //
     // Accept/Reject can only be attached by the app itself, and the app is only
@@ -854,6 +865,7 @@ export async function notifyRestaurantNewOrder(orderDoc) {
           acceptanceDeadlineAt: str(orderDoc.acceptanceDeadlineAt?.toISOString?.() || ""),
           // The admin's accept time this order was given, for the countdown.
           acceptTimeoutSeconds: str(acceptTimeoutSeconds(orderDoc)),
+          prepMinutes: str(prepMinutes || ""),
         },
       },
     );
