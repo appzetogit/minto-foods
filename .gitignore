@@ -8,5 +8,3 @@ suvio-api.conf
 
 # Local server access + work notes (never commit).
 SERVER_NOTES.md
-config.bat
-node_modules
