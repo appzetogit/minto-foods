@@ -603,7 +603,29 @@ export const logout = async (refreshToken, fcmToken, platform) => {
 
   // 2. Invalidate the refresh token (standard logout procedure)
   const deleted = await prisma.foodRefreshToken.deleteMany({ where: { token: refreshToken } });
+
+  // 3. A rider who signs out stops being available. Left online, the admin
+  // panel showed them active and dispatch kept offering them orders. Only for a
+  // token we had issued (it was just deleted), so a forged one cannot take
+  // someone offline. Same path as the app's own "go offline": the duty shift
+  // is closed, and a rider still carrying an order stays on it.
+  if (deleted.count > 0) await takeRiderOfflineOnLogout(refreshToken);
+
   return { invalidated: deleted.count > 0 };
+};
+
+const takeRiderOfflineOnLogout = async (refreshToken) => {
+  try {
+    const jwt = await import("jsonwebtoken");
+    const claims = jwt.default.decode(refreshToken);
+    if (claims?.role !== "DELIVERY_PARTNER" || !isId(String(claims.userId || ""))) return;
+    const { updateDeliveryAvailability } = await import(
+      "../../modules/food/delivery/services/delivery.service.js"
+    );
+    await updateDeliveryAvailability(String(claims.userId), { status: "offline" });
+  } catch (err) {
+    logger.warn(`Rider not taken offline on logout: ${err?.message || err}`);
+  }
 };
 
 export const getProfile = async (userId, role) => {
