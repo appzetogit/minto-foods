@@ -2147,39 +2147,6 @@ function assertNotAnsweredElsewhere(from, to) {
   }
 }
 
-/**
- * The restaurant changes its prep time after accepting (the - / + on the order
- * card): the kitchen is running late, or the food is ready sooner. Moves the
- * countdown on every phone, the admin panel's clock and the customer's ETA.
- */
-export async function setPrepMinutesRestaurant(orderId, restaurantId, minutes) {
-  const value = Math.round(Number(minutes));
-  if (!Number.isFinite(value) || value < 1 || value > 240) {
-    throw new ValidationError("Preparation time must be between 1 and 240 minutes");
-  }
-  const identity = buildOrderIdentityFilter(orderId);
-  const row = await prisma.foodOrder.findFirst({
-    where: { ...identity, restaurantId: String(restaurantId) },
-    select: { id: true, orderStatus: true },
-  });
-  if (!row) throw new NotFoundError("Order not found");
-  if (!["confirmed", "preparing"].includes(String(row.orderStatus))) {
-    throw new ValidationError("Preparation time can only be changed before the food is ready");
-  }
-  await prisma.foodOrder.update({ where: { id: row.id }, data: { packingMinutes: value } });
-  void refreshOrderEta(row.id, { force: true }).catch(() => {});
-  try {
-    // The restaurant's other phones refresh their card.
-    getIO()?.to(rooms.restaurant(String(restaurantId))).emit("order_status_update", {
-      orderMongoId: row.id,
-      orderId: row.id,
-      orderStatus: row.orderStatus,
-    });
-  } catch (_) {}
-  const updated = toOrder(await prisma.foodOrder.findUnique({ where: { id: row.id }, include: orderInclude }));
-  return toRestaurantView(normalizeOrderForClient(updated));
-}
-
 export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "", packingMinutes) {
   await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
 
