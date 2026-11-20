@@ -69,6 +69,15 @@ const start = async () => {
                 logger.error(`Unaccepted order sweep error: ${err.message}`);
             }
             try {
+                // Riders whose app went silent (logged out offline, killed,
+                // phone dead) stop showing as active.
+                const { takeSilentRidersOffline } = await import('../src/modules/food/delivery/services/delivery.service.js');
+                const n = await takeSilentRidersOffline();
+                if (n) logger.info(`Took ${n} silent rider(s) offline`);
+            } catch (err) {
+                logger.error(`Silent rider sweep error: ${err.message}`);
+            }
+            try {
                 // Anything the hunt above could not rescue is eventually closed
                 // out rather than left open for days.
                 const { expired, failed } = await expireStalledOrders();
