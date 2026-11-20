@@ -207,15 +207,6 @@ export async function updateOrderStatusRestaurantController(req, res, next) {
     }
 }
 
-export async function setPrepMinutesRestaurantController(req, res, next) {
-    try {
-        const order = await orderService.setPrepMinutesRestaurant(req.params.orderId, req.user?.userId, req.body?.minutes);
-        return sendResponse(res, 200, 'Preparation time updated', { order });
-    } catch (err) {
-        next(err);
-    }
-}
-
 export async function listOrdersAvailableDeliveryController(req, res, next) {
     try {
         const deliveryPartnerId = req.user?.userId;
