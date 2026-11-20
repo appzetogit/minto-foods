@@ -431,6 +431,47 @@ const closeOpenSessions = async (tx, partnerId, { bySystem = false, lat = null, 
     return open.length;
 };
 
+/** Online riders' phones ping every few minutes; this long a silence means the phone is gone. */
+export const RIDER_SILENT_OFFLINE_MINUTES = 30;
+
+/**
+ * Takes offline every online rider whose app has gone silent: logged out with
+ * no network, app killed, phone dead. None of those reach the server, so the
+ * rider stayed "online" for days -- active in the admin panel, counted for
+ * dispatch. A rider still carrying an order is left alone.
+ *
+ * ponytail: the shift closes at the sweep, so duty time can overcount by up to
+ * RIDER_SILENT_OFFLINE_MINUTES; close it at lastLocationAt if payouts use it.
+ */
+export const takeSilentRidersOffline = async ({ now = new Date() } = {}) => {
+    const cutoff = new Date(now.getTime() - RIDER_SILENT_OFFLINE_MINUTES * 60000);
+    const silent = await prisma.foodDeliveryPartner.findMany({
+        where: {
+            availabilityStatus: 'online',
+            updatedAt: { lt: cutoff },
+            OR: [{ lastLocationAt: null }, { lastLocationAt: { lt: cutoff } }],
+        },
+        select: { id: true },
+    });
+    let count = 0;
+    for (const { id } of silent) {
+        const onTrip = await prisma.foodOrder.findFirst({
+            where: { dispatchDeliveryPartnerId: id, dispatchStatus: 'accepted', orderStatus: { notIn: TERMINAL_ORDER_STATUSES } },
+            select: { id: true },
+        });
+        if (onTrip) continue;
+        await prisma.$transaction(async (tx) => {
+            const { count: moved } = await tx.foodDeliveryPartner.updateMany({
+                where: { id, availabilityStatus: 'online' },
+                data: { availabilityStatus: 'offline' },
+            });
+            if (moved) await closeOpenSessions(tx, id, { bySystem: true });
+            count += moved;
+        });
+    }
+    return count;
+};
+
 export const updateDeliveryAvailability = async (userId, payload) => {
     const partner = await requirePartner(userId);
 
