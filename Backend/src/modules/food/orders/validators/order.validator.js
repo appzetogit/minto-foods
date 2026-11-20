@@ -224,7 +224,9 @@ export function validateOrderStatusDto(body) {
             'delivered',
             'cancelled_by_restaurant'
         ]),
-        note: z.string().optional()
+        note: z.string().optional(),
+        // Prep time chosen when accepting.
+        packingMinutes: z.coerce.number().int().min(1).max(240).optional()
     });
     const result = schema.safeParse(body);
     if (!result.success) {

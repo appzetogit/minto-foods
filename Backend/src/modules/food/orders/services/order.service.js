@@ -17,7 +17,7 @@ import {
 } from '../helpers/razorpay.helper.js';
 import { getBalance, recordTransaction } from '../../../../core/payments/transaction.service.js';
 import { assertCodAllowedForTotal, loadOrderLimits } from '../../shared/orderLimits.js';
-import { refreshOrderEta } from './eta.service.js';
+import { refreshOrderEta, dishPrepMinutes } from './eta.service.js';
 import { recomputePartnerRating, recomputeRestaurantRating } from './rating.service.js';
 import {
   refundOrder,
@@ -2147,7 +2147,7 @@ function assertNotAnsweredElsewhere(from, to) {
   }
 }
 
-export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "") {
+export async function updateOrderStatusRestaurant(orderId, restaurantId, orderStatus, note = "", packingMinutes) {
   await expireUnacceptedOrders({ restaurantId: String(restaurantId) });
 
   const identity = buildOrderIdentityFilter(orderId);
@@ -2202,10 +2202,20 @@ export async function updateOrderStatusRestaurant(orderId, restaurantId, orderSt
   // One atomic update that only lands if the order is still in the status this
   // request read. Two phones answering together both read "created"; the
   // database lets exactly one of them through, and the other gets a 409.
+  // Accepting starts the kitchen clock: the prep time the restaurant chose,
+  // or the slowest dish's when it accepted without choosing (card button).
+  const accepting = String(from) === "created" && ["confirmed", "preparing"].includes(targetStatus);
+  const prep = accepting
+    ? (Number(packingMinutes) > 0
+        ? Math.round(Number(packingMinutes))
+        : await dishPrepMinutes((row.items || []).map((i) => i.itemId)))
+    : null;
+
   const { count: moved } = await prisma.foodOrder.updateMany({
     where: { id: order.id, orderStatus: from },
     data: {
       orderStatus,
+      ...(prep ? { packingMinutes: prep } : {}),
       // The acceptance window exists only to auto-cancel orders the restaurant
       // never acted on. It was never cleared once they did, so expireUnacceptedOrders
       // later cancelled confirmed, actively-dispatching orders as "Not accepted".
