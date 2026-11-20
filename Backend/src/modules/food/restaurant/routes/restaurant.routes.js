@@ -376,6 +376,7 @@ router.post('/orders/:orderId/cancellation-acknowledged', authMiddleware, requir
     }
 });
 router.patch('/orders/:orderId/status', authMiddleware, requireRestaurant, orderController.updateOrderStatusRestaurantController);
+router.patch('/orders/:orderId/prep-time', authMiddleware, requireRestaurant, orderController.setPrepMinutesRestaurantController);
 router.post('/orders/:orderId/resend-notification', authMiddleware, requireRestaurant, orderController.resendDeliveryNotificationRestaurantController);
 
 // Reviews: what customers rated and wrote, newest first, with the average.
