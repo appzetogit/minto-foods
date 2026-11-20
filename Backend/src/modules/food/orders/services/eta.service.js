@@ -44,6 +44,15 @@ export const parsePrepMinutes = (value) => {
     return minutes > 0 && minutes <= 240 ? Math.round(minutes) : null;
 };
 
+/** The slowest dish decides when an order is ready; DEFAULT_PREP_MINUTES when none says. */
+export async function dishPrepMinutes(itemIds = []) {
+    const ids = [...new Set(itemIds.filter(Boolean).map(String))];
+    if (!ids.length) return DEFAULT_PREP_MINUTES;
+    const foods = await prisma.foodItem.findMany({ where: { id: { in: ids } }, select: { preparationTime: true } });
+    const times = foods.map((f) => parsePrepMinutes(f.preparationTime)).filter((m) => m != null);
+    return times.length ? Math.max(...times) : DEFAULT_PREP_MINUTES;
+}
+
 const point = (lat, lng) => {
     const la = Number(lat);
     const ln = Number(lng);
@@ -93,7 +102,7 @@ export async function refreshOrderEta(orderId, { force = false } = {}) {
         const order = await runUnscoped(() => prisma.foodOrder.findUnique({
             where: { id },
             select: {
-                id: true, userId: true, orderStatus: true, createdAt: true, etaComputedAt: true,
+                id: true, userId: true, orderStatus: true, createdAt: true, etaComputedAt: true, packingMinutes: true,
                 addrLat: true, addrLng: true, riderLat: true, riderLng: true,
                 dispatchDeliveryPartnerId: true,
                 restaurant: { select: { latitude: true, longitude: true } },
@@ -112,15 +121,10 @@ export async function refreshOrderEta(orderId, { force = false } = {}) {
             || (order.dispatchDeliveryPartnerId ? point(order.deliveryPartner?.lastLat, order.deliveryPartner?.lastLng) : null);
         const pickedUp = PICKED_UP.includes(order.orderStatus);
 
-        // The slowest dish decides when the order is ready.
+        // What the restaurant quoted when it accepted, else the slowest dish.
         let prepMinutes = DEFAULT_PREP_MINUTES;
         if (!pickedUp) {
-            const itemIds = [...new Set(order.items.map((i) => i.itemId).filter(Boolean))];
-            const foods = itemIds.length
-                ? await prisma.foodItem.findMany({ where: { id: { in: itemIds } }, select: { preparationTime: true } })
-                : [];
-            const times = foods.map((f) => parsePrepMinutes(f.preparationTime)).filter((m) => m != null);
-            if (times.length) prepMinutes = Math.max(...times);
+            prepMinutes = order.packingMinutes || await dishPrepMinutes(order.items.map((i) => i.itemId));
         }
 
         const [riderToRestaurant, restaurantToCustomer, riderToCustomer] = await Promise.all([

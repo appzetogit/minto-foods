@@ -1463,6 +1463,9 @@ model FoodOrder {
   /// What the customer tipped the rider. Paid through to the rider on top of
   /// their earning, so it is kept apart from the fee the platform collects.
   tipAmount            Decimal      @default(0) @db.Decimal(14, 2)
+  /// Minutes the restaurant said the food takes, set when it accepts. Drives
+  /// its countdown on the order card and the kitchen part of the ETA.
+  packingMinutes       Int?
   platformFee          Decimal      @default(0) @db.Decimal(14, 2)
   /// Quick Mode surcharge; also included in platformFee.
   quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)

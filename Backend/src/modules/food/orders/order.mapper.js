@@ -114,6 +114,7 @@ export function toOrder(row) {
             discount: money(row.discount),
             // The customer's tip for the rider; riderEarning already includes it.
             tip: money(row.tipAmount),
+            packingMinutes: row.packingMinutes ?? null,
             couponCode: row.couponCode,
             total: money(row.total),
             currency: row.currency,
