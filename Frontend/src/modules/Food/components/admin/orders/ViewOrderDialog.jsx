@@ -14,6 +14,8 @@ import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/fo
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
 import { restaurantLabel } from "@food/utils/entityLabels"
 import { RiderPicker } from "@food/pages/admin/dispatch/AssignRider"
+import { KitchenTiming } from "./PrepTimer"
+import { prepTiming } from "./orderStage"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
 const debugError = (...args) => {}
@@ -456,6 +458,9 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
               }}
             />
           ) : null}
+
+          {/* From the order as fetched, so every page that opens this gets it. */}
+          <KitchenTiming timing={detail ? prepTiming(detail) : order.prepTiming} />
 
           {/* Restaurant Information */}
           {order.restaurant && (

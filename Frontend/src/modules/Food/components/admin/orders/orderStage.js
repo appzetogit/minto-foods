@@ -101,3 +101,36 @@ export function orderStage(order, backendStatus, riderName = "", now = Date.now(
       return { label: null, note: "", late: false }
   }
 }
+
+/**
+ * The kitchen's clock for an order: the prep time the restaurant chose when
+ * accepting (pricing.packingMinutes), when it fell due, and how the restaurant
+ * did against it -- marked ready, then handed to the rider.
+ *
+ * All times are Date or null; minute figures are whole minutes, null when the
+ * step has not happened. `readyLateBy`/`handoverAfterDue` are negative when
+ * early.
+ */
+export function prepTiming(order) {
+  const quoted = Number(order?.pricing?.packingMinutes) || null
+  const at = (v) => {
+    const t = v ? new Date(v) : null
+    return t && Number.isFinite(t.getTime()) ? t : null
+  }
+  const acceptedAt = at(reachedAt(order, "confirmed") || reachedAt(order, "preparing"))
+  const readyAt = at(reachedAt(order, "ready_for_pickup"))
+  const pickedUpAt = at(order?.deliveryState?.pickedUpAt || reachedAt(order, "picked_up"))
+  const dueAt = quoted && acceptedAt ? new Date(acceptedAt.getTime() + quoted * 60000) : null
+  const mins = (a, b) => (a && b ? Math.round((a.getTime() - b.getTime()) / 60000) : null)
+  return {
+    quoted,
+    acceptedAt,
+    dueAt,
+    readyAt,
+    pickedUpAt,
+    tookMinutes: mins(readyAt, acceptedAt),
+    readyLateBy: mins(readyAt, dueAt),
+    handoverAfterDue: mins(pickedUpAt, dueAt),
+    handoverAfterReady: mins(pickedUpAt, readyAt),
+  }
+}
