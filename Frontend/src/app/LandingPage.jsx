@@ -267,8 +267,17 @@ export default function LandingPage() {
   const catsRef = useRef(null);
   const dishesRef = useRef(null);
 
+  // This page owns its tab title; the company-name updater leaves it alone while it is mounted.
   useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.ownTitle = "1";
     document.title = "MintoFood – Order food online";
+    return () => {
+      delete root.dataset.ownTitle;
+    };
+  }, []);
+
+  useEffect(() => {
     (async () => {
       try {
         const response = await apiClient.get("/food/pages/support", { params: { module: "USER" } });
