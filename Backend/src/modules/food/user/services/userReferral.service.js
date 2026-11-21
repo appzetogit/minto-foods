@@ -3,6 +3,7 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { buildReferralLinkFromTemplate } from '../../delivery/services/deliveryReferral.service.js';
 import { applyUserReferral } from '../../../../core/auth/auth.service.js';
+import { ensureShortReferralCode } from '../../../../core/auth/referralCode.js';
 
 /**
  * The three rows every referral view needs: the referrer, their wallet (for
@@ -15,8 +16,8 @@ const loadReferralContext = async (userId) => {
     const [user, wallet, settingsDoc] = await Promise.all([
         prisma.foodUser.findUnique({
             where: { id },
-            select: { id: true, referralCount: true, referralCode: true },
-        }),
+            select: { id: true, name: true, referralCount: true, referralCode: true },
+        }).then(ensureShortReferralCode),
         prisma.wallet.findUnique({
             where: { entityType_entityId: { entityType: 'user', entityId: id } },
             select: { referralEarnings: true },

@@ -595,7 +595,7 @@ model FoodUser {
   anniversary DateTime?
   gender      Gender    @default(unset)
 
-  referralCode  String?
+  referralCode  String?  @unique
   referredById  String? @db.VarChar(24)
   referralCount Int     @default(0)
 
