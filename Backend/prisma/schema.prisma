@@ -775,6 +775,13 @@ model FoodRestaurant {
   isAcceptingOrders    Boolean @default(true)
   /// Taken offline by an admin: the restaurant app cannot turn it back on.
   offlineByAdmin    Boolean @default(false)
+  /// Why the restaurant went offline ("Kitchen is full"), shown back to it.
+  offlineReason     String  @default("")
+  /// A scheduled break: the restaurant goes offline at offlineFrom...
+  offlineFrom       DateTime?
+  /// ...and comes back online by itself at offlineUntil (also "offline for 2
+  /// hours" from now). Flipped by the scheduler; see restaurantOffline.service.
+  offlineUntil      DateTime?
   /// Legacy, no longer honoured. Cleared whenever the toggle is updated.
   outsideHoursOverride Boolean @default(false)
 
