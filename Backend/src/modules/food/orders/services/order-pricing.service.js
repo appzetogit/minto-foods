@@ -913,11 +913,16 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     Number(feeSettings.quickDeliveryFee) || 0,
   );
 
+  // Each cart line against its own resolved line. resolveOrderCartItems keeps
+  // the cart's order one-to-one; matching by dish id instead compared every
+  // line of a dish against its first one, so Full + Half (or two add-on
+  // choices) of the same dish always read as "prices changed" and the order
+  // could not be placed.
   const priceChanges = (Array.isArray(dto.items) ? dto.items : [])
-    .map((rawItem) => {
+    .map((rawItem, index) => {
       const itemId = String(rawItem?.itemId || rawItem?.id || '').trim();
-      const resolved = items.find((entry) => String(entry.itemId) === itemId);
-      if (!resolved) return null;
+      const resolved = resolvedItems[index];
+      if (!resolved || String(resolved.itemId) !== itemId) return null;
 
       const previousPrice = Number(rawItem?.price);
       const nextPrice = Number(resolved.price);

@@ -359,3 +359,24 @@ test('an address outside every zone cannot order, even within the restaurant ran
     const { order } = await createOrder(userId, { restaurantId: edge.id, items: [{ itemId: dish.id, quantity: 1 }], address: inside, paymentMethod: 'cash' });
     assert.ok(order);
 });
+
+// Two lines of the same dish (two sizes) were each compared with the first
+// line's price, so the app always saw "prices changed" and could not order.
+test('two sizes of one dish at their right prices are not a price change', async () => {
+    const sized = await prisma.foodItem.findUnique({ where: { id: sizedFoodId }, include: { variants: true } });
+    const regular = sized.variants.find((v) => v.name === 'Regular');
+    const quote = await calculateOrder(userId, cart([
+        { itemId: sizedFoodId, variantId: regular.id, quantity: 1, price: 300 },
+        { itemId: sizedFoodId, variantId: largeId, quantity: 1, price: 500 },
+    ]));
+    assert.deepEqual(quote.priceChanges, []);
+
+    // A real change on the second line is still reported, against that line.
+    const moved = await calculateOrder(userId, cart([
+        { itemId: sizedFoodId, variantId: regular.id, quantity: 1, price: 300 },
+        { itemId: sizedFoodId, variantId: largeId, quantity: 1, price: 450 },
+    ]));
+    assert.equal(moved.priceChanges.length, 1);
+    assert.equal(moved.priceChanges[0].previousPrice, 450);
+    assert.equal(moved.priceChanges[0].price, 500);
+});
