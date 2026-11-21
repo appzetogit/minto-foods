@@ -763,10 +763,15 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
 
   // The restaurant's range only counts inside its zone; the lists apply the
   // same rule, and this catches a cart from before the address changed.
-  // Not on confirming an order already paid for.
+  //
+  // Its own switch, not skipAvailabilityCheck: placing an order skips the
+  // open-hours checks (createOrder runs them itself at the order time), and
+  // riding on that flag let a customer outside every zone order from any
+  // restaurant whose range reached them. Only the cart's stored-price
+  // previews skip it.
   const addrLat = Number(deliveryAddress?.latitude ?? deliveryAddress?.location?.latitude);
   const addrLng = Number(deliveryAddress?.longitude ?? deliveryAddress?.location?.longitude);
-  if (!options.skipAvailabilityCheck && Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
+  if (!options.skipZoneCheck && Number.isFinite(addrLat) && Number.isFinite(addrLng)) {
     const zones = await customerZoneIds(addrLat, addrLng);
     if (!zoneAllowsRestaurant(zones, restaurant?.zoneId)) {
       throw new ValidationError(

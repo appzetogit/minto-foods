@@ -328,3 +328,34 @@ test('every change is logged', async () => {
     assert.equal(Number(logs[1].before.percent), 5);
     assert.equal(Number(logs[1].after.percent), 6);
 });
+
+// A customer just outside every zone, but inside a restaurant's delivery range,
+// could place an order: placing skipped the zone check along with the open-hours
+// checks. The restaurant sits at the zone's edge, the address ~200 m outside it.
+test('an address outside every zone cannot order, even within the restaurant range', async () => {
+    const edge = await prisma.foodRestaurant.create({
+        data: {
+            restaurantName: `${tag} Edge`, ownerName: 'Owner', ownerPhone: uniquePhone('9'), status: 'approved',
+            zoneId: created.zones[0], latitude: HERE.lat + 0.499, longitude: HERE.lng,
+            isAcceptingOrders: true, outsideHoursOverride: true,
+        },
+    });
+    created.restaurants.push(edge.id);
+    const dish = await prisma.foodItem.create({
+        data: { restaurantId: edge.id, name: `${tag} Edge Thali`, price: 120, approvalStatus: 'approved', isAvailable: true },
+    });
+    created.foods.push(dish.id);
+
+    const outside = { ...address(), latitude: HERE.lat + 0.501 };
+    await assert.rejects(
+        () => createOrder(userId, { restaurantId: edge.id, items: [{ itemId: dish.id, quantity: 1 }], address: outside, paymentMethod: 'cash' }),
+        /do not deliver to this address/,
+    );
+    const placed = await prisma.foodOrder.count({ where: { restaurantId: edge.id } });
+    assert.equal(placed, 0);
+
+    // Inside the zone the same order goes through.
+    const inside = { ...address(), latitude: HERE.lat + 0.49 };
+    const { order } = await createOrder(userId, { restaurantId: edge.id, items: [{ itemId: dish.id, quantity: 1 }], address: inside, paymentMethod: 'cash' });
+    assert.ok(order);
+});
