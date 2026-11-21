@@ -1,3 +1,4 @@
+import { ensureShortReferralCode } from './referralCode.js';
 import crypto from "crypto";
 import ms from "ms";
 import { createOrUpdateOtp, verifyOtp } from "../otp/otp.service.js";
@@ -119,9 +120,11 @@ export const requestUserOtp = async (phone) => {
  * concurrent attempt fails there and never pays a duplicate reward.
  */
 export const applyUserReferral = async (userDoc, rawCode) => {
-  const code = String(rawCode || "").trim().toLowerCase();
-  if (!isId(code)) return { applied: false, reason: "invalid_code" };
-  if (code === userDoc.id) return { applied: false, reason: "own_code" };
+  const raw = String(rawCode || "").trim();
+  // Old codes are the 24-char id (lower case); new ones are short (ARMAN1234).
+  const code = isId(raw.toLowerCase()) ? raw.toLowerCase() : raw.toUpperCase();
+  if (!/^[A-Za-z0-9]{4,24}$/.test(code)) return { applied: false, reason: "invalid_code" };
+  if (code === userDoc.id || code === userDoc.referralCode) return { applied: false, reason: "own_code" };
   if (userDoc.referredById) return { applied: false, reason: "already_referred" };
 
   const [referrer, settingsDoc] = await Promise.all([
@@ -246,12 +249,7 @@ export const verifyUserOtpAndLogin = async (
   }
 
   // Ensure referralCode exists (used for share links on older accounts).
-  if (!userDoc.referralCode) {
-    userDoc = await prisma.foodUser.update({
-      where: { id: userDoc.id },
-      data: { referralCode: userDoc.id },
-    });
-  }
+  userDoc = await ensureShortReferralCode(userDoc);
 
   // Referral crediting: only for brand new accounts.
   if (isNewUser && typeof ref === "string" && ref.trim()) {
