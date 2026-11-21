@@ -217,6 +217,22 @@ test('changing a dish sends it back for approval', async () => {
     assert.equal(updated.rejectionReason, '');
 });
 
+test('a dish under a category it cannot pick any more can still be edited', async () => {
+    const mine = await makeRestaurant();
+    const other = await makeRestaurant();
+    const theirs = await makeCategory({ name: 'burger', restaurantId: other.id, approvalStatus: 'approved', isActive: true });
+    const food = await createRestaurantFood(mine.id, { name: 'Combo', price: 100 });
+    created.foods.push(food.id);
+    await prisma.foodItem.update({ where: { id: food.id }, data: { categoryId: theirs.id, categoryName: 'burger' } });
+
+    // What the app sends: the unchanged category plus the edit.
+    const updated = await updateRestaurantFood(mine.id, food.id, {
+        name: 'Combo', price: 120, categoryId: theirs.id, categoryName: 'burger',
+    });
+    assert.equal(Number(updated.price), 120);
+    assert.equal(updated.categoryId, theirs.id);
+});
+
 test('saving the whole dish with only a switch changed keeps it approved', async () => {
     const mine = await makeRestaurant();
     const food = await createRestaurantFood(mine.id, { name: 'Paratha', price: 20, description: 'Hot' });
