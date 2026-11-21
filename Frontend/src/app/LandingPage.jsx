@@ -154,6 +154,7 @@ function ScrollButtons({ targetRef }) {
 
 function Img({ src, alt, className, fallback = FALLBACK_FOOD }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
   return (
     <img
       src={!src || failed ? fallback : src}
@@ -391,6 +392,7 @@ export default function LandingPage() {
     }
     return list.slice(0, 16);
   }, [restaurants]);
+  const heroDish = useMemo(() => dishes.find((d) => d.image) || dishes[0] || null, [dishes]);
 
   const filtered = useMemo(() => {
     const f = FILTERS.find((x) => x.key === filter);
@@ -609,13 +611,13 @@ export default function LandingPage() {
             <div className="absolute inset-6 rounded-full" style={{ background: GRADIENT, opacity: 0.9 }} />
             <div className="relative rounded-full overflow-hidden border-[10px] border-white shadow-2xl shadow-[#0B6E63]/25 aspect-square">
               <Img
-                src={dishes[0]?.image || "https://images.unsplash.com/photo-1631515243349-e0cb75fb8d3a?q=80&w=1000&auto=format&fit=crop"}
-                alt={dishes[0]?.name || "Food"}
+                src={heroDish?.image || FALLBACK_FOOD}
+                alt={heroDish?.name || "Food"}
                 className="w-full h-full object-cover"
               />
             </div>
-            {dishes[0] && (
-              <motion.a href={`/food/user/restaurants/${restaurantSlug(dishes[0].r)}?dish=${dishes[0].id}`}
+            {heroDish && (
+              <motion.a href={`/food/user/restaurants/${restaurantSlug(heroDish.r)}?dish=${heroDish.id}`}
                 animate={{ y: [0, -8, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
                 className="absolute -left-4 bottom-12 bg-white rounded-2xl shadow-xl p-3 pr-5 flex items-center gap-3 max-w-[240px]"
               >
@@ -623,8 +625,8 @@ export default function LandingPage() {
                   <UtensilsCrossed className="w-5 h-5" />
                 </span>
                 <span className="leading-tight min-w-0">
-                  <span className="block text-sm font-bold truncate">{dishes[0].name}</span>
-                  <span className="block text-xs text-slate-500 truncate">₹{dishes[0].price} · {dishes[0].r.restaurantName}</span>
+                  <span className="block text-sm font-bold truncate">{heroDish.name}</span>
+                  <span className="block text-xs text-slate-500 truncate">₹{heroDish.price} · {heroDish.r.restaurantName}</span>
                 </span>
               </motion.a>
             )}
