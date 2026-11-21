@@ -1,19 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
-import { motion, useScroll, useTransform, AnimatePresence } from "framer-motion";
-import Lenis from "lenis";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, Search, ShoppingCart, Play, Apple,
-  MapPin, Clock, Star, Facebook, Youtube, Instagram, Linkedin,
-  Zap, Award, ShieldCheck, TrendingUp, ArrowUpRight, Map,
-  Users, Percent, Heart, Sparkles, X, Home, Store, Bike, Loader2
+  ArrowRight, Apple, Play, MapPin, Clock, Bike, Store, ShieldCheck, Smartphone,
+  Search, ShoppingBag, Navigation, Menu, X, Check, Loader2, BadgePercent, Star,
+  LocateFixed, ChevronDown, ChevronLeft, ChevronRight, Copy, Leaf, Tag, UtensilsCrossed,
+  Facebook, Youtube, Instagram, Linkedin, Mail, Phone, HeartHandshake,
 } from "lucide-react";
-import { APP_CONFIG } from "../config/constants"; // Adjust path if needed
-import apiClient, { restaurantAPI } from "../services/api";
+import apiClient, { adminAPI, restaurantAPI, zoneAPI } from "../services/api";
 
 // Minto's own store listings and social pages. Empty until they are published:
-// a missing link renders as "Coming soon" instead of sending people somewhere
-// else. These used to point at another company's apps and accounts, left over
-// from the codebase Minto was built from.
+// a missing link renders as "Coming soon" instead of sending people somewhere else.
 const STORE_LINKS = {
   customer: { ios: "", android: "" },
   restaurant: { ios: "", android: "" },
@@ -23,1776 +19,982 @@ const SOCIAL_LINKS = [
   // { network: "instagram", url: "https://www.instagram.com/..." },
 ];
 
-function StoreLink({ href, className, children }) {
-  if (!href) {
-    return (
-      <span className={`${className} opacity-60 cursor-default`} aria-disabled="true" title="Coming soon">
-        {children} <span className="text-[10px] font-semibold uppercase tracking-wider opacity-80">Soon</span>
-      </span>
-    );
+const ORDER_URL = "/food/user";
+const CITY_STORAGE_KEY = "minto_landing_city";
+const PAGE_SIZE = 8;
+
+// Brand palette from the logo: deep teal -> bright teal gradient on soft mint.
+const C = { deep: "#0B6E63", teal: "#12A594", bright: "#19C9B4", mint: "#E7F7F3", ink: "#0E2724" };
+const GRADIENT = `linear-gradient(135deg, ${C.deep} 0%, ${C.teal} 55%, ${C.bright} 100%)`;
+
+const FALLBACK_FOOD = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=800&auto=format&fit=crop";
+
+// ───────────────────────── helpers ─────────────────────────
+
+const imgUrl = (v) => (typeof v === "string" ? v : v?.url || v?.imageUrl || "");
+
+const prettyCity = (name = "") =>
+  String(name)
+    .replace(/\s*zone\s*$/i, "")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+// Centre of a zone polygon, used as the point we list restaurants around.
+const zoneCentre = (zone) => {
+  const pts = (zone?.coordinates || []).filter((p) => Number.isFinite(p?.latitude) && Number.isFinite(p?.longitude));
+  if (!pts.length) return null;
+  return {
+    lat: pts.reduce((s, p) => s + p.latitude, 0) / pts.length,
+    lng: pts.reduce((s, p) => s + p.longitude, 0) / pts.length,
+  };
+};
+
+const restaurantSlug = (r) => r.slug || r.nameSlug || r.restaurantId || r.id || r._id;
+const restaurantImage = (r) => imgUrl(r.coverImages?.[0]) || imgUrl(r.profileImage) || "";
+const deliveryMins = (r) => {
+  const m = Number(r.estimatedDeliveryTimeMinutes) || parseInt(r.estimatedDeliveryTime, 10);
+  return Number.isFinite(m) && m > 0 ? m : null;
+};
+const offerText = (r) => r.activeOffers?.[0]?.summary || r.offer || "";
+const isOpen = (r) => r.isOpenNow ?? r.isOpen ?? true;
+
+const readStoredCity = () => {
+  try {
+    return JSON.parse(localStorage.getItem(CITY_STORAGE_KEY) || "null");
+  } catch {
+    return null;
   }
+};
+const storeCity = (city) => {
+  try {
+    localStorage.setItem(CITY_STORAGE_KEY, JSON.stringify(city));
+  } catch {
+    /* private mode etc. */
+  }
+};
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: (i = 0) => ({ opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1], delay: i * 0.06 } }),
+};
+
+// ───────────────────────── small pieces ─────────────────────────
+
+function SpeedLines({ className = "", light = false }) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
-      {children}
+    <span className={`inline-flex flex-col gap-[5px] ${className}`} aria-hidden="true">
+      <span className="h-[5px] w-7 rounded-full" style={{ background: light ? "#fff" : C.bright, opacity: 0.45 }} />
+      <span className="h-[5px] w-5 rounded-full ml-2" style={{ background: light ? "#fff" : C.teal, opacity: 0.7 }} />
+      <span className="h-[5px] w-8 rounded-full" style={{ background: light ? "#fff" : C.teal }} />
+    </span>
+  );
+}
+
+function Wordmark({ light = false, compact = false }) {
+  return (
+    <a href="/" className="flex items-center gap-2 shrink-0" aria-label="MintoFood home">
+      <img src="/minto-logo.png" alt="" className="h-9 w-9 rounded-xl shadow-sm" />
+      <span className={`${compact ? "hidden sm:inline" : ""} text-xl sm:text-2xl font-extrabold tracking-tight leading-none`}>
+        <span style={{ color: light ? "#fff" : C.deep }}>Minto</span>
+        <span style={{ color: light ? "#9BF0E3" : C.bright }}>Food</span>
+      </span>
     </a>
   );
 }
 
-// --- Animation Variants for Cinematic Reveals ---
-const textReveal = {
-  hidden: { y: "120%" },
-  visible: (i) => ({
-    y: 0,
-    transition: { duration: 1, ease: [0.16, 1, 0.3, 1], delay: i * 0.1 }
-  })
-};
+function StoreButton({ href, icon: Icon, top, label, dark = true }) {
+  const base = `flex items-center gap-3 rounded-2xl px-5 py-3 transition-all duration-300 ${
+    dark ? "bg-[#0E2724] text-white hover:bg-black" : "bg-white text-[#0E2724] hover:bg-[#F3FBF9]"
+  }`;
+  const inner = (
+    <>
+      <Icon className="w-6 h-6 shrink-0" />
+      <span className="flex flex-col leading-tight text-left">
+        <span className="text-[10px] uppercase tracking-wider opacity-70">{href ? top : "Coming soon on"}</span>
+        <span className="text-base font-bold">{label}</span>
+      </span>
+    </>
+  );
+  if (!href) return <span className={`${base} opacity-80 cursor-default`} aria-disabled="true">{inner}</span>;
+  return <a href={href} target="_blank" rel="noopener noreferrer" className={base}>{inner}</a>;
+}
 
-const imageReveal = {
-  hidden: { scale: 1.1, opacity: 0, clipPath: "inset(100% 0% 0% 0% round 2rem)" },
-  visible: {
-    scale: 1,
-    opacity: 1,
-    clipPath: "inset(0% 0% 0% 0% round 2rem)",
-    transition: { duration: 1.4, ease: [0.16, 1, 0.3, 1], delay: 0.2 }
-  }
-};
+function SectionHead({ tag, title, right }) {
+  return (
+    <div className="flex items-end justify-between gap-4 mb-6">
+      <div>
+        <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.teal }}>
+          <SpeedLines className="scale-[0.5] -my-2 -mx-2" />
+          {tag}
+        </span>
+        <h2 className="mt-1 text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight">{title}</h2>
+      </div>
+      {right}
+    </div>
+  );
+}
 
-const gridVariants = {
-  hidden: { opacity: 0, y: 50 },
-  visible: (i) => ({
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: i * 0.15 }
-  })
-};
+function ScrollButtons({ targetRef }) {
+  const scroll = (dir) => targetRef.current?.scrollBy({ left: dir * targetRef.current.clientWidth * 0.8, behavior: "smooth" });
+  return (
+    <div className="hidden sm:flex gap-2 shrink-0">
+      {[[-1, ChevronLeft, "Scroll left"], [1, ChevronRight, "Scroll right"]].map(([d, Icon, label]) => (
+        <button
+          key={label}
+          onClick={() => scroll(d)}
+          aria-label={label}
+          className="w-10 h-10 rounded-full border border-slate-200 bg-white flex items-center justify-center text-slate-600 hover:border-[#12A594] hover:text-[#0B6E63] transition"
+        >
+          <Icon className="w-5 h-5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Img({ src, alt, className, fallback = FALLBACK_FOOD }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <img
+      src={!src || failed ? fallback : src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={className}
+    />
+  );
+}
+
+const Skeleton = ({ className }) => <div className={`animate-pulse rounded-2xl bg-slate-100 ${className}`} />;
+
+function RestaurantCard({ r }) {
+  const open = isOpen(r);
+  const mins = deliveryMins(r);
+  const offer = offerText(r);
+  const dist = Number(r.distanceKm ?? r.distanceInKm);
+  const rating = Number(r.rating) || 0;
+  return (
+    <a
+      href={`/food/user/restaurants/${restaurantSlug(r)}`}
+      className="group block rounded-3xl bg-white border border-slate-100 overflow-hidden hover:shadow-xl hover:shadow-[#12A594]/10 hover:-translate-y-1 transition-all duration-300"
+    >
+      <div className="relative aspect-[16/10] overflow-hidden bg-[#E7F7F3]">
+        <Img src={restaurantImage(r)} alt={r.restaurantName || r.name} className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${open ? "" : "grayscale"}`} />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+          {r.highlightBadgeInfo?.label && (
+            <span className="rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-bold text-[#0E2724]">★ {r.highlightBadgeInfo.label}</span>
+          )}
+          {r.pureVegRestaurant && (
+            <span className="rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-bold text-green-700 inline-flex items-center gap-1">
+              <Leaf className="w-3 h-3" /> Pure Veg
+            </span>
+          )}
+        </div>
+        {offer && (
+          <span className="absolute bottom-3 left-3 right-3 text-white text-sm font-extrabold drop-shadow inline-flex items-center gap-1.5 truncate">
+            <Tag className="w-4 h-4 shrink-0" /> <span className="truncate">{offer}</span>
+          </span>
+        )}
+        {!open && (
+          <span className="absolute top-3 right-3 rounded-full bg-black/75 px-2.5 py-1 text-[11px] font-bold text-white">Closed now</span>
+        )}
+      </div>
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="font-bold text-lg leading-snug truncate">{r.restaurantName || r.name}</h3>
+          {rating > 0 ? (
+            <span className="shrink-0 inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-sm font-bold text-white" style={{ background: C.teal }}>
+              {rating.toFixed(1)} <Star className="w-3 h-3 fill-white" />
+            </span>
+          ) : (
+            <span className="shrink-0 rounded-lg bg-[#E7F7F3] px-2 py-0.5 text-xs font-bold text-[#0B6E63]">NEW</span>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-slate-500 truncate">{(r.cuisines || []).slice(0, 3).join(" • ") || "Multi-cuisine"}</p>
+        <div className="mt-3 flex items-center gap-3 text-sm text-slate-600">
+          {mins && <span className="inline-flex items-center gap-1"><Clock className="w-4 h-4 text-[#12A594]" /> {mins}–{mins + 5} min</span>}
+          {Number.isFinite(dist) && <span className="inline-flex items-center gap-1"><MapPin className="w-4 h-4 text-[#12A594]" /> {dist.toFixed(1)} km</span>}
+          {r.area && <span className="truncate text-slate-400">{r.area}</span>}
+        </div>
+      </div>
+    </a>
+  );
+}
+
+const inputCls =
+  "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-[#12A594] focus:ring-4 focus:ring-[#12A594]/15 transition";
+
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "open", label: "Open now", test: (r) => isOpen(r) },
+  { key: "veg", label: "Pure Veg", icon: Leaf, test: (r) => r.pureVegRestaurant },
+  { key: "rating", label: "Rating 4.0+", test: (r) => Number(r.rating) >= 4 },
+  { key: "offers", label: "Offers", test: (r) => Boolean(offerText(r)) },
+  { key: "fast", label: "Under 30 min", test: (r) => (deliveryMins(r) ?? 99) <= 30 },
+];
+
+// ───────────────────────── page ─────────────────────────
 
 export default function LandingPage() {
-  const containerRef = useRef(null);
-  const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const [isRestaurantOpen, setIsRestaurantOpen] = useState(false);
-  const [isDeliveryOpen, setIsDeliveryOpen] = useState(false);
-  const [supportContact, setSupportContact] = useState({
-    email: "support@mintofood.com",
-    mobile: "1-800-123-4567"
-  });
-  const [leadForm, setLeadForm] = useState({
-    ownerName: "",
-    restaurantName: "",
-    mobileNumber: "",
-    emailId: "",
-    location: "",
-  });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [cityOpen, setCityOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  // Location: a zone picked from the list, or the browser's own location.
+  const [zones, setZones] = useState([]);
+  const [city, setCity] = useState(readStoredCity); // { id, name, lat, lng }
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState("");
+
+  // Live data for that location.
+  const [restaurants, setRestaurants] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  const [copied, setCopied] = useState("");
+
+  const [supportContact, setSupportContact] = useState({ email: "support@mintofood.com", mobile: "" });
+  const [leadForm, setLeadForm] = useState({ ownerName: "", restaurantName: "", mobileNumber: "", emailId: "", location: "" });
   const [submittingLead, setSubmittingLead] = useState(false);
   const [leadSuccess, setLeadSuccess] = useState(false);
-  const [activeCraving, setActiveCraving] = useState(0);
+  const [leadError, setLeadError] = useState("");
+
+  const offersRef = useRef(null);
+  const catsRef = useRef(null);
+  const dishesRef = useRef(null);
 
   useEffect(() => {
-    async function fetchSupportInfo() {
+    document.title = "MintoFood – Order food online";
+    (async () => {
       try {
-        const response = await apiClient.get("/food/pages/support", {
-          params: { module: "USER" }
-        });
+        const response = await apiClient.get("/food/pages/support", { params: { module: "USER" } });
         const data = response?.data?.data || response?.data;
         if (data && (data.email || data.mobile)) {
-          setSupportContact({
-            email: data.email || "support@mintofood.com",
-            mobile: data.mobile || "1-800-123-4567"
-          });
+          setSupportContact((p) => ({ email: data.email || p.email, mobile: data.mobile || p.mobile }));
         }
       } catch (err) {
-        console.error("Error fetching support contact for footer:", err);
+        console.error("Error fetching support contact:", err);
       }
-    }
-    fetchSupportInfo();
+    })();
   }, []);
 
-  const [mapRotate, setMapRotate] = useState({ x: 0, y: 0 });
-  const handleMapMouseMove = (e) => {
-    const card = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - card.left - card.width / 2;
-    const y = e.clientY - card.top - card.height / 2;
-    setMapRotate({ x: -y / 15, y: x / 15 });
+  // Zones -> city list. Default to the first city that has a centre.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await zoneAPI.getPublicZones();
+        const list = (res?.data?.data?.zones || [])
+          .filter((z) => z.isActive !== false)
+          .map((z) => ({ id: z._id || z.id, name: prettyCity(z.name || z.zoneName), ...zoneCentre(z) }))
+          .filter((z) => Number.isFinite(z.lat));
+        setZones(list);
+        setCity((current) => {
+          if (current && Number.isFinite(current.lat)) return current;
+          const preferred = list.find((z) => /indore/i.test(z.name)) || list[0];
+          return preferred || null;
+        });
+      } catch (err) {
+        console.error("Error fetching zones:", err);
+        setLoading(false);
+        setLoadError("Couldn't load cities right now.");
+      }
+    })();
+  }, []);
+
+  // Restaurants + categories for the chosen location.
+  useEffect(() => {
+    if (!city || !Number.isFinite(city.lat)) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError("");
+    setVisible(PAGE_SIZE);
+    const params = { lat: city.lat, lng: city.lng };
+    Promise.allSettled([
+      restaurantAPI.getRestaurants(params),
+      adminAPI.getPublicCategories(params),
+    ]).then(([rRes, cRes]) => {
+      if (cancelled) return;
+      if (rRes.status === "fulfilled") {
+        setRestaurants(rRes.value?.data?.data?.restaurants || []);
+      } else {
+        setRestaurants([]);
+        setLoadError("Couldn't load restaurants right now. Please try again.");
+      }
+      setCategories(cRes.status === "fulfilled" ? cRes.value?.data?.data?.categories || cRes.value?.data?.categories || [] : []);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [city]);
+
+  const chooseCity = (c) => {
+    setCity(c);
+    storeCity(c);
+    setCityOpen(false);
+    setLocError("");
+    setFilter("all");
   };
-  const handleMapMouseLeave = () => {
-    setMapRotate({ x: 0, y: 0 });
+
+  const useMyLocation = () => {
+    if (!navigator.geolocation) {
+      setLocError("Location isn't available in this browser.");
+      return;
+    }
+    setLocating(true);
+    setLocError("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        chooseCity({ id: "gps", name: "Your location", lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        setLocating(false);
+        setLocError("Couldn't get your location. Pick a city instead.");
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+    );
+  };
+
+  const onSearch = (e) => {
+    e.preventDefault();
+    const q = query.trim();
+    window.location.href = q ? `/food/user/search?q=${encodeURIComponent(q)}` : ORDER_URL;
+  };
+
+  // Derived live sections.
+  const openCount = useMemo(() => restaurants.filter(isOpen).length, [restaurants]);
+  const cuisineCount = useMemo(() => new Set(restaurants.flatMap((r) => r.cuisines || [])).size, [restaurants]);
+
+  const offers = useMemo(() => {
+    const list = [];
+    for (const r of restaurants) {
+      const coupons = r.activeOffers || [];
+      if (coupons.length) {
+        coupons.forEach((o) => list.push({ key: `${r.id}-${o.id}`, r, text: o.summary, code: o.couponCode }));
+      } else if (r.offer) {
+        list.push({ key: `${r.id}-offer`, r, text: r.offer, code: "" });
+      }
+    }
+    return list;
+  }, [restaurants]);
+
+  const dishes = useMemo(() => {
+    const list = [];
+    for (const r of restaurants) {
+      for (const d of r.recommendedItems || []) {
+        list.push({ ...d, r });
+      }
+    }
+    return list.slice(0, 16);
+  }, [restaurants]);
+
+  const filtered = useMemo(() => {
+    const f = FILTERS.find((x) => x.key === filter);
+    return f?.test ? restaurants.filter(f.test) : restaurants;
+  }, [restaurants, filter]);
+
+  const copyCode = async (code) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(code);
+      setTimeout(() => setCopied(""), 1800);
+    } catch {
+      /* clipboard blocked: the code is still visible to copy by hand */
+    }
   };
 
   const handleLeadSubmit = async (e) => {
     e.preventDefault();
-    if (!leadForm.ownerName || !leadForm.restaurantName || !leadForm.mobileNumber || !leadForm.emailId || !leadForm.location) {
-      alert("Please fill all the details to register.");
+    setLeadError("");
+    if (Object.values(leadForm).some((v) => !String(v).trim())) {
+      setLeadError("Please fill in all the details.");
       return;
     }
     try {
       setSubmittingLead(true);
       await restaurantAPI.createUnregisteredRestaurant(leadForm);
       setLeadSuccess(true);
-      setLeadForm({
-        ownerName: "",
-        restaurantName: "",
-        mobileNumber: "",
-        emailId: "",
-        location: "",
-      });
+      setLeadForm({ ownerName: "", restaurantName: "", mobileNumber: "", emailId: "", location: "" });
     } catch (err) {
       console.error("Error submitting lead:", err);
-      alert(err.response?.data?.message || "Failed to submit. Please try again later.");
+      setLeadError(err.response?.data?.message || "Could not submit right now. Please try again.");
     } finally {
       setSubmittingLead(false);
     }
   };
-  const lenisRef = useRef(null);
+  const setField = (k) => (e) => setLeadForm((f) => ({ ...f, [k]: e.target.value }));
 
-  useEffect(() => {
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smooth: true,
-      mouseMultiplier: 1,
-    });
-    lenisRef.current = lenis;
+  const navLinks = [
+    { href: "#restaurants", label: "Restaurants" },
+    { href: "#offers", label: "Offers" },
+    { href: "#download", label: "Get the app" },
+    { href: "#partner", label: "Partner with us" },
+  ];
 
-    function raf(time) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
-    requestAnimationFrame(raf);
-
-    return () => lenis.destroy();
-  }, []);
-
-  useEffect(() => {
-    if (isAboutOpen || isRestaurantOpen || isDeliveryOpen) {
-      if (lenisRef.current) lenisRef.current.stop();
-      document.body.style.overflow = "hidden";
-    } else {
-      if (lenisRef.current) lenisRef.current.start();
-      document.body.style.overflow = "";
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [isAboutOpen, isRestaurantOpen, isDeliveryOpen]);
-
-  // Handle browser back button (popstate) to close overlays instead of navigating away
-  useEffect(() => {
-    const handlePopState = (event) => {
-      setIsAboutOpen(false);
-      setIsRestaurantOpen(false);
-      setIsDeliveryOpen(false);
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, []);
-
-  // Sync React states to browser history stack
-  useEffect(() => {
-    const isAnyOpen = isAboutOpen || isRestaurantOpen || isDeliveryOpen;
-    
-    if (isAnyOpen) {
-      if (!window.history.state?.modalOpen) {
-        window.history.pushState({ modalOpen: true }, "");
-      }
-    } else {
-      if (window.history.state?.modalOpen) {
-        window.history.back();
-      }
-    }
-  }, [isAboutOpen, isRestaurantOpen, isDeliveryOpen]);
-
-  // Global Scroll Progress Hook
-  const { scrollYProgress } = useScroll({ target: containerRef });
-
-  // Hero Parallax (Mapping to the top 15% of the page scroll)
-  const heroY = useTransform(scrollYProgress, [0, 0.15], ["0%", "50%"]);
-  const heroOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0]);
-  const imageParallax = useTransform(scrollYProgress, [0, 0.15], ["0%", "20%"]);
-
-  // Phone Mockup Parallax
-  const scalePhone = useTransform(scrollYProgress, [0.2, 0.4], [0.85, 1]);
-  const rotatePhone = useTransform(scrollYProgress, [0.2, 0.4], [10, 0]);
+  const cityLabel = city?.name || "Select city";
 
   return (
-    <div ref={containerRef} className="bg-[#FCFBFA] min-h-screen w-full max-w-full text-slate-900 font-sans selection:bg-[#008078] selection:text-white overflow-x-hidden relative">
+    <div
+      className="min-h-screen w-full overflow-x-hidden bg-white text-[#0E2724] selection:bg-[#12A594] selection:text-white"
+      style={{ fontFamily: "Outfit, Inter, system-ui, sans-serif" }}
+    >
+      {/* ───────────── HEADER ───────────── */}
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-[#12A594]/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-3 sm:gap-5">
+          <Wordmark compact />
 
-      {/* Refined, Subtler Lighting */}
-      <div className="absolute top-0 right-0 w-[40vw] h-[40vw] bg-pink-500/10 rounded-full blur-[120px] pointer-events-none z-0" />
-      <div className="absolute top-[20%] left-[-10%] w-[40vw] h-[40vw] bg-orange-400/5 rounded-full blur-[100px] pointer-events-none z-0" />
+          {/* City picker */}
+          <div className="relative">
+            <button
+              onClick={() => setCityOpen((o) => !o)}
+              className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold hover:bg-[#E7F7F3] transition max-w-[160px]"
+              aria-expanded={cityOpen}
+            >
+              <MapPin className="w-4 h-4 text-[#12A594] shrink-0" />
+              <span className="truncate">{cityLabel}</span>
+              <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${cityOpen ? "rotate-180" : ""}`} />
+            </button>
+            {cityOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setCityOpen(false)} />
+                <div className="absolute left-0 mt-2 z-50 w-64 rounded-2xl bg-white shadow-2xl border border-slate-100 p-2">
+                  <button
+                    onClick={useMyLocation}
+                    className="w-full flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#0B6E63] hover:bg-[#E7F7F3]"
+                  >
+                    {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" />}
+                    Use my current location
+                  </button>
+                  {locError && <p className="px-3 pb-2 text-xs text-red-600">{locError}</p>}
+                  <p className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">We deliver in</p>
+                  {zones.map((z) => (
+                    <button
+                      key={z.id}
+                      onClick={() => chooseCity(z)}
+                      className={`w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-sm hover:bg-slate-50 ${city?.id === z.id ? "font-bold text-[#0B6E63]" : ""}`}
+                    >
+                      {z.name}
+                      {city?.id === z.id && <Check className="w-4 h-4" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
 
-      {/* Header */}
-      <header className="absolute top-0 w-full z-50 px-6 py-8 md:px-12 lg:px-20 flex items-center justify-between bg-transparent">
-        <div className="text-2xl font-black text-slate-900 tracking-tighter relative z-50">
-          {APP_CONFIG?.NAME || "BRAND"}
-          <span className="text-[#008078]">.</span>
+          {/* Search (desktop) */}
+          <form onSubmit={onSearch} className="hidden md:flex flex-1 max-w-md items-center gap-2 rounded-full bg-slate-50 border border-slate-200 px-4 py-2 focus-within:border-[#12A594] focus-within:bg-white transition">
+            <Search className="w-4 h-4 text-slate-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search for restaurants or dishes"
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+            />
+          </form>
+
+          <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600 ml-auto">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href} className="hover:text-[#0B6E63] transition-colors">{l.label}</a>
+            ))}
+          </nav>
+
+          <div className="flex items-center gap-1 ml-auto lg:ml-0">
+            <a
+              href={ORDER_URL}
+              className="rounded-full px-4 sm:px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#12A594]/25 hover:-translate-y-px transition-all whitespace-nowrap"
+              style={{ background: GRADIENT }}
+            >
+              Order Now
+            </a>
+            <button className="lg:hidden p-2 rounded-full hover:bg-[#E7F7F3] text-[#0B6E63]" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">
+              {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
-        <nav className="flex items-center gap-1.5 bg-white/50 backdrop-blur-md border border-slate-200/30 p-1 rounded-full shadow-lg shadow-slate-900/5 relative z-50">
-          <a
-            href="/"
-            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#008078] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5"
-          >
-            <Home className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#008078] transition-colors" />
-            <span className="hidden md:inline">Home</span>
-          </a>
-          <button
-            onClick={() => setIsRestaurantOpen(true)}
-            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#008078] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
-          >
-            <Store className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#008078] transition-colors" />
-            <span className="hidden md:inline">Restaurant Partner</span>
-          </button>
-          <button
-            onClick={() => setIsDeliveryOpen(true)}
-            className="group flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 rounded-full text-xs font-bold text-slate-700 hover:text-[#008078] hover:bg-white/80 transition-all duration-300 shadow-sm hover:shadow-md hover:-translate-y-0.5 cursor-pointer"
-          >
-            <Bike className="w-4 h-4 md:w-3.5 md:h-3.5 text-slate-500 group-hover:text-[#008078] transition-colors" />
-            <span className="hidden md:inline">Delivery Partner</span>
-          </button>
-        </nav>
+        {menuOpen && (
+          <div className="lg:hidden border-t border-[#12A594]/10 bg-white px-4 py-2 flex flex-col">
+            {navLinks.map((l) => (
+              <a key={l.href} href={l.href} onClick={() => setMenuOpen(false)} className="py-3 text-base font-medium text-slate-700 border-b border-slate-100 last:border-0">
+                {l.label}
+              </a>
+            ))}
+          </div>
+        )}
       </header>
 
-      {/* 1. AWARD-WINNING HERO SECTION */}
-      <section className="relative z-10 min-h-screen py-20 lg:py-0 lg:h-screen flex items-center px-6 md:px-12 lg:px-20 max-w-[1800px] mx-auto">
+      {/* ───────────── HERO ───────────── */}
+      <section className="relative overflow-hidden">
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 1440 800" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0,0 L1440,0 L1440,200 C1150,280 1000,100 720,170 C440,240 260,90 0,180 Z" fill="#E7F7F3" />
+          <path d="M1440,0 L1440,460 C1300,360 1250,170 1060,0 Z" fill="#CFF0E9" opacity="0.6" />
+          <path d="M0,800 L1440,800 L1440,690 C1180,620 980,760 700,710 C420,660 220,770 0,730 Z" fill="#F4FBF9" />
+        </svg>
 
-        <motion.div style={{ y: heroY, opacity: heroOpacity }} className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-center w-full h-full pt-28 lg:pt-20">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-14 md:pt-16 md:pb-20 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+          <div className="min-w-0">
+            <motion.span initial="hidden" animate="visible" variants={fadeUp} custom={0}
+              className="inline-flex items-center gap-2 rounded-full bg-white border border-[#12A594]/20 px-3 py-1.5 text-xs font-semibold text-[#0B6E63] shadow-sm"
+            >
+              <span className="h-2 w-2 rounded-full bg-[#19C9B4] animate-pulse" />
+              {loading ? "Checking restaurants near you…" : `${openCount} restaurants open now in ${cityLabel}`}
+            </motion.span>
 
-          {/* Left: Dramatic Typography */}
-          <div className="col-span-1 flex flex-col justify-center z-20 h-full relative">
+            <motion.h1 initial="hidden" animate="visible" variants={fadeUp} custom={1}
+              className="mt-5 text-[2.5rem] leading-[1.05] sm:text-5xl md:text-6xl font-extrabold tracking-tight"
+            >
+              Hungry? Order from
+              <br />
+              <span className="inline-flex items-center gap-3">
+                <SpeedLines className="hidden sm:inline-flex" />
+                <span className="bg-clip-text text-transparent" style={{ backgroundImage: GRADIENT }}>the best near you.</span>
+              </span>
+            </motion.h1>
 
-            <div className="overflow-hidden mb-6">
-              <motion.div custom={0} initial="hidden" animate="visible" variants={textReveal} className="inline-flex items-center gap-2 text-[#008078] font-bold tracking-widest uppercase text-xs bg-[#008078]/10 px-4 py-2 rounded-full">
-                <Award className="w-4 h-4" /> Michelin-Level Experience at Home
-              </motion.div>
-            </div>
+            <motion.p initial="hidden" animate="visible" variants={fadeUp} custom={2} className="mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-lg">
+              Local favourites, fresh off the stove, tracked live from the kitchen to your door.
+            </motion.p>
 
-            <h1 className="text-[10vw] lg:text-[5.8vw] font-black leading-[0.85] tracking-tighter text-slate-900 relative z-20">
-              <div className="overflow-hidden pb-2">
-                <motion.div custom={1} initial="hidden" animate="visible" variants={textReveal}>
-                  WHAT IS
-                </motion.div>
-              </div>
-              <div className="overflow-hidden pb-4">
-                <motion.div custom={2} initial="hidden" animate="visible" variants={textReveal} className="flex items-center gap-4 lg:gap-8">
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-pink-600">MINTO FOODS?</span>
-                </motion.div>
-              </div>
-            </h1>
+            {/* Big search */}
+            <motion.form initial="hidden" animate="visible" variants={fadeUp} custom={3} onSubmit={onSearch}
+              className="mt-7 flex items-center gap-2 rounded-full bg-white border-2 border-[#12A594]/20 focus-within:border-[#12A594] p-1.5 pl-5 shadow-lg shadow-[#12A594]/10 max-w-xl transition"
+            >
+              <Search className="w-5 h-5 text-slate-400 shrink-0" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Try “poha”, “pizza” or a restaurant"
+                className="flex-1 min-w-0 bg-transparent py-2.5 text-base outline-none placeholder:text-slate-400"
+              />
+              <button type="submit" className="rounded-full px-5 sm:px-7 py-3 text-sm sm:text-base font-semibold text-white shrink-0" style={{ background: GRADIENT }}>
+                Find food
+              </button>
+            </motion.form>
 
-            <div className="overflow-hidden mt-4 lg:mt-6 max-w-xl">
-              <motion.p custom={3} initial="hidden" animate="visible" variants={textReveal} className="text-base lg:text-lg text-slate-600 font-light leading-relaxed">
-                Minto Foods is a next-generation food delivery platform built with a mission to create fairness and transparency in the food ecosystem. We give restaurant partners transparent, flexible billing: a per-order commission or a fixed monthly plan, so they always know what they pay.
-              </motion.p>
-            </div>
+            <motion.div initial="hidden" animate="visible" variants={fadeUp} custom={4} className="mt-4 flex flex-wrap gap-3">
+              <a href={ORDER_URL} className="group inline-flex items-center gap-2 text-sm font-semibold text-[#0B6E63] hover:underline underline-offset-4">
+                <ShoppingBag className="w-4 h-4" /> Order Now <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+              </a>
+              <span className="text-slate-300">|</span>
+              <a href="#download" className="inline-flex items-center gap-2 text-sm font-semibold text-[#0B6E63] hover:underline underline-offset-4">
+                <Smartphone className="w-4 h-4" /> Download App
+              </a>
+            </motion.div>
 
-            <div className="overflow-hidden mt-6 lg:mt-8">
-              <motion.div custom={4} initial="hidden" animate="visible" variants={textReveal}>
-                <button
-                  onClick={() => setIsAboutOpen(true)}
-                  className="group flex items-center gap-3 bg-slate-900 hover:bg-[#008078] text-white px-8 py-4 rounded-full font-bold text-sm transition-all duration-500 hover:shadow-xl hover:shadow-[#008078]/20 cursor-pointer"
-                >
-                  Learn More About Our Mission
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
-              </motion.div>
-            </div>
+            {/* Live stats */}
+            <motion.div initial="hidden" animate="visible" variants={fadeUp} custom={5} className="mt-8 grid grid-cols-3 gap-3 max-w-md">
+              {[
+                [restaurants.length, "Restaurants nearby"],
+                [openCount, "Open right now"],
+                [cuisineCount, "Cuisines"],
+              ].map(([n, l]) => (
+                <div key={l} className="rounded-2xl bg-white/80 border border-[#12A594]/10 px-3 py-3">
+                  <div className="text-2xl sm:text-3xl font-extrabold" style={{ color: C.deep }}>
+                    {loading ? <span className="inline-block w-8 h-7 rounded bg-slate-100 animate-pulse align-middle" /> : n}
+                  </div>
+                  <div className="text-[11px] sm:text-xs text-slate-500 leading-tight mt-0.5">{l}</div>
+                </div>
+              ))}
+            </motion.div>
           </div>
 
-          {/* Right: The Cinematic Centerpiece */}
-          <div className="hidden lg:flex col-span-1 h-full items-center justify-end">
-
-            <motion.div
-              initial="hidden"
-              animate="visible"
-              variants={imageReveal}
-              style={{ y: imageParallax }}
-              className="relative w-full h-[75vh] max-h-[750px] rounded-3xl overflow-hidden shadow-2xl"
-            >
-              {/* Overlay Gradient to blend with text on smaller screens */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent z-10" />
-
-              <img
-                src="https://images.unsplash.com/photo-1555939594-58d7cb561ad1?q=80&w=1200&auto=format&fit=crop"
-                alt="Gourmet Plating"
+          {/* Hero visual */}
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+            className="relative mx-auto w-full max-w-[420px] hidden sm:block"
+          >
+            <div className="absolute inset-6 rounded-full" style={{ background: GRADIENT, opacity: 0.9 }} />
+            <div className="relative rounded-full overflow-hidden border-[10px] border-white shadow-2xl shadow-[#0B6E63]/25 aspect-square">
+              <Img
+                src={dishes[0]?.image || "https://images.unsplash.com/photo-1631515243349-e0cb75fb8d3a?q=80&w=1000&auto=format&fit=crop"}
+                alt={dishes[0]?.name || "Food"}
                 className="w-full h-full object-cover"
               />
-
-              {/* Minimal Floating Element */}
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 1.5, duration: 0.8 }}
-                className="absolute bottom-6 left-6 bg-white/90 backdrop-blur-xl p-4 rounded-2xl shadow-xl flex items-center gap-4 z-20 border border-white/50"
+            </div>
+            {dishes[0] && (
+              <motion.a href={`/food/user/restaurants/${restaurantSlug(dishes[0].r)}?dish=${dishes[0].id}`}
+                animate={{ y: [0, -8, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                className="absolute -left-4 bottom-12 bg-white rounded-2xl shadow-xl p-3 pr-5 flex items-center gap-3 max-w-[240px]"
               >
-                <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center shrink-0">
-                  <Clock className="w-5 h-5 text-white" />
-                </div>
-                <div className="pr-4">
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Average Delivery</p>
-                  <p className="text-xl font-black text-slate-900 leading-none mt-1">15 Mins</p>
-                </div>
-              </motion.div>
-
+                <span className="w-11 h-11 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: GRADIENT }}>
+                  <UtensilsCrossed className="w-5 h-5" />
+                </span>
+                <span className="leading-tight min-w-0">
+                  <span className="block text-sm font-bold truncate">{dishes[0].name}</span>
+                  <span className="block text-xs text-slate-500 truncate">₹{dishes[0].price} · {dishes[0].r.restaurantName}</span>
+                </span>
+              </motion.a>
+            )}
+            <motion.div animate={{ y: [0, 8, 0] }} transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute -right-2 top-10 bg-white rounded-2xl shadow-xl px-4 py-3 flex items-center gap-2"
+            >
+              <Bike className="w-5 h-5 text-[#12A594]" />
+              <span className="leading-tight">
+                <span className="block text-sm font-bold">Live tracking</span>
+                <span className="block text-[11px] text-slate-500">Kitchen to door</span>
+              </span>
             </motion.div>
-          </div>
-        </motion.div>
-      </section>
-
-      {/* 2. OUR STORY / ASYMMETRICAL LAYOUT */}
-      <section className="relative z-10 py-32 px-6 md:px-16 lg:px-24 max-w-[1800px] mx-auto">
-        <div className="grid lg:grid-cols-2 gap-20 items-center">
-
-          <div className="space-y-8">
-            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
-              About Minto Foods
-            </span>
-            <h3 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-slate-900">
-              Empowering partners, <br /><span className="italic text-slate-500 font-light">restoring trust.</span>
-            </h3>
-            <p className="text-lg md:text-xl text-slate-600 leading-relaxed font-light max-w-lg">
-              Minto Foods offers restaurants a choice of billing: a per-order commission, or a fixed monthly subscription instead. We believe in creating a balanced, fair, and growth-oriented food ecosystem.
-            </p>
-            <div className="pt-2">
-              <button
-                onClick={() => setIsAboutOpen(true)}
-                className="group inline-flex items-center gap-2.5 text-slate-900 hover:text-[#008078] font-bold text-sm tracking-wide uppercase transition-colors"
-              >
-                Read Our Story <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
-            <div className="pt-8 grid grid-cols-2 gap-8 border-t border-slate-200">
-              <div>
-                <p className="text-4xl font-black text-slate-950">2</p>
-                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mt-2">Billing Plans</p>
-              </div>
-              <div>
-                <p className="text-4xl font-black text-slate-950">3</p>
-                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mt-2">Live Hubs</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="relative h-[400px] lg:h-[600px] rounded-[2.5rem] overflow-hidden group shadow-2xl border-4 border-white">
-            <div className="absolute inset-0 bg-[#008078] mix-blend-overlay opacity-10 z-10 group-hover:opacity-0 transition-opacity duration-700" />
-            <img
-              src="https://images.unsplash.com/photo-1577219491135-ce391730fb2c?q=80&w=1000&auto=format&fit=crop"
-              alt="Chef working"
-              className="w-full h-full object-cover transform scale-105 group-hover:scale-100 transition-transform duration-1000 ease-out"
-            />
-          </div>
+          </motion.div>
         </div>
       </section>
 
-      {/* 3. MOBILE EXPERIENCE (Floating Phone Parallax) */}
-      <section className="relative z-10 py-32 bg-slate-50/60 backdrop-blur-3xl border-y border-slate-100">
-        <div className="max-w-[1800px] mx-auto px-6 md:px-16 lg:px-24 flex flex-col lg:flex-row items-center gap-20">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6">
+        {loadError && (
+          <div className="mb-8 rounded-2xl bg-red-50 border border-red-100 px-5 py-4 text-sm text-red-700">{loadError}</div>
+        )}
 
-          {/* Phone Mockup Column */}
-          <div className="flex-1 lg:pl-20 order-2 lg:order-1">
-            <motion.div style={{ scale: scalePhone, rotateZ: rotatePhone }} className="relative w-[290px] sm:w-[320px] h-[580px] sm:h-[640px] mx-auto perspective-1000">
-
-              {/* 3D Phone CSS Mockup */}
-              <div className="absolute inset-0 rounded-[3rem] bg-slate-900 p-2 shadow-[0_40px_80px_rgba(15,23,42,0.12)] border border-slate-800 transform-style-3d shadow-2xl">
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-36 h-6 bg-black rounded-b-2xl z-20" />
-                <div className="w-full h-full bg-white rounded-[2.5rem] overflow-hidden relative border border-slate-100">
-                  <img
-                    src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=1000&auto=format&fit=crop"
-                    className="w-full h-[55%] object-cover"
-                    alt="App preview"
-                  />
-                  <div className="absolute bottom-0 w-full h-[50%] bg-gradient-to-t from-white via-white to-transparent p-6 flex flex-col justify-end">
-                    <div className="w-12 h-1 bg-slate-200 rounded-full mb-6 mx-auto" />
-                    <h4 className="text-2xl font-black text-slate-900 mb-1">Sushi Masterclass</h4>
-                    <p className="text-slate-500 text-xs font-semibold mb-4">Japanese • 4.9 <Star className="inline w-3 h-3 text-[#008078] fill-[#008078] mb-0.5" /></p>
-                    <button className="w-full bg-slate-900 text-white py-3.5 rounded-2xl font-bold hover:bg-[#008078] transition-colors duration-300 text-sm shadow-md">
-                      Track Delivery
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Floating App Card */}
-              <motion.div
-                animate={{ y: [0, -12, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                className="absolute -right-8 sm:-right-12 top-32 bg-white border border-slate-200/60 p-4 rounded-2xl shadow-xl flex items-center gap-3.5 z-20"
-              >
-                <div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center shrink-0">
-                  <Clock className="w-5 h-5 text-[#008078]" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Arriving In</p>
-                  <p className="text-base font-black text-slate-900">14 mins</p>
-                </div>
-              </motion.div>
-            </motion.div>
-          </div>
-
-          {/* App Info Column */}
-          <div className="flex-1 space-y-8 order-1 lg:order-2">
-            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
-              Mobile Experience
-            </span>
-            <h3 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-slate-900">
-              Flawless <br />from tap to table.
-            </h3>
-            <p className="text-lg md:text-xl text-slate-600 font-light leading-relaxed max-w-lg">
-              Live tracking that actually updates. Beautifully designed interface. Zero friction. Download the app to experience food delivery designed for the modern era.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 pt-4">
-              <StoreLink href={STORE_LINKS.customer.ios} className="flex items-center justify-center gap-3 bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md shadow-slate-900/10">
-                <Apple className="w-5 h-5" /> App Store
-              </StoreLink>
-              <StoreLink href={STORE_LINKS.customer.android} className="flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-sm">
-                <Play className="w-5 h-5" /> Google Play
-              </StoreLink>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* 4. LATE NIGHT CRAVINGS - Cinematic 3D Interactive Midnight Console Stage */}
-      <section className="relative z-10 py-36 bg-[#030303] text-slate-100 overflow-hidden">
-        
-        {/* Dynamic ambient backdrop glow matching active item */}
-        <div 
-          className="absolute inset-0 transition-all duration-1000 ease-out pointer-events-none opacity-40 blur-[150px]"
-          style={{
-            background: `radial-gradient(circle at 50% 50%, ${
-              activeCraving === 0 ? '#008078' : activeCraving === 1 ? '#EB590E' : '#EAB308'
-            } 0%, transparent 60%)`
-          }}
-        />
-
-        {/* Abstract Grid Lines for Spatial Depth */}
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:80px_80px] pointer-events-none opacity-20" />
-
-        <div className="max-w-[1800px] mx-auto px-6 md:px-16 lg:px-24 relative z-10">
-          
-          {/* Section Header */}
-          <div className="text-center mb-24">
-            <span className="inline-flex items-center gap-2 text-[10px] font-black tracking-[0.35em] text-[#008078] uppercase bg-[#008078]/10 border border-[#008078]/30 rounded-full px-4 py-2 mb-6">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#008078] animate-ping" />
-              Midnight Gastronomy
-            </span>
-            <h3 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-tight text-white mb-6">
-              Late Night <span className="text-transparent bg-clip-text bg-gradient-to-r from-slate-200 via-slate-400 to-[#008078] italic font-light">Cravings.</span>
-            </h3>
-            <p className="text-slate-400 max-w-xl mx-auto text-sm md:text-base font-light leading-relaxed">
-              Curated epicurean experiences crafted for the midnight hours. Fully active between 11:00 PM and 4:00 AM.
-            </p>
-          </div>
-
-          {/* Interactive Console Console Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 items-center">
-            
-            {/* Left Console: Tab selectors (Columns 5) */}
-            <div className="lg:col-span-5 flex flex-col gap-6 order-2 lg:order-1">
-              {[
-                { 
-                  tag: "🔥 BESTSELLER", 
-                  title: "Midnight Wagyu Burger", 
-                  num: "01",
-                  time: "15-20 min", 
-                  desc: "Double-patty dry-aged Wagyu beef, aged cheddar melt, caramelized onion jam, and truffle aioli on toasted brioche.",
-                  color: "#008078",
-                  ingredients: ["🧀 Cheddar", "🧅 Onion Jam", "🍞 Brioche", "🍄 Truffle"]
-                },
-                { 
-                  tag: "⚡ CHEF'S SPECIAL", 
-                  title: "Spicy Tonkotsu Ramen", 
-                  num: "02",
-                  time: "20-30 min", 
-                  desc: "Rich 12-hour pork bone broth, hand-pulled noodles, spicy tare, pork chashu, and soy-cured soft egg.",
-                  color: "#EB590E",
-                  ingredients: ["🥚 Cured Egg", "🥩 Chashu", "🧅 Scallions", "🌶️ Chili Tare"]
-                },
-                { 
-                  tag: "👑 LATE NIGHT EXCLUSIVE", 
-                  title: "Signature Loaded Fries", 
-                  num: "03",
-                  time: "10-15 min", 
-                  desc: "Triple-cooked crispy potatoes smothered in cheddar melt, wood-smoked bacon, and white truffle oil.",
-                  color: "#EAB308",
-                  ingredients: ["🍟 Crispy Fries", "🥓 Smoked Bacon", "🌿 Chives", "🧀 Cheddar"]
-                }
-              ].map((item, index) => {
-                const isActive = activeCraving === index;
-                return (
-                  <div
-                    key={index}
-                    onClick={() => setActiveCraving(index)}
-                    className={`group relative rounded-[2rem] p-8 cursor-pointer border transition-all duration-500 ease-out select-none ${
-                      isActive 
-                        ? "bg-white/[0.03] border-white/10 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.8)]" 
-                        : "bg-transparent border-transparent hover:bg-white/[0.01] hover:border-white/5"
-                    }`}
-                  >
-                    {/* Left Active border bar indicator */}
-                    <div 
-                      className={`absolute left-0 top-8 bottom-8 w-1 rounded-r-full transition-all duration-500 ${
-                        isActive ? "scale-y-100 opacity-100" : "scale-y-0 opacity-0 group-hover:scale-y-50 group-hover:opacity-50"
-                      }`}
-                      style={{ backgroundColor: item.color }}
-                    />
-
-                    <div className="flex gap-6 items-start">
-                      <span 
-                        className={`text-2xl font-black transition-colors duration-500 ${isActive ? "text-white" : "text-slate-600 group-hover:text-slate-400"}`}
-                        style={{ color: isActive ? item.color : undefined }}
-                      >
-                        {item.num}
-                      </span>
-                      
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-3 mb-2">
-                          <span 
-                            className="text-[9px] font-black tracking-widest uppercase px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10"
-                            style={{ color: isActive ? item.color : '#94A3B8' }}
-                          >
-                            {item.tag}
-                          </span>
-                          <span className="text-[11px] text-slate-500 font-bold flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 text-slate-500" />
-                            {item.time}
-                          </span>
-                        </div>
-
-                        <h4 className="text-xl md:text-2xl font-black text-white group-hover:text-slate-200 transition-colors duration-300">
-                          {item.title}
-                        </h4>
-
-                        {/* Slide open description & action */}
-                        <div 
-                          className={`transition-all duration-500 ease-in-out overflow-hidden ${
-                            isActive ? "max-h-[300px] mt-4 opacity-100" : "max-h-0 opacity-0"
-                          }`}
-                        >
-                          <p className="text-slate-400 text-xs md:text-sm font-light leading-relaxed mb-5">
-                            {item.desc}
-                          </p>
-
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            {item.ingredients.map((ing, k) => (
-                              <span key={k} className="text-[10px] font-semibold text-slate-300 bg-white/5 border border-white/5 px-2.5 py-1 rounded-lg">
-                                {ing}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
+        {/* ───────────── OFFERS ───────────── */}
+        {(loading || offers.length > 0) && (
+          <section id="offers" className="scroll-mt-20 py-8">
+            <SectionHead tag="Today's deals" title={`Offers in ${cityLabel}`} right={<ScrollButtons targetRef={offersRef} />} />
+            <div ref={offersRef} className="flex gap-4 overflow-x-auto snap-x pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
+              {loading
+                ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="shrink-0 w-[280px] h-[150px]" />)
+                : offers.map((o, i) => (
+                    <div key={o.key} className="snap-start shrink-0 w-[280px] sm:w-[320px] rounded-3xl p-5 text-white relative overflow-hidden flex flex-col"
+                      style={{ background: i % 2 ? `linear-gradient(135deg, ${C.ink}, ${C.deep})` : GRADIENT }}
+                    >
+                      <BadgePercent className="absolute -right-4 -top-4 w-28 h-28 opacity-15" />
+                      <span className="text-xs font-semibold uppercase tracking-wider opacity-80 truncate">{o.r.restaurantName}</span>
+                      <span className="mt-1 text-xl font-extrabold leading-tight">{o.text}</span>
+                      <div className="mt-auto pt-4 flex items-center gap-2">
+                        {o.code ? (
+                          <button onClick={() => copyCode(o.code)} className="inline-flex items-center gap-2 rounded-full bg-white/15 border border-dashed border-white/60 px-3 py-1.5 text-sm font-bold hover:bg-white/25">
+                            {copied === o.code ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                            {copied === o.code ? "Copied" : o.code}
+                          </button>
+                        ) : null}
+                        <a href={`/food/user/restaurants/${restaurantSlug(o.r)}`} className="ml-auto inline-flex items-center gap-1 text-sm font-semibold hover:underline">
+                          Order <ArrowRight className="w-4 h-4" />
+                        </a>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  ))}
             </div>
+          </section>
+        )}
 
-            {/* Right Console: The floating cinematic 3D Stage (Columns 7) */}
-            <div className="lg:col-span-7 flex justify-center items-center order-1 lg:order-2 h-[500px] md:h-[600px] relative">
-              
-              {/* Dynamic Pedestal Under-glow Shadow */}
-              <div 
-                className="absolute bottom-12 w-[350px] md:w-[480px] h-[35px] rounded-full blur-[40px] opacity-40 transition-all duration-1000 ease-out"
-                style={{
-                  background: activeCraving === 0 ? '#008078' : activeCraving === 1 ? '#EB590E' : '#EAB308'
-                }}
-              />
+        {/* ───────────── CATEGORIES ───────────── */}
+        {(loading || categories.length > 0) && (
+          <section className="py-8">
+            <SectionHead tag="Recommended for you" title="What's on your mind?" right={<ScrollButtons targetRef={catsRef} />} />
+            <div ref={catsRef} className="flex gap-4 sm:gap-6 overflow-x-auto snap-x pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
+              {loading
+                ? Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="shrink-0 w-24 h-28 !rounded-full" />)
+                : categories.map((c) => {
+                    const slug = c.slug || String(c.name || "").toLowerCase().replace(/\s+/g, "-");
+                    return (
+                      <a key={c.id || c._id || slug} href={`/food/user/category/${slug}`} className="snap-start shrink-0 w-24 sm:w-28 flex flex-col items-center gap-2 group">
+                        <span className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-[#E7F7F3] ring-2 ring-transparent group-hover:ring-[#12A594] transition">
+                          <Img src={imgUrl(c.image)} alt={c.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                        </span>
+                        <span className="text-sm font-semibold text-center text-slate-700 group-hover:text-[#0B6E63] line-clamp-1">{c.name}</span>
+                      </a>
+                    );
+                  })}
+            </div>
+          </section>
+        )}
 
-              {/* Floating Culinary Stage Container */}
-              <motion.div
-                className="relative cursor-pointer select-none group/plate"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ duration: 1 }}
+        {/* ───────────── POPULAR DISHES ───────────── */}
+        {(loading || dishes.length > 0) && (
+          <section className="py-8">
+            <SectionHead tag="Popular near you" title="Dishes people love" right={<ScrollButtons targetRef={dishesRef} />} />
+            <div ref={dishesRef} className="flex gap-4 overflow-x-auto snap-x pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
+              {loading
+                ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="shrink-0 w-[220px] h-[260px]" />)
+                : dishes.map((d) => (
+                    <a key={`${d.r.id}-${d.id}`} href={`/food/user/restaurants/${restaurantSlug(d.r)}?dish=${d.id}`}
+                      className="snap-start shrink-0 w-[200px] sm:w-[230px] rounded-3xl bg-white border border-slate-100 overflow-hidden hover:shadow-xl hover:shadow-[#12A594]/10 hover:-translate-y-1 transition-all group"
+                    >
+                      <div className="aspect-[4/3] overflow-hidden bg-[#E7F7F3]">
+                        <Img src={d.image} alt={d.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      </div>
+                      <div className="p-4">
+                        <h3 className="font-bold leading-snug line-clamp-1">{d.name}</h3>
+                        <p className="text-xs text-slate-500 truncate mt-0.5">{d.r.restaurantName}</p>
+                        <div className="mt-3 flex items-center justify-between">
+                          <span className="text-lg font-extrabold">₹{d.price}</span>
+                          <span className="rounded-xl border-2 border-[#12A594] px-4 py-1 text-xs font-extrabold text-[#0B6E63] group-hover:bg-[#12A594] group-hover:text-white transition">
+                            ADD
+                          </span>
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+            </div>
+          </section>
+        )}
+
+        {/* ───────────── RESTAURANTS ───────────── */}
+        <section id="restaurants" className="scroll-mt-20 py-8 md:py-12">
+          <SectionHead
+            tag="Near you"
+            title={loading ? "Restaurants delivering to you" : `${filtered.length} restaurants delivering in ${cityLabel}`}
+          />
+          <div className="flex gap-2 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => { setFilter(f.key); setVisible(PAGE_SIZE); }}
+                className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold border transition ${
+                  filter === f.key ? "text-white border-transparent" : "bg-white border-slate-200 text-slate-700 hover:border-[#12A594]"
+                }`}
+                style={filter === f.key ? { background: GRADIENT } : undefined}
               >
-                {/* Orbital floating decorative elements */}
-                <div className="absolute inset-0 pointer-events-none z-20">
-                  <span className="absolute -top-6 -right-6 animate-bounce text-2xl" style={{ animationDuration: '4s' }}>🌶️</span>
-                  <span className="absolute -bottom-8 -left-8 animate-bounce text-2xl" style={{ animationDuration: '6s' }}>🌿</span>
-                  <span className="absolute top-1/2 -left-12 animate-bounce text-2xl" style={{ animationDuration: '5s' }}>🧄</span>
-                </div>
+                {f.icon && <f.icon className="w-4 h-4" />}
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-                {/* Animated plate layout transitions */}
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeCraving}
-                    initial={{ rotate: -45, scale: 0.8, opacity: 0 }}
-                    animate={{ rotate: 0, scale: 1, opacity: 1 }}
-                    exit={{ rotate: 45, scale: 0.8, opacity: 0 }}
-                    transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-                    className="relative w-[340px] h-[340px] md:w-[480px] md:h-[480px] rounded-full p-2 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.9)] overflow-hidden"
-                  >
-                    {/* Inner gloss layer */}
-                    <div className="absolute inset-0 bg-black/10 group-hover/plate:bg-black/0 transition-all duration-500" />
-                    
-                    {/* Plate Food Image */}
-                    <img 
-                      src={
-                        activeCraving === 0 
-                          ? "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?q=80&w=1000&auto=format&fit=crop" 
-                          : activeCraving === 1 
-                            ? "https://images.unsplash.com/photo-1557872943-16a5ac26437e?q=80&w=1000&auto=format&fit=crop" 
-                            : "https://images.unsplash.com/photo-1534080564583-6be75777b70a?q=80&w=1000&auto=format&fit=crop"
-                      }
-                      alt="Late Night Cravings Showcase Plate" 
-                      className="w-full h-full object-cover rounded-full transform scale-100 group-hover/plate:scale-105 transition-all duration-700 ease-out"
-                    />
-
-                    {/* Stage circular glass highlight border */}
-                    <div className="absolute inset-0 rounded-full border-[10px] border-white/5 pointer-events-none" />
+          {loading ? (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[290px] !rounded-3xl" />)}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-3xl bg-[#F4FBF9] border border-[#12A594]/10 p-10 text-center">
+              <UtensilsCrossed className="w-10 h-10 mx-auto text-[#12A594]" />
+              <h3 className="mt-3 text-lg font-bold">
+                {restaurants.length ? "No restaurants match this filter" : `We're not delivering here yet`}
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {restaurants.length ? "Try another filter." : "Pick another city from the location menu at the top."}
+              </p>
+              {restaurants.length > 0 && (
+                <button onClick={() => setFilter("all")} className="mt-4 text-sm font-semibold text-[#0B6E63] hover:underline">Show all restaurants</button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {filtered.slice(0, visible).map((r, i) => (
+                  <motion.div key={r.id || r._id} initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-40px" }} variants={fadeUp} custom={i % 4}>
+                    <RestaurantCard r={r} />
                   </motion.div>
-                </AnimatePresence>
-
-                {/* Clock Overlay Badge */}
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/85 backdrop-blur-md border border-white/10 px-5 py-2.5 rounded-full flex items-center gap-2.5 shadow-2xl z-30">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-black tracking-widest text-white uppercase whitespace-nowrap">Service Active</span>
-                </div>
-              </motion.div>
-            </div>
-            
-          </div>
-        </div>
-      </section>
-      {/* 4.1 whats waiting for you section */}
-      <section className="relative z-10 py-20 md:py-24 px-6 md:px-12 lg:px-20 max-w-[1800px] mx-auto bg-[#FCFBFA]">
-
-        {/* Section Header */}
-        <div className="mb-12 md:mb-16 flex flex-col md:flex-row md:items-end justify-between gap-8">
-          <div>
-            <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-[#008078]/10 border border-[#008078]/20 rounded-full px-4 py-1.5 mb-6">
-              The Experience
-            </span>
-            <h2 className="text-4xl lg:text-6xl font-black leading-[0.95] tracking-tighter text-slate-900">
-              What's Waiting <br />
-              <span className="italic font-light text-slate-500">For You.</span>
-            </h2>
-          </div>
-          <p className="text-base md:text-lg text-slate-600 font-light max-w-sm leading-relaxed pb-1">
-            Beyond just food delivery. We are engineering a new standard for dining at home.
-          </p>
-        </div>
-
-        {/* Asymmetrical Bento Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 h-auto md:h-[600px]">
-
-          {/* Left Column - Card 1 */}
-          <div className="md:col-span-8 h-full">
-            {/* Card 1: Large Featured */}
-            <motion.div
-              custom={0} initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-100px" }}
-              variants={gridVariants}
-              className="group relative w-full h-full min-h-[350px] md:min-h-0 rounded-[2rem] overflow-hidden bg-slate-900 shadow-xl"
-            >
-              <img
-                src="https://images.unsplash.com/photo-1600891964092-4316c288032e?q=80&w=1200&auto=format&fit=crop"
-                alt="Chef preparing premium steak"
-                className="absolute inset-0 w-full h-full object-cover opacity-70 group-hover:scale-105 group-hover:opacity-90 transition-all duration-1000 ease-out"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-
-              <div className="absolute top-6 left-6 w-11 h-11 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20">
-                <Award className="w-5 h-5 text-white" />
-              </div>
-
-              <div className="absolute bottom-0 w-full p-6 md:p-10">
-                <h3 className="text-2xl md:text-4xl font-black text-white mb-3 tracking-tight">The Culinary Elite</h3>
-                <p className="text-slate-300 text-sm md:text-base font-light max-w-md mb-5 leading-relaxed">
-                  Exclusive access to menus from Michelin-starred kitchens and highly sought-after private chefs, unavailable anywhere else.
-                </p>
-                <button className="flex items-center gap-2 text-white font-bold text-xs uppercase tracking-wider group/btn">
-                  Meet The Chefs <ArrowUpRight className="w-4 h-4 group-hover/btn:translate-x-1 group-hover/btn:-translate-y-1 transition-transform" />
-                </button>
-              </div>
-            </motion.div>
-          </div>
-
-          {/* Right Column - Card 2 & Card 3 */}
-          <div className="md:col-span-4 flex flex-col gap-6 h-full">
-            {/* Card 2: Top Right */}
-            <motion.div
-              custom={1} initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-100px" }}
-              variants={gridVariants}
-              className="group relative flex-1 min-h-[250px] md:min-h-0 rounded-[2rem] overflow-hidden bg-white border border-slate-200 shadow-xl shadow-slate-200/50 p-6 md:p-8 flex flex-col justify-between hover:shadow-2xl hover:-translate-y-1 transition-all duration-500"
-            >
-              <div className="w-12 h-12 bg-pink-50 rounded-xl flex items-center justify-center border border-pink-100 group-hover:bg-[#008078] transition-colors duration-500">
-                <Map className="w-5 h-5 text-[#008078] group-hover:text-white transition-colors duration-500" />
-              </div>
-              <div>
-                <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-2 tracking-tight">Surgical Precision</h3>
-                <p className="text-slate-600 font-light text-xs md:text-sm leading-relaxed">
-                  Proprietary routing algorithms ensure your meal arrives at the exact optimum temperature. Watch it live, down to the exact intersection.
-                </p>
-              </div>
-            </motion.div>
-
-            {/* Card 3: Bottom Right (Split into two on desktop) */}
-            <motion.div
-              custom={2} initial="hidden" whileInView="visible" viewport={{ once: true, margin: "-100px" }}
-              variants={gridVariants}
-              className="flex-1 min-h-[250px] md:min-h-0 grid grid-cols-2 gap-6"
-            >
-              {/* Sub-card A */}
-              <div className="col-span-1 rounded-[2rem] overflow-hidden relative group shadow-lg">
-                <img
-                  src="https://images.unsplash.com/photo-1618160702438-9b02ab6515c9?q=80&w=800&auto=format&fit=crop"
-                  alt="Premium Packaging"
-                  className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-                />
-                <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors duration-500" />
-                <div className="absolute bottom-5 left-5 right-5">
-                  <h4 className="text-white font-bold text-base md:text-lg leading-tight">Bespoke<br />Packaging</h4>
-                </div>
-              </div>
-
-              {/* Sub-card B */}
-              <div className="col-span-1 rounded-[2rem] bg-slate-900 p-5 md:p-6 flex flex-col justify-between border border-slate-800 group hover:bg-[#008078] transition-colors duration-500 shadow-lg">
-                <div className="w-9 h-9 bg-white/10 rounded-full flex items-center justify-center">
-                  <ShieldCheck className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h4 className="text-white font-bold text-base md:text-lg leading-tight mb-1">Zero<br />Compromise</h4>
-                  <p className="text-slate-400 text-[10px] md:text-xs group-hover:text-white/80 transition-colors">Sealed, hygienic, and pristine.</p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-
-        </div>
-      </section>
-
-      {/* 4.5 GEOGRAPHY / Telengana Highlight */}
-      <section className="relative z-10 py-24 px-6 md:px-16 lg:px-24 max-w-[1800px] mx-auto overflow-hidden">
-        {/* Glow ambient background lights */}
-        <div className="absolute top-[20%] right-[-10%] w-[30vw] h-[30vw] bg-pink-500/5 rounded-full blur-[120px] pointer-events-none z-0" />
-        <div className="absolute bottom-[10%] left-[-10%] w-[25vw] h-[25vw] bg-orange-400/5 rounded-full blur-[100px] pointer-events-none z-0" />
-
-        <div className="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center relative z-10">
-
-          {/* Left Column: Text Content */}
-          <div className="lg:col-span-5 space-y-8">
-            <div className="space-y-4">
-              <span className="inline-flex items-center gap-2 text-xs font-black tracking-[0.25em] text-[#008078] uppercase bg-[#008078]/10 border border-[#008078]/20 rounded-full px-4 py-2">
-                <MapPin className="w-3.5 h-3.5" /> Our Geography
-              </span>
-              <h3 className="text-4xl md:text-6xl font-black leading-[1.05] tracking-tight text-slate-900">
-                Where We Are <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-br from-slate-900 to-slate-500 italic font-light">Operating.</span>
-              </h3>
-              <p className="text-lg text-slate-600 font-light leading-relaxed">
-                Starting our journey from <strong>Indore</strong>, Minto Foods is engineered to scale across India, specifically focusing on empowering Tier-2 and Tier-3 cities.
-              </p>
-            </div>
-
-            {/* Features list */}
-            <div className="space-y-4">
-              <div className="group bg-white/70 backdrop-blur-md border border-slate-200/50 p-6 rounded-2xl hover:shadow-xl hover:shadow-pink-500/5 transition-all duration-300 flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-[#008078]/10 flex items-center justify-center text-[#008078] shrink-0">
-                  <Award className="w-6 h-6" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 mb-1">Indore Launchpad (Active)</h4>
-                  <p className="text-sm text-slate-500 font-light">
-                    Our first live delivery hub, alongside Vapi and Bhiwandi.
-                  </p>
-                </div>
-              </div>
-
-              <div className="group bg-white/70 backdrop-blur-md border border-slate-200/50 p-6 rounded-2xl hover:shadow-xl hover:shadow-pink-500/5 transition-all duration-300 flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-orange-500/10 flex items-center justify-center text-orange-500 shrink-0">
-                  <TrendingUp className="w-6 h-6" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 mb-1">Empowering Tier 2 & 3 Cities</h4>
-                  <p className="text-sm text-slate-500 font-light">
-                    Bringing modern food delivery, with clear and flexible restaurant billing, to growing towns and communities.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Dynamic Glowing India Map Visual */}
-          <div className="lg:col-span-7 flex justify-center w-full">
-            <motion.div 
-              className="w-full max-w-[550px] bg-slate-950 rounded-[3rem] p-6 md:p-10 border border-slate-800 shadow-2xl relative overflow-hidden h-[540px] flex flex-col justify-between cursor-pointer"
-              onMouseMove={handleMapMouseMove}
-              onMouseLeave={handleMapMouseLeave}
-              animate={{ rotateX: mapRotate.x, rotateY: mapRotate.y }}
-              transition={{ type: "spring", stiffness: 150, damping: 15 }}
-              style={{ transformStyle: "preserve-3d", perspective: 1000 }}
-            >
-
-              {/* Grid Overlay */}
-              <div className="absolute inset-0 bg-[radial-gradient(#ffffff08_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none z-0" />
-
-              {/* Scanner Line Overlay */}
-              <motion.div
-                className="absolute left-0 right-0 h-[100px] bg-gradient-to-b from-[#008078]/0 via-[#008078]/5 to-[#008078]/0 pointer-events-none z-0 border-y border-[#008078]/5"
-                animate={{ top: ["-100px", "540px"] }}
-                transition={{ repeat: Infinity, duration: 6, ease: "linear" }}
-              />
-
-              {/* Map Widget Header */}
-              <div className="relative z-10 flex items-center justify-between border-b border-slate-800/80 pb-4 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" />
-                  <span className="text-[10px] uppercase tracking-widest font-black text-slate-400">Live Network Operations</span>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 text-[10px] text-slate-400 font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                  Hubs: Indore · Vapi · Bhiwandi
-                </div>
-              </div>
-
-              {/* The Map Graph Wrapper with Masked Image and Premium Overlays */}
-              <div className="relative z-10 flex-1 flex items-center justify-center py-4 overflow-hidden select-none pointer-events-none">
-                <img 
-                  src="/india-map-operations-minto.jpg" 
-                  alt="Minto Foods Operational Map" 
-                  className="w-full h-full object-contain filter brightness-110 contrast-105 saturate-110 transform scale-[1.18]"
-                  style={{
-                    maskImage: 'radial-gradient(circle at center, black 65%, transparent 100%)',
-                    WebkitMaskImage: 'radial-gradient(circle at center, black 65%, transparent 100%)'
-                  }}
-                />
-
-                {/* Horizontal glowing pointer connector line */}
-                <div 
-                  className="hidden lg:block absolute top-[47.4%] left-[39.6%] w-[17.4%] h-[1.5px] bg-gradient-to-r from-[#008078] to-[#008078]/40 z-20 pointer-events-none"
-                  style={{ transform: "translateY(-50%)" }}
-                />
-
-                {/* Animated pulsing pin on Indore */}
-                <div className="absolute top-[47.4%] left-[39.6%] -translate-x-1/2 -translate-y-1/2 z-20">
-                  {/* Super tight ping beacon */}
-                  <span className="absolute inline-flex h-5 w-5 -top-2.5 -left-2.5 rounded-full bg-[#008078]/85 animate-ping" />
-                  
-                  {/* Glowing Core center - sharp, bright, and tiny */}
-                  <span className="relative block rounded-full h-2.5 w-2.5 bg-white shadow-[0_0_8px_#fff,0_0_12px_#008078]" />
-                </div>
-
-                {/* Floating Active Info Tag over the beacon, centered above it on mobile, shifted right on desktop */}
-                <div className="absolute top-[47.4%] left-[39.6%] lg:left-[57%] -translate-x-1/2 lg:translate-x-0 -translate-y-[280%] lg:-translate-y-1/2 bg-slate-900/95 border border-[#008078]/50 text-[9px] font-black text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-2xl shadow-pink-500/20 whitespace-nowrap z-30">
-                  <span className="w-2 h-2 rounded-full bg-[#008078] animate-ping" />
-                  INDORE (ACTIVE HUB)
-                </div>
-              </div>
-
-              {/* Map Footer Metadata */}
-              <div className="relative z-10 border-t border-slate-800/80 pt-4 flex items-center justify-between text-[9px] text-slate-500 uppercase tracking-widest font-black shrink-0">
-                <span>Hub Status: active</span>
-                <span>Latency: 18ms</span>
-                <span>Network Integrity: 100%</span>
-              </div>
-            </motion.div>
-          </div>
-
-        </div>
-      </section>
-
-      {/* 5. FASTEST DELIVERY / GLOWING ROUTE */}
-      <section className="relative z-10 py-32 px-6 md:px-16 lg:px-24 max-w-[1800px] mx-auto">
-        <div className="flex flex-col lg:flex-row items-center gap-20">
-
-          <div className="flex-1 space-y-8">
-            <div className="space-y-4">
-              <span className="inline-block text-xs font-black tracking-[0.3em] text-[#008078] uppercase bg-pink-50 border border-pink-100 rounded-full px-3 py-1">
-                Precision Logistics
-              </span>
-              <h3 className="text-5xl lg:text-7xl font-black leading-[1.1] tracking-tight text-slate-900">
-                Fastest <br /><span className="italic text-slate-500 font-light">Delivery Route.</span>
-              </h3>
-              <p className="text-base md:text-lg text-slate-600 font-light leading-relaxed max-w-lg">
-                Our advanced routing algorithm calculates the exact fastest path to your door, avoiding traffic and delays. Watch your order arrive in real-time.
-              </p>
-            </div>
-
-            {/* Premium Feature Stats / Cards */}
-            <div className="grid grid-cols-1 gap-4 pt-4">
-              {[
-                { 
-                  icon: Zap, 
-                  title: "Predictive AI Dispatch", 
-                  desc: "Riders are auto-positioned based on historical demand models before you even checkout." 
-                },
-                { 
-                  icon: ShieldCheck, 
-                  title: "Active Thermal Control", 
-                  desc: "Meals are packed in temperature-isolated chambers maintaining exact kitchen heat." 
-                },
-                { 
-                  icon: TrendingUp, 
-                  title: "Average Speed: 22 Mins", 
-                  desc: "A highly optimized city-wide rider network designed for unmatched delivery velocity." 
-                }
-              ].map((feat, idx) => (
-                <motion.div 
-                  key={idx}
-                  initial={{ opacity: 0, x: -20 }}
-                  whileInView={{ opacity: 1, x: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: idx * 0.1, duration: 0.6 }}
-                  className="flex gap-4 p-4 rounded-2xl bg-slate-50/50 border border-slate-200/60 hover:bg-white hover:border-[#008078]/20 hover:shadow-lg transition-all duration-300 group cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] group-hover:bg-[#008078] group-hover:text-white transition-all duration-300 shrink-0">
-                    <feat.icon className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-sm">{feat.title}</h4>
-                    <p className="text-slate-500 text-xs font-light mt-0.5 leading-relaxed">{feat.desc}</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-
-          {/* Interactive live radar route container with glass HUDs */}
-          <div className="flex-1 w-full h-[380px] sm:h-[500px] relative rounded-[2.5rem] border border-slate-200/80 bg-slate-50/50 backdrop-blur-sm overflow-hidden flex items-center justify-center shadow-xl">
-
-            {/* Radar Sweep Animation Effect */}
-            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_50%,rgba(0, 128, 120,0.025)_0%,transparent_60%)] z-0" />
-            <div className="absolute top-[20%] left-[20%] w-[350px] h-[350px] bg-pink-100/30 rounded-full blur-[80px] opacity-40 pointer-events-none" />
-
-            {/* Map Grid Dots Background */}
-            <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, #0F172A 1px, transparent 0)', backgroundSize: '32px 32px' }} />
-
-            {/* Glass HUD 1: Active Signal */}
-            <div className="absolute top-4 right-4 sm:top-6 sm:right-6 bg-white/90 backdrop-blur-md border border-slate-200/50 px-3 py-1.5 sm:px-4 sm:py-2 rounded-2xl flex items-center gap-2 shadow-md z-20">
-              <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-emerald-500 animate-ping" />
-              <span className="text-[9px] sm:text-[10px] font-black tracking-widest text-slate-800 uppercase">Live Dispatch Signal</span>
-            </div>
-
-            {/* Glass HUD 2: Rider Stats */}
-            <div className="hidden sm:flex absolute sm:bottom-6 sm:left-6 bg-white/90 backdrop-blur-md border border-slate-200/50 sm:p-4 rounded-2xl flex-col gap-1 shadow-md z-20 sm:text-xs sm:w-[220px]">
-              <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                <Zap className="w-3.5 h-3.5 text-[#008078]" /> <span>Rider Telemetry</span>
-              </div>
-              <div className="text-slate-500 text-[10px] font-medium font-mono leading-relaxed pt-1.5 border-t border-slate-100 mt-1">
-                Speed: 42 km/h <br />
-                Temp: 74°C (Hot Chamber) <br />
-                Route: Optimal Engaged
-              </div>
-            </div>
-
-            {/* Floating Location Badges */}
-            <div className="hidden sm:block absolute top-[18%] left-[10%] bg-pink-50/95 backdrop-blur-sm border border-pink-100 px-3 py-1 rounded-xl text-[9px] font-black tracking-widest text-[#008078] shadow-sm z-20 animate-pulse">
-              KITCHEN PICKUP
-            </div>
-            <div className="hidden sm:block absolute bottom-[20%] right-[10%] bg-[#0F172A]/90 backdrop-blur-sm px-3 py-1 rounded-xl text-[9px] font-black tracking-widest text-white shadow-sm z-20 animate-pulse">
-              YOUR DOORSTEP
-            </div>
-
-            {/* Animated SVG Route */}
-            <svg viewBox="0 0 400 300" className="w-full h-full max-w-[400px] relative z-10 p-6">
-              <path d="M 50 250 Q 150 250, 200 150 T 350 50" fill="none" stroke="rgba(15,23,42,0.06)" strokeWidth="4" strokeLinecap="round" />
-              <motion.path
-                d="M 50 250 Q 150 250, 200 150 T 350 50"
-                fill="none"
-                stroke="#008078"
-                strokeWidth="4"
-                strokeLinecap="round"
-                initial={{ pathLength: 0 }}
-                whileInView={{ pathLength: 1 }}
-                viewport={{ once: false, margin: "-100px" }}
-                transition={{ duration: 2.5, ease: "easeInOut", repeat: Infinity, repeatType: "loop", repeatDelay: 1 }}
-                style={{ filter: "drop-shadow(0px 0px 8px rgba(0, 128, 120,0.5))" }}
-              />
-              <circle cx="50" cy="250" r="8" fill="#008078" className="shadow-[0_0_10px_#008078]" />
-              <circle cx="350" cy="50" r="8" fill="#0F172A" />
-            </svg>
-          </div>
-        </div>
-      </section>
-
-      {/* 6. FOOTER */}
-      <footer className="relative z-10 bg-slate-50 pt-32 pb-10 px-6 md:px-16 lg:px-24 border-t border-slate-200/50 overflow-hidden text-slate-600">
-
-        <div className="max-w-[1800px] mx-auto">
-          <div className="grid lg:grid-cols-5 gap-16 mb-24 relative z-10">
-            <div className="lg:col-span-2">
-              <h2 className="text-5xl font-black tracking-tighter text-slate-950 mb-6">
-                {APP_CONFIG?.NAME || "BRAND"}<span className="text-[#008078]">.</span>
-              </h2>
-              <p className="text-slate-500 text-lg font-light leading-relaxed max-w-sm mb-8">
-                Elevating the dining experience. Premium food delivery for those who expect more.
-              </p>
-              {SOCIAL_LINKS.length > 0 && (
-              <div className="flex gap-4">
-                {SOCIAL_LINKS.map(({ network, url }) => ({
-                  Icon: { facebook: Facebook, youtube: Youtube, instagram: Instagram, linkedin: Linkedin }[network],
-                  url,
-                })).filter(({ Icon }) => Icon).map(({ Icon, url }, i) => (
-                  <a 
-                    key={i} 
-                    href={url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="w-11 h-11 rounded-full border border-slate-200 flex items-center justify-center hover:bg-[#008078] hover:border-[#008078] hover:text-white cursor-pointer transition-all duration-300 text-slate-700 bg-white shadow-sm"
-                  >
-                    <Icon className="w-4.5 h-4.5" />
-                  </a>
                 ))}
               </div>
+              {visible < filtered.length && (
+                <div className="mt-8 text-center">
+                  <button onClick={() => setVisible((v) => v + PAGE_SIZE)} className="rounded-full border-2 border-[#12A594]/30 px-7 py-3 font-semibold text-[#0B6E63] hover:border-[#12A594] hover:bg-[#F3FBF9] transition">
+                    Load more restaurants
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </main>
+
+      {/* ───────────── HOW IT WORKS ───────────── */}
+      <section className="py-16 md:py-20 bg-[#F4FBF9]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="text-center">
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.teal }}>Simple as 1-2-3</span>
+            <h2 className="mt-1 text-3xl sm:text-4xl font-extrabold tracking-tight">How MintoFood works</h2>
+          </div>
+          <div className="mt-10 grid sm:grid-cols-3 gap-5">
+            {[
+              { icon: Search, title: "Find", desc: "Browse restaurants near you, with menus and prices up front." },
+              { icon: ShoppingBag, title: "Order", desc: "Add what you're craving and pay online in a couple of taps." },
+              { icon: Navigation, title: "Track", desc: "Watch your rider on the map until the food is at your door." },
+            ].map((s, i) => (
+              <div key={s.title} className="relative rounded-3xl bg-white border border-slate-100 p-7">
+                <span className="absolute top-5 right-6 text-5xl font-extrabold text-[#E7F7F3]">{i + 1}</span>
+                <span className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-white" style={{ background: GRADIENT }}>
+                  <s.icon className="w-6 h-6" />
+                </span>
+                <h3 className="relative mt-5 text-xl font-bold">{s.title}</h3>
+                <p className="relative mt-2 text-slate-600 leading-relaxed">{s.desc}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-8 grid sm:grid-cols-3 gap-4">
+            {[
+              { icon: Clock, t: "Quick, tracked delivery" },
+              { icon: BadgePercent, t: "Fair billing for restaurants" },
+              { icon: ShieldCheck, t: "Safe & secure payments" },
+            ].map((f) => (
+              <div key={f.t} className="flex items-center justify-center gap-2 text-sm font-semibold text-slate-700">
+                <f.icon className="w-5 h-5 text-[#12A594]" /> {f.t}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ───────────── DOWNLOAD APP ───────────── */}
+      <section id="download" className="scroll-mt-20 py-16 md:py-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="relative overflow-hidden rounded-[2.5rem] px-6 py-12 sm:px-12 md:py-14 text-white" style={{ background: GRADIENT }}>
+            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" viewBox="0 0 800 400" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M0,300 C200,220 300,380 520,300 C680,240 720,320 800,280 L800,400 L0,400 Z" fill="#fff" />
+              <path d="M520,0 C600,120 700,60 800,140 L800,0 Z" fill="#fff" />
+            </svg>
+            <div className="relative grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-10 items-center">
+              <div>
+                <SpeedLines light className="mb-5" />
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight">Hungry? MintoFood is a tap away.</h2>
+                <p className="mt-4 text-white/85 text-lg max-w-md">Save your addresses, reorder favourites and get live updates on every order.</p>
+                <div className="mt-8 flex flex-col sm:flex-row gap-3">
+                  <StoreButton href={STORE_LINKS.customer.android} icon={Play} top="Get it on" label="Google Play" />
+                  <StoreButton href={STORE_LINKS.customer.ios} icon={Apple} top="Download on the" label="App Store" />
+                </div>
+                <a href={ORDER_URL} className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-white/90 hover:text-white hover:underline underline-offset-4">
+                  Or order on the web right now <ArrowRight className="w-4 h-4" />
+                </a>
+              </div>
+              <div className="hidden md:flex justify-center">
+                <div className="w-56 rounded-[2.5rem] bg-[#0E2724] p-2 shadow-2xl rotate-3">
+                  <div className="rounded-[2rem] bg-white overflow-hidden text-[#0E2724]">
+                    <div className="px-4 pt-5 pb-3 flex items-center gap-2">
+                      <img src="/minto-logo.png" alt="" className="w-7 h-7 rounded-lg" />
+                      <span className="text-sm font-extrabold"><span style={{ color: C.deep }}>Minto</span><span style={{ color: C.bright }}>Food</span></span>
+                    </div>
+                    <Img src={restaurantImage(restaurants.find((r) => restaurantImage(r)) || {})} alt="" className="h-36 w-full object-cover" />
+                    <div className="p-4">
+                      <p className="text-sm font-bold truncate">{restaurants[0]?.restaurantName || "Your favourite place"}</p>
+                      <p className="text-xs text-slate-500 truncate">{(restaurants[0]?.cuisines || []).slice(0, 2).join(" • ") || "Near you"}</p>
+                      <div className="mt-3 rounded-xl py-2.5 text-center text-xs font-bold text-white" style={{ background: GRADIENT }}>Track order</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ───────────── PARTNERS ───────────── */}
+      <section id="partner" className="scroll-mt-20 py-16 md:py-20 bg-[#F4FBF9]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="text-center max-w-2xl mx-auto">
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: C.teal }}>Grow with us</span>
+            <h2 className="mt-1 text-3xl sm:text-4xl font-extrabold tracking-tight">Partner with MintoFood</h2>
+            <p className="mt-3 text-slate-600 text-lg">Bring your restaurant online or earn on your own schedule as a delivery partner.</p>
+          </div>
+
+          <div className="mt-10 grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <div className="lg:col-span-3 rounded-[2rem] bg-white p-6 sm:p-8 border border-[#12A594]/10">
+              <div className="flex items-center gap-3">
+                <span className="w-12 h-12 rounded-2xl flex items-center justify-center text-white" style={{ background: GRADIENT }}>
+                  <Store className="w-6 h-6" />
+                </span>
+                <div>
+                  <h3 className="text-xl sm:text-2xl font-bold">List your restaurant</h3>
+                  <p className="text-sm text-slate-500">Per-order commission or a fixed monthly plan, your choice.</p>
+                </div>
+              </div>
+
+              {leadSuccess ? (
+                <div className="mt-8 rounded-2xl bg-[#E7F7F3] p-8 text-center">
+                  <span className="mx-auto w-14 h-14 rounded-full flex items-center justify-center text-white" style={{ background: GRADIENT }}>
+                    <Check className="w-7 h-7" />
+                  </span>
+                  <h4 className="mt-4 text-lg font-bold">Thanks, we got your details!</h4>
+                  <p className="mt-1 text-sm text-slate-600">Our onboarding team will call you shortly to set up your restaurant.</p>
+                  <button onClick={() => setLeadSuccess(false)} className="mt-5 text-sm font-semibold text-[#0B6E63] hover:underline">Submit another restaurant</button>
+                </div>
+              ) : (
+                <form onSubmit={handleLeadSubmit} className="mt-7 grid sm:grid-cols-2 gap-3.5">
+                  <input className={inputCls} placeholder="Owner name" value={leadForm.ownerName} onChange={setField("ownerName")} autoComplete="name" />
+                  <input className={inputCls} placeholder="Restaurant name" value={leadForm.restaurantName} onChange={setField("restaurantName")} />
+                  <input className={inputCls} placeholder="Mobile number" inputMode="tel" value={leadForm.mobileNumber} onChange={setField("mobileNumber")} autoComplete="tel" />
+                  <input className={inputCls} placeholder="Email" type="email" value={leadForm.emailId} onChange={setField("emailId")} autoComplete="email" />
+                  <input className={`${inputCls} sm:col-span-2`} placeholder="City / area" value={leadForm.location} onChange={setField("location")} />
+                  {leadError && <p className="sm:col-span-2 text-sm text-red-600">{leadError}</p>}
+                  <button type="submit" disabled={submittingLead}
+                    className="sm:col-span-2 mt-1 inline-flex items-center justify-center gap-2 rounded-full py-3.5 font-semibold text-white shadow-md shadow-[#12A594]/25 disabled:opacity-70"
+                    style={{ background: GRADIENT }}
+                  >
+                    {submittingLead ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                    {submittingLead ? "Submitting…" : "Register my restaurant"}
+                  </button>
+                </form>
               )}
             </div>
 
-            <div className="flex flex-col gap-5 text-sm font-medium">
-              <h4 className="text-slate-900 font-bold tracking-widest text-xs uppercase mb-1">Legal</h4>
-              <a 
-                href="https://admin.mintofood.com/food/user/profile/privacy" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="hover:text-[#008078] transition-colors"
-              >
-                Privacy Policy
-              </a>
-              <a 
-                href="https://admin.mintofood.com/food/user/profile/terms" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="hover:text-[#008078] transition-colors"
-              >
-                Terms of Service
-              </a>
-            </div>
-
-            <div className="flex flex-col gap-5 text-sm font-medium">
-              <h4 className="text-slate-900 font-bold tracking-widest text-xs uppercase mb-1">Company</h4>
-              <a 
-                href="https://admin.mintofood.com/food/user/profile/about" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="hover:text-[#008078] transition-colors"
-              >
-                About Us
-              </a>
-              <a 
-                href="https://admin.mintofood.com/food/user/profile/help-content" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="hover:text-[#008078] transition-colors"
-              >
-                Support
-              </a>
-            </div>
-
-            <div className="flex flex-col gap-5 text-sm font-medium">
-              <h4 className="text-slate-900 font-bold tracking-widest text-xs uppercase mb-1">Contact</h4>
-              <a href={`mailto:${supportContact.email}`} className="hover:text-[#008078] transition-colors">{supportContact.email}</a>
-              <a href={`tel:${supportContact.mobile}`} className="hover:text-[#008078] transition-colors">{supportContact.mobile}</a>
-              <p className="text-slate-400 text-xs mt-3 leading-relaxed">Available 24/7 for premium members.</p>
-            </div>
-          </div>
-
-          <div className="border-t border-slate-200/60 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 relative z-10 text-xs font-semibold">
-            <p className="text-slate-400">© 2026 {APP_CONFIG?.NAME || 'Brand'} Technologies Inc. All rights reserved.</p>
-            <div className="flex gap-6">
-              <p className="text-slate-400 hover:text-slate-600 cursor-pointer transition-colors">System Status: <span className="text-emerald-500">100% Operational</span></p>
+            <div className="lg:col-span-2 rounded-[2rem] p-6 sm:p-8 text-white flex flex-col bg-[#0E2724] relative overflow-hidden">
+              <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full opacity-30" style={{ background: GRADIENT }} />
+              <span className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-white" style={{ background: GRADIENT }}>
+                <Bike className="w-6 h-6" />
+              </span>
+              <h3 className="relative mt-5 text-xl sm:text-2xl font-bold">Become a delivery partner</h3>
+              <p className="relative mt-2 text-white/70 leading-relaxed">Ride with MintoFood in your city. Flexible hours, weekly payouts and incentives on top.</p>
+              <ul className="relative mt-6 space-y-3 text-sm">
+                {["Choose your own hours", "Weekly payouts to your bank", "Bonuses and incentives"].map((t) => (
+                  <li key={t} className="flex items-center gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-[#19C9B4]/20 flex items-center justify-center"><Check className="w-3.5 h-3.5 text-[#19C9B4]" /></span>
+                    {t}
+                  </li>
+                ))}
+              </ul>
+              <div className="relative mt-auto pt-8">
+                <StoreButton href={STORE_LINKS.delivery.android} icon={Play} top="Get the rider app on" label="Google Play" dark={false} />
+              </div>
             </div>
           </div>
         </div>
+      </section>
+
+      {/* ───────────── FOOTER ───────────── */}
+      <footer className="bg-[#0E2724] text-white/70">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 grid gap-10 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <Wordmark light />
+            <p className="mt-4 text-sm leading-relaxed max-w-xs">Food delivery from your favourite local restaurants, tracked live to your door.</p>
+            {SOCIAL_LINKS.length > 0 && (
+              <div className="mt-5 flex gap-3">
+                {SOCIAL_LINKS.map(({ network, url }) => {
+                  const Icon = { facebook: Facebook, youtube: Youtube, instagram: Instagram, linkedin: Linkedin }[network];
+                  return Icon ? (
+                    <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="w-10 h-10 rounded-full bg-white/10 hover:bg-[#12A594] flex items-center justify-center transition-colors">
+                      <Icon className="w-4 h-4 text-white" />
+                    </a>
+                  ) : null;
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 text-sm">
+            <h4 className="text-white font-semibold mb-1">We deliver in</h4>
+            {zones.map((z) => (
+              <button key={z.id} onClick={() => { chooseCity(z); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-left hover:text-white">
+                {z.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-3 text-sm">
+            <h4 className="text-white font-semibold mb-1">Company</h4>
+            <a href="https://admin.mintofood.com/food/user/profile/about" target="_blank" rel="noopener noreferrer" className="hover:text-white">About us</a>
+            <a href="#partner" className="hover:text-white">Partner with us</a>
+            <a href="https://admin.mintofood.com/food/user/profile/help-content" target="_blank" rel="noopener noreferrer" className="hover:text-white">Support</a>
+            <a href="https://admin.mintofood.com/food/user/profile/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-white">Privacy policy</a>
+            <a href="https://admin.mintofood.com/food/user/profile/terms" target="_blank" rel="noopener noreferrer" className="hover:text-white">Terms of service</a>
+          </div>
+
+          <div className="flex flex-col gap-3 text-sm">
+            <h4 className="text-white font-semibold mb-1">Contact</h4>
+            <a href={`mailto:${supportContact.email}`} className="hover:text-white inline-flex items-center gap-2 break-all">
+              <Mail className="w-4 h-4 shrink-0" /> {supportContact.email}
+            </a>
+            {supportContact.mobile && (
+              <a href={`tel:${supportContact.mobile}`} className="hover:text-white inline-flex items-center gap-2">
+                <Phone className="w-4 h-4 shrink-0" /> {supportContact.mobile}
+              </a>
+            )}
+            <span className="inline-flex items-center gap-2"><HeartHandshake className="w-4 h-4 shrink-0" /> Made in India</span>
+          </div>
+        </div>
+        <div className="border-t border-white/10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 text-xs text-white/50">© {new Date().getFullYear()} MintoFood. All rights reserved.</div>
+        </div>
       </footer>
-
-      {/* --- Full-Screen Interactive About Page --- */}
-      <AnimatePresence>
-        {isAboutOpen && (
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 28, stiffness: 220 }}
-            data-lenis-prevent
-            className="fixed inset-0 z-[100] w-screen h-screen bg-[#FCFBFA] overflow-y-auto flex flex-col selection:bg-[#008078] selection:text-white"
-          >
-            {/* Ambient Background Lights */}
-            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-pink-500/10 rounded-full blur-[140px] pointer-events-none z-0" />
-            <div className="absolute bottom-0 left-0 w-[40vw] h-[40vw] bg-orange-400/5 rounded-full blur-[120px] pointer-events-none z-0" />
-
-            {/* Sticky Header */}
-            <header className="sticky top-0 w-full z-50 px-6 py-6 md:px-12 lg:px-20 flex items-center justify-between bg-[#FCFBFA]/80 backdrop-blur-md border-b border-slate-200/40 shrink-0">
-              <div className="text-2xl font-black text-slate-900 tracking-tighter">
-                {APP_CONFIG?.NAME || "Minto Foods"}
-                <span className="text-[#008078]">.</span>
-              </div>
-              <button
-                onClick={() => setIsAboutOpen(false)}
-                className="group flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-[#008078] transition-all duration-300 shadow-md hover:shadow-lg shadow-slate-900/10 cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-                Back to Home
-              </button>
-            </header>
-
-            {/* Page Content Container */}
-            <main className="flex-1 relative z-10 w-full max-w-[1400px] mx-auto px-6 py-12 md:py-20 lg:px-20 flex flex-col gap-12 md:gap-20">
-
-              {/* Cinematic Page Title */}
-              <div className="max-w-3xl space-y-6">
-                <span className="inline-flex items-center gap-2 text-[#008078] font-bold tracking-widest uppercase text-xs bg-[#008078]/10 px-4 py-2 rounded-full">
-                  <Sparkles className="w-4 h-4" /> The Movement
-                </span>
-                <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-slate-900">
-                  Reclaiming Fairness <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-slate-900 to-slate-500 italic font-light">in the Food Ecosystem.</span>
-                </h1>
-                <p className="text-xl text-slate-600 font-light leading-relaxed">
-                  Minto Foods is built with a mission to create a sustainable, transparent, and balanced environment for both food merchants and consumers across India.
-                </p>
-              </div>
-
-              {/* Central Blockquote Quote Banner */}
-              <div className="bg-slate-900 text-white rounded-[2.5rem] p-8 md:p-14 relative overflow-hidden shadow-2xl shrink-0">
-                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-[#008078]/20 rounded-full blur-[90px] pointer-events-none" />
-                <div className="relative z-10 space-y-6">
-                  <p className="text-2xl md:text-3xl lg:text-4xl font-light leading-relaxed italic text-slate-100 max-w-4xl">
-                    "Minto Foods isn’t just a food delivery app—it’s a movement towards fair business, trust, and transparency."
-                  </p>
-                  <div className="w-16 h-1 bg-[#008078] rounded-full" />
-                  <p className="text-xs uppercase tracking-widest font-bold text-slate-400">Our Core Philosophy</p>
-                </div>
-              </div>
-
-              {/* Dynamic Value Story Grid */}
-              <div className="grid md:grid-cols-2 gap-8 lg:gap-12 shrink-0">
-
-                {/* Story Card 1: Flexible billing */}
-                <div className="group bg-white border border-slate-200/60 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Percent className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Flexible, Transparent Billing</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Restaurants choose how they pay: a per-order commission, or a fixed monthly subscription instead. Every charge is shown upfront, giving partners the clarity to plan, grow, sustain jobs, and thrive in a digital economy.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">No Hidden Partner Fees</span>
-                  </div>
-                </div>
-
-                {/* Story Card 2: Transparent Pricing */}
-                <div className="group bg-white border border-slate-200/60 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center text-orange-500 mb-6 group-hover:scale-110 transition-transform">
-                      <Heart className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Trust & Transparent Pricing</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      By offering transparent pricing, Minto Foods ensures customers pay genuine prices without hidden markups. We are building long-term relationships of trust with both restaurants and consumers.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
-                    <ShieldCheck className="w-4 h-4 text-orange-500" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Honest Pricing Guarantee</span>
-                  </div>
-                </div>
-
-                {/* Story Card 3: Geographical Expansion */}
-                <div className="group bg-white border border-slate-200/60 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 mb-6 group-hover:scale-110 transition-transform">
-                      <MapPin className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Indore to Tier 2 & 3 Cities</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Minto Foods is starting its journey from Indore, with a strategic focus on expanding across Tier 2 and Tier 3 cities in India. We aim to empower local businesses in these growing regions and integrate them into the digital market.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
-                    <Map className="w-4 h-4 text-indigo-600" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Empowering Local Communities</span>
-                  </div>
-                </div>
-
-                {/* Story Card 4: Two Young Founders */}
-                <div className="group bg-white border border-slate-200/60 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 mb-6 group-hover:scale-110 transition-transform">
-                      <Users className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Founded by Visionaries</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Minto Foods was founded by two passionate 23-year-old entrepreneurs driven by a vision to revolutionize the food delivery industry and create a more balanced, fair, and growth-oriented platform for all stakeholders.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-100 flex items-center gap-3">
-                    <TrendingUp className="w-4 h-4 text-emerald-600" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Innovation Led By Youth</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Bottom Call to Action */}
-              <div className="text-center py-12 md:py-20 border-t border-slate-200/60 flex flex-col items-center gap-6 shrink-0">
-                <h3 className="text-3xl md:text-4xl font-black text-slate-900">Be Part of the Movement</h3>
-                <p className="text-slate-500 max-w-lg font-light">
-                  Support your local neighborhood restaurants. Join Minto Foods today as a customer or partner and help us create a fair ecosystem.
-                </p>
-                <div className="flex gap-4 mt-2">
-                  <button
-                    onClick={() => setIsAboutOpen(false)}
-                    className="bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-full font-bold text-sm transition-all duration-300 shadow-md shadow-slate-900/10 cursor-pointer"
-                  >
-                    Return to Homepage
-                  </button>
-                </div>
-              </div>
-
-            </main>
-
-            {/* Simple Footer */}
-            <footer className="bg-slate-50 border-t border-slate-200/50 py-8 text-center text-xs text-slate-400 font-medium shrink-0">
-              <p>© 2026 {APP_CONFIG?.NAME || "Minto Foods"} Technologies Inc. All rights reserved.</p>
-            </footer>
-          </motion.div>
-        )}
-
-        {isRestaurantOpen && (
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 28, stiffness: 220 }}
-            data-lenis-prevent
-            className="fixed inset-0 z-[100] w-screen h-screen bg-[#FAF7F2] overflow-y-auto flex flex-col selection:bg-[#008078] selection:text-white"
-          >
-            {/* Ambient Background Lights - Signature Pink and Warm Amber */}
-            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-[#008078]/5 rounded-full blur-[140px] pointer-events-none z-0" />
-            <div className="absolute bottom-0 left-0 w-[40vw] h-[40vw] bg-orange-400/5 rounded-full blur-[120px] pointer-events-none z-0" />
-
-            {/* Sticky Header */}
-            <header className="sticky top-0 w-full z-50 px-4 py-4 md:px-12 lg:px-20 flex items-center justify-between bg-[#FAF7F2]/90 backdrop-blur-md border-b border-slate-200/40 shrink-0">
-              <div className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter">
-                {APP_CONFIG?.NAME || "Minto Foods"}
-                <span className="text-[#008078]">.</span>
-              </div>
-              <div className="flex items-center gap-2 sm:gap-3">
-                <button
-                  onClick={() => document.getElementById("partner-lead-form")?.scrollIntoView({ behavior: "smooth" })}
-                  className="group flex items-center gap-1.5 sm:gap-2 bg-[#008078]/10 hover:bg-[#008078] text-[#008078] hover:text-white px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs font-bold transition-all duration-300 border border-[#008078]/20 cursor-pointer shadow-sm"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Become a Partner</span>
-                  <span className="sm:hidden">Join</span>
-                </button>
-                <button
-                  onClick={() => setIsRestaurantOpen(false)}
-                  className="group flex items-center gap-1.5 sm:gap-2 bg-slate-900 text-white px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-full text-xs font-bold hover:bg-[#008078] transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-                  <span className="hidden sm:inline">Back to Home</span>
-                  <span className="sm:hidden">Back</span>
-                </button>
-              </div>
-            </header>
-
-            {/* Page Content Container */}
-            <main className="flex-1 relative z-10 w-full max-w-[1400px] mx-auto px-6 py-12 md:py-20 lg:px-20 flex flex-col gap-12 md:gap-20">
-
-              {/* Cinematic Page Title - Centered Elegant Culinary Accent */}
-              <div className="max-w-4xl space-y-6 text-center mx-auto mb-4">
-                <span className="inline-flex items-center gap-2 text-[#008078] font-black tracking-widest uppercase text-xs bg-[#008078]/10 border border-[#008078]/20 px-4 py-2 rounded-full">
-                  <Store className="w-4 h-4 text-[#008078]" /> Restaurant Empowerment Initiative
-                </span>
-                <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-slate-900">
-                  Grow Your Restaurant. <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-[#E02477] font-extrabold italic font-light">Pay the Way That Suits You.</span>
-                </h1>
-                <p className="text-xl text-slate-700 font-light leading-relaxed max-w-3xl mx-auto">
-                  With Minto Foods, you gain access to a powerful digital ordering system with <strong>flexible billing</strong>: a per-order commission, or a fixed monthly plan instead.
-                </p>
-              </div>
-
-              {/* Download CTA Block - Customized as a POS Tablet Terminal Layout */}
-              <div className="bg-slate-900 text-white rounded-[2.5rem] p-8 md:p-14 relative overflow-hidden shadow-2xl shrink-0 flex flex-col lg:flex-row items-center gap-12 border border-slate-800">
-                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-[#008078]/10 rounded-full blur-[90px] pointer-events-none" />
-
-                <div className="flex-1 space-y-6 relative z-10">
-                  <div className="inline-block text-[10px] uppercase tracking-widest font-black text-pink-500 bg-[#008078]/10 border border-[#008078]/20 px-3 py-1.5 rounded-full">
-                    Active Operations: Indore · Vapi · Bhiwandi
-                  </div>
-                  <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Setup Your Live Digital Kitchen</h2>
-                  <p className="text-slate-400 font-light max-w-xl leading-relaxed text-sm md:text-base">
-                    Register your business profile, customize your digital menu, and start receiving orders directly on your phone or tablet in minutes.
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                    <StoreLink href={STORE_LINKS.restaurant.ios} className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
-                      <Apple className="w-5 h-5" /> iOS App Store
-                    </StoreLink>
-                    <StoreLink href={STORE_LINKS.restaurant.android} className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-700 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
-                      <Play className="w-5 h-5" /> Android Play Store
-                    </StoreLink>
-                  </div>
-                </div>
-
-                {/* Conceptual POS Tablet Mockup Graphic */}
-                <div className="w-full lg:w-[420px] shrink-0 flex justify-center relative z-10">
-                  <div className="w-full max-w-[380px] h-[250px] bg-slate-900 border-4 border-slate-700 rounded-2xl shadow-2xl p-4 flex flex-col justify-between relative overflow-hidden">
-                    {/* Tablet Top Notch and bezel look */}
-                    <div className="absolute top-1 left-1/2 -translate-x-1/2 w-16 h-2 bg-slate-700 rounded-full" />
-
-                    {/* POS Header */}
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2 shrink-0 mt-1">
-                      <div className="flex items-center gap-2">
-                        <Store className="w-4 h-4 text-[#008078]" />
-                        <span className="text-[10px] text-white font-bold tracking-wider uppercase">Live POS Terminal</span>
-                      </div>
-                      <span className="text-[8px] bg-pink-500/10 text-[#008078] px-2 py-0.5 rounded-full font-bold uppercase">Online</span>
-                    </div>
-
-                    {/* Middle: Comparison metric */}
-                    <div className="grid grid-cols-2 gap-3 py-2 flex-1 items-center">
-                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-center">
-                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Today&apos;s Sales</div>
-                        <div className="text-sm font-black text-[#008078] mt-0.5">₹18,450.00</div>
-                        <div className="text-[7px] text-slate-400 mt-0.5">42 orders</div>
-                      </div>
-                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-center relative opacity-80">
-                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">Avg. Order</div>
-                        <div className="text-sm font-black text-slate-300 mt-0.5">₹439.29</div>
-                        <div className="text-[7px] text-[#008078] mt-0.5 font-bold">Today</div>
-                      </div>
-                    </div>
-
-                    {/* POS Footer bar */}
-                    <div className="bg-[#008078] text-white text-[9px] font-black text-center py-2 rounded-lg uppercase tracking-widest shrink-0">
-                      Saving ₹5,535.00 Today
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Partner Benefits 2x2 Grid - Styled with Elegant Champagne Glassmorphism */}
-              <div className="grid md:grid-cols-2 gap-8 lg:gap-12 shrink-0">
-
-                {/* Benefit 1 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Percent className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Choose Your Billing Plan</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Pay a per-order commission, or switch to a fixed monthly subscription instead. Every charge is visible in your dashboard, so you can scale your business, hire culinary talent, and plan your margins.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Empowering Culinary Businesses</span>
-                  </div>
-                </div>
-
-                {/* Benefit 2 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Clock className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Instant Daily Settlements</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Say goodbye to frustrating weekly payout cycles that lock up your operating capital. Minto Foods processes bank settlements daily, keeping your cash flow running smoothly.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <ShieldCheck className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Fast Cash Flow Cycle</span>
-                  </div>
-                </div>
-
-                {/* Benefit 3 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Sparkles className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Live Menu & Pricing Control</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Easily adjust your digital menu in real-time. Switch items on or off, edit prices directly to protect your margins, customize add-ons, and roll out special promotional offers instantly.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <Map className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Zero Lag Adjustments</span>
-                  </div>
-                </div>
-
-                {/* Benefit 4 */}
-                <div className="group bg-white/80 border border-slate-200/40 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-[#008078]/5 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between shadow-sm">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-pink-50 border border-pink-100 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <TrendingUp className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Deep Customer Analytics</h3>
-                    <p className="text-slate-600 font-light leading-relaxed">
-                      Know exactly what your customers love. Access user ratings, review order history patterns, track peak delivery hours, and use rich data points to optimize your offerings.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-200/50 flex items-center gap-3">
-                    <Users className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Data-Driven Growth</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Bottom Call to Action and Lead Form */}
-              <div id="partner-lead-form" className="py-12 md:py-20 border-t border-slate-200/40 shrink-0 max-w-3xl mx-auto w-full">
-                <div className="text-center mb-10">
-                  <h3 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">Become a Restaurant Partner</h3>
-                  <p className="text-slate-600 max-w-lg font-light text-sm md:text-base mx-auto mt-3">
-                    Fill out the form below to register your interest, and our onboarding team will contact you to set up your restaurant on Minto Foods.
-                  </p>
-                </div>
-
-                {leadSuccess ? (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-[#008078]/5 border border-[#008078]/20 rounded-3xl p-8 text-center space-y-4"
-                  >
-                    <div className="w-16 h-16 bg-[#008078]/10 rounded-full flex items-center justify-center mx-auto text-[#008078]">
-                      <Sparkles className="w-8 h-8" />
-                    </div>
-                    <h4 className="text-xl font-bold text-slate-900">Application Submitted Successfully!</h4>
-                    <p className="text-sm text-slate-600 max-w-md mx-auto">
-                      Thank you for choosing Minto Foods. Our onboarding representative will get in touch with you shortly to finalize your registration.
-                    </p>
-                    <button
-                      onClick={() => setLeadSuccess(false)}
-                      className="px-6 py-2.5 text-xs font-bold text-[#008078] bg-[#008078]/10 hover:bg-[#008078]/20 transition-all rounded-full"
-                    >
-                      Submit Another Inquiry
-                    </button>
-                  </motion.div>
-                ) : (
-                  <form onSubmit={handleLeadSubmit} className="space-y-5 bg-white border border-slate-200/60 p-6 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-900/5">
-                    <div className="grid md:grid-cols-2 gap-5">
-                      <div className="space-y-2">
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Owner Name</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="Ex: John Doe"
-                          value={leadForm.ownerName}
-                          onChange={(e) => setLeadForm({ ...leadForm, ownerName: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Restaurant Name</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="Ex: The Culinary Hub"
-                          value={leadForm.restaurantName}
-                          onChange={(e) => setLeadForm({ ...leadForm, restaurantName: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-5">
-                      <div className="space-y-2">
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Mobile Number</label>
-                        <input
-                          type="tel"
-                          required
-                          placeholder="Ex: +91 98765 43210"
-                          value={leadForm.mobileNumber}
-                          onChange={(e) => setLeadForm({ ...leadForm, mobileNumber: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Mail ID</label>
-                        <input
-                          type="email"
-                          required
-                          placeholder="Ex: partner@domain.com"
-                          value={leadForm.emailId}
-                          onChange={(e) => setLeadForm({ ...leadForm, emailId: e.target.value })}
-                          className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">Location / Address</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ex: Vijay Nagar, Indore, Madhya Pradesh"
-                        value={leadForm.location}
-                        onChange={(e) => setLeadForm({ ...leadForm, location: e.target.value })}
-                        className="w-full px-5 py-3.5 text-sm rounded-2xl border border-slate-200 bg-slate-50/50 focus:outline-none focus:ring-2 focus:ring-[#008078]/20 focus:border-[#008078] transition-all text-slate-800"
-                      />
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-4 pt-4">
-                      <button
-                        type="submit"
-                        disabled={submittingLead}
-                        className="flex-1 bg-slate-900 text-white hover:bg-[#008078] px-8 py-4 rounded-2xl font-bold text-sm transition-all duration-300 shadow-md cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {submittingLead ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-white" />
-                            Registering Your Lead...
-                          </>
-                        ) : (
-                          "Submit Registration Request"
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsRestaurantOpen(false)}
-                        className="sm:flex-initial bg-slate-100 hover:bg-slate-200 text-slate-700 px-8 py-4 rounded-2xl font-bold text-sm transition-all duration-300 text-center cursor-pointer"
-                      >
-                        Return to Homepage
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-
-            </main>
-
-            {/* Simple Footer */}
-            <footer className="bg-slate-50 border-t border-slate-200/50 py-8 text-center text-xs text-slate-400 font-medium shrink-0">
-              <p>© 2026 {APP_CONFIG?.NAME || "Minto Foods"} Technologies Inc. All rights reserved.</p>
-            </footer>
-          </motion.div>
-        )}
-
-        {isDeliveryOpen && (
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", damping: 28, stiffness: 220 }}
-            data-lenis-prevent
-            className="fixed inset-0 z-[100] w-screen h-screen bg-[#07080B] text-slate-100 overflow-y-auto flex flex-col selection:bg-[#008078] selection:text-white"
-          >
-            {/* Ambient Cyberpunk Background Lights - Electric Purple/Indigo and Hot Pink */}
-            <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-[#008078]/5 rounded-full blur-[140px] pointer-events-none z-0" />
-            <div className="absolute bottom-0 left-0 w-[40vw] h-[40vw] bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none z-0" />
-
-            {/* Sticky Cyber Header */}
-            <header className="sticky top-0 w-full z-50 px-6 py-6 md:px-12 lg:px-20 flex items-center justify-between bg-[#07080B]/90 backdrop-blur-md border-b border-slate-800/80 shrink-0">
-              <div className="text-2xl font-black text-white tracking-tighter">
-                {APP_CONFIG?.NAME || "Minto Foods"}
-                <span className="text-[#008078]">.</span>
-              </div>
-              <button
-                onClick={() => setIsDeliveryOpen(false)}
-                className="group flex items-center gap-2 bg-slate-900 border border-slate-800 text-white px-5 py-2.5 rounded-full text-xs font-bold hover:bg-[#008078] hover:border-[#008078] transition-all duration-300 shadow-md hover:shadow-lg cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-                Back to Home
-              </button>
-            </header>
-
-            {/* Page Content Container */}
-            <main className="flex-1 relative z-10 w-full max-w-[1400px] mx-auto px-6 py-12 md:py-20 lg:px-20 flex flex-col gap-12 md:gap-20">
-
-              {/* Cinematic Page Title - Cyber Centered HUD Accent */}
-              <div className="max-w-4xl space-y-6 text-center mx-auto mb-4">
-                <span className="inline-flex items-center gap-2 text-[#008078] font-black tracking-widest uppercase text-xs bg-[#008078]/15 border border-[#008078]/30 px-4 py-2 rounded-full animate-pulse">
-                  <Bike className="w-4 h-4 text-[#008078]" /> Active Captain HUD Dashboard
-                </span>
-                <h1 className="text-5xl md:text-7xl font-black leading-[1.05] tracking-tight text-white">
-                  Drive on Your Terms. <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-br from-[#008078] to-indigo-400 font-extrabold italic font-light">Earn More & Cash Out Faster.</span>
-                </h1>
-                <p className="text-xl text-slate-400 font-light leading-relaxed max-w-3xl mx-auto">
-                  Join the elite squad of Minto Foods Captains. Secure the most competitive distance-based payout structure, absolute route clarity, weekly settlements, and <strong>keep 100% of your customer tips</strong>.
-                </p>
-              </div>
-
-              {/* Download CTA Block - Customized as a Cyberpunk Navigator Map UI */}
-              <div className="bg-slate-950 text-white rounded-[2.5rem] p-8 md:p-14 relative overflow-hidden shadow-2xl shrink-0 flex flex-col lg:flex-row items-center gap-12 border border-slate-900">
-                {/* Grid Overlay */}
-                <div className="absolute inset-0 bg-[radial-gradient(#ffffff04_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none z-0" />
-                <div className="absolute top-[-50%] right-[-10%] w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-[90px] pointer-events-none" />
-
-                <div className="flex-1 space-y-6 relative z-10">
-                  <div className="inline-block text-[10px] uppercase tracking-widest font-black text-[#008078] bg-[#008078]/10 border border-[#008078]/20 px-3 py-1.5 rounded-full">
-                    Squad Expanding: Indore · Vapi · Bhiwandi
-                  </div>
-                  <h2 className="text-3xl md:text-4xl font-black leading-tight tracking-tight">Join the active delivery crew</h2>
-                  <p className="text-slate-400 font-light max-w-xl leading-relaxed text-sm md:text-base">
-                    Quick onboarding. Setup your profile, upload identification documents, and start accepting dispatch requests with zero hidden deductions.
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row gap-4 pt-2">
-                    <StoreLink href={STORE_LINKS.delivery.ios} className="flex items-center justify-center gap-3 bg-white text-slate-950 hover:bg-[#008078] hover:text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
-                      <Apple className="w-5 h-5" /> iOS App Store
-                    </StoreLink>
-                    <StoreLink href={STORE_LINKS.delivery.android} className="flex items-center justify-center gap-3 bg-slate-800 border border-slate-800 text-white hover:bg-[#008078] hover:border-[#008078] px-8 py-4 rounded-2xl font-bold transition-all duration-300 text-sm shadow-md text-center">
-                      <Play className="w-5 h-5" /> Android Play Store
-                    </StoreLink>
-                  </div>
-                </div>
-
-                {/* Conceptual Live Route HUD Mockup */}
-                <div className="w-full lg:w-[350px] shrink-0 flex justify-center relative z-10">
-                  <div className="w-[260px] h-[340px] bg-slate-900 border-4 border-slate-800 rounded-[2.5rem] shadow-2xl p-4 flex flex-col justify-between relative overflow-hidden">
-                    {/* Top Speaker bezel */}
-                    <div className="absolute top-1 left-1/2 -translate-x-1/2 w-20 h-3 bg-slate-800 rounded-full" />
-
-                    {/* Active State Header */}
-                    <div className="flex items-center justify-between mt-2 shrink-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Captain On-Duty</span>
-                      </div>
-                      <span className="text-[8px] text-[#008078] font-black tracking-widest bg-[#008078]/15 px-2 py-0.5 rounded border border-[#008078]/30">GPS Active</span>
-                    </div>
-
-                    {/* Compass/GPS HUD Area */}
-                    <div className="bg-slate-950/80 border border-slate-850 rounded-xl p-3 my-2 flex-1 flex flex-col justify-between relative overflow-hidden">
-                      <div className="flex items-center justify-between text-[8px] text-slate-400 uppercase tracking-widest">
-                        <span>Target Node</span>
-                        <span className="text-white font-bold">1.2 km away</span>
-                      </div>
-
-                      {/* Fake GPS Path Indicator */}
-                      <div className="flex-1 flex items-center justify-center relative my-2">
-                        <svg className="w-full h-16" viewBox="0 0 100 40">
-                          {/* Dotted target path */}
-                          <motion.path
-                            d="M10,20 C40,5 60,35 90,20"
-                            fill="none"
-                            stroke="#008078"
-                            strokeWidth="2"
-                            strokeDasharray="4 4"
-                            animate={{ strokeDashoffset: [0, -20] }}
-                            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                          />
-                          {/* Point A */}
-                          <circle cx="10" cy="20" r="3.5" fill="#4F46E5" />
-                          {/* Point B */}
-                          <circle cx="90" cy="20" r="3.5" fill="#008078" className="animate-pulse" />
-                        </svg>
-                      </div>
-
-                      <div className="flex items-center justify-between text-[9px]">
-                        <span className="text-slate-500 font-medium">Earned This Trip</span>
-                        <span className="text-white font-black">₹185.00 + ₹40 Tip</span>
-                      </div>
-                    </div>
-
-                    {/* Accept Request button */}
-                    <div className="bg-gradient-to-r from-[#008078] to-indigo-600 text-white text-[10px] font-black text-center py-2.5 rounded-xl uppercase tracking-wider shrink-0 cursor-pointer shadow-lg shadow-pink-500/20">
-                      Deliver Order
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Captain Benefits 2x2 Grid - Cyberpunk Dark Glass cards */}
-              <div className="grid md:grid-cols-2 gap-8 lg:gap-12 shrink-0">
-
-                {/* Benefit 1 */}
-                <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Heart className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Keep 100% Customer Tips</h3>
-                    <p className="text-slate-400 font-light leading-relaxed">
-                      Every single rupee that a grateful customer tips you belongs entirely to you. Minto Foods takes zero cuts from your extra rewards. Honest payouts, guaranteed.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <Zap className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Respecting Captain Labor</span>
-                  </div>
-                </div>
-
-                {/* Benefit 2 */}
-                <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Clock className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Absolute Schedule Freedom</h3>
-                    <p className="text-slate-400 font-light leading-relaxed">
-                      Work when you want, where you want. No rigid shift systems, no penalty zones. Set your status to active whenever you are ready to earn, and switch off seamlessly.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <ShieldCheck className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Flexible Lifestyle First</span>
-                  </div>
-                </div>
-
-                {/* Benefit 3 */}
-                <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <TrendingUp className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Fast Weekly Wallet Payouts</h3>
-                    <p className="text-slate-400 font-light leading-relaxed">
-                      Never wait weeks to enjoy your hard-earned rewards. Minto Foods settles your total earnings straight into your active digital wallet every single week, cleanly and securely.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <Map className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Consistent Financial Flow</span>
-                  </div>
-                </div>
-
-                {/* Benefit 4 */}
-                <div className="group bg-slate-900/40 border border-slate-800/80 rounded-[2rem] p-8 lg:p-10 hover:shadow-2xl hover:shadow-pink-500/5 hover:border-pink-500/30 hover:-translate-y-1 transition-all duration-500 flex flex-col justify-between">
-                  <div>
-                    <div className="w-14 h-14 rounded-2xl bg-[#008078]/10 border border-[#008078]/20 flex items-center justify-center text-[#008078] mb-6 group-hover:scale-110 transition-transform">
-                      <Users className="w-7 h-7" />
-                    </div>
-                    <h3 className="text-2xl font-black text-white mb-3 tracking-tight">Dedicated Captain Care</h3>
-                    <p className="text-slate-400 font-light leading-relaxed">
-                      Access 24/7 priority support over chat and phone. Our physical hubs across active regions ensure you always have a dedicated, physical place to resolve any concerns.
-                    </p>
-                  </div>
-                  <div className="mt-8 pt-6 border-t border-slate-800/60 flex items-center gap-3">
-                    <Users className="w-4 h-4 text-[#008078]" />
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Supported Every Mile</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Bottom Call to Action */}
-              <div className="text-center py-12 md:py-20 border-t border-slate-800/80 flex flex-col items-center gap-6 shrink-0">
-                <h3 className="text-3xl md:text-4xl font-black text-white">Start Earning with Minto Foods</h3>
-                <p className="text-slate-400 max-w-lg font-light text-sm md:text-base">
-                  Get on the road and empower the local neighborhood restaurant ecosystem while securing premium distance-based earnings.
-                </p>
-                <div className="flex gap-4 mt-2">
-                  <button
-                    onClick={() => setIsDeliveryOpen(false)}
-                    className="bg-slate-900 hover:bg-[#008078] text-white border border-slate-800 hover:border-[#008078] px-8 py-4 rounded-full font-bold text-sm transition-all duration-300 shadow-md cursor-pointer"
-                  >
-                    Return to Homepage
-                  </button>
-                </div>
-              </div>
-
-            </main>
-
-            {/* Simple Footer */}
-            <footer className="bg-slate-950 border-t border-slate-900 py-8 text-center text-xs text-slate-505 font-medium shrink-0">
-              <p>© 2026 {APP_CONFIG?.NAME || "Minto Foods"} Technologies Inc. All rights reserved.</p>
-            </footer>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
