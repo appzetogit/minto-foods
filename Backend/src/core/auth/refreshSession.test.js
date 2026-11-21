@@ -50,17 +50,30 @@ test('every refresh hands out a new refresh token, and the old one still works',
     assert.ok((await refreshAccessToken(first)).accessToken, 'an app that kept the old one is not logged out');
 });
 
-test('a refused session takes the rider offline so offers stop', async () => {
+test('a phone replaced by a newer login is refused but leaves the rider on duty there', async () => {
+    // The rider signed in on another phone and went online on it; the old
+    // phone's refresh must not switch the new one off.
     await prisma.foodDeliveryPartner.update({ where: { id: rider.id }, data: { availabilityStatus: 'online' } });
     const evicted = await issue({ userId: rider.id, role: 'DELIVERY_PARTNER', tokenVersion: 2 });
     await assert.rejects(() => refreshAccessToken(evicted), /another device/);
     const after = await prisma.foodDeliveryPartner.findUnique({ where: { id: rider.id } });
-    assert.equal(after.availabilityStatus, 'offline');
+    assert.equal(after.availabilityStatus, 'online');
+});
 
+test('an expired session takes the rider offline so offers stop', async () => {
     await prisma.foodDeliveryPartner.update({ where: { id: rider.id }, data: { availabilityStatus: 'online' } });
     const expired = await issue({ userId: rider.id, role: 'DELIVERY_PARTNER', tokenVersion: 3 }, '-1s');
     await assert.rejects(() => refreshAccessToken(expired), /Invalid refresh token/);
     assert.equal((await prisma.foodDeliveryPartner.findUnique({ where: { id: rider.id } })).availabilityStatus, 'offline');
+});
+
+test('the socket handshake refuses a token from a replaced phone', async () => {
+    const { sessionRefusal } = await import('./auth.middleware.js');
+    assert.match(
+        await sessionRefusal({ userId: rider.id, role: 'DELIVERY_PARTNER', tokenVersion: 2 }),
+        /another device/,
+    );
+    assert.equal(await sessionRefusal({ userId: rider.id, role: 'DELIVERY_PARTNER', tokenVersion: 3 }), null);
 });
 
 test('a token we never issued changes nothing', async () => {

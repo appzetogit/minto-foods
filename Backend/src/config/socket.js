@@ -154,8 +154,24 @@ export const initSocket = async (server) => {
             });
             const decoded = verifyAccessToken(token);
             socket.user = { userId: decoded.userId, role: decoded.role };
-            logger.info(`Socket auth success: ${decoded.role}:${decoded.userId} for socket ${socket.id}`);
-            return next();
+            // A signature alone is not enough: a phone replaced by a newer login
+            // still holds a well-signed token, and would keep receiving the
+            // rider's order offers on this socket.
+            import('../core/auth/auth.middleware.js')
+                .then(({ sessionRefusal }) => sessionRefusal(decoded))
+                .then((reason) => {
+                    if (reason) {
+                        logger.warn(`Socket refused for ${decoded.role}:${decoded.userId}: ${reason}`);
+                        return next(new Error('AUTH_INVALID'));
+                    }
+                    logger.info(`Socket auth success: ${decoded.role}:${decoded.userId} for socket ${socket.id}`);
+                    return next();
+                })
+                .catch((err) => {
+                    logger.error(`Socket session check failed for ${socket.id}: ${err?.message || err}`);
+                    next(new Error('AUTH_INVALID'));
+                });
+            return undefined;
         } catch (err) {
             logger.error(`Socket auth failed for socket ${socket.id}: ${err.message}`);
             logger.error(`[DeliverySocket] Handshake auth invalid`, {
