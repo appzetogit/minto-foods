@@ -66,6 +66,8 @@ const buildMenuFromFoods = async (foods = []) => {
             videoUrl: food.videoUrl || '',
             foodType: food.foodType || 'Non-Veg',
             isAvailable: food.isAvailable !== false,
+            // Out of stock until then, back by itself ("back at 8:30 PM").
+            stockResumeAt: food.stockResumeAt || null,
             approvalStatus: food.approvalStatus || 'approved',
             rejectionReason: food.rejectionReason || '',
             requestedAt: food.requestedAt,

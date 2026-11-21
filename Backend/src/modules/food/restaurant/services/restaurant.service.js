@@ -450,6 +450,9 @@ const toRestaurantProfile = (doc) => {
         },
         isAcceptingOrders: doc.isAcceptingOrders !== false,
         outsideHoursOverride: doc.outsideHoursOverride === true,
+        offlineReason: doc.offlineReason || '',
+        offlineFrom: doc.offlineFrom || null,
+        offlineUntil: doc.offlineUntil || null,
         subscriptionPlan: doc.subscriptionPlan || '',
         subscriptionAmount: Number.isFinite(Number(doc.subscriptionAmount)) ? Number(doc.subscriptionAmount) : 0,
         subscriptionPaidAmount: Number.isFinite(Number(doc.subscriptionPaidAmount)) ? Number(doc.subscriptionPaidAmount) : 0,
@@ -507,6 +510,7 @@ const PROFILE_SELECT = {
     formattedAddress: true, fssaiExpiry: true, fssaiImage: true, fssaiNumber: true,
     gstAddress: true, gstImage: true, gstLegalName: true, gstNumber: true,
     gstRegistered: true, id: true, ifscCode: true, isAcceptingOrders: true,
+    offlineReason: true, offlineFrom: true, offlineUntil: true,
     landmark: true, latitude: true, longitude: true, menuImages: true,
     nameOnPan: true, onboardingFeePaid: true, onboardingFeePaidAt: true,
     onboardingFeePaymentId: true, onboardingFeePaymentMethod: true,
@@ -1098,8 +1102,28 @@ const enrichRestaurantProfileWithAvailability = async (profile, doc) => {
     };
 };
 
-export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingOrders) => {
+/**
+ * Online/offline from the restaurant app.
+ *
+ * Offline can carry a reason and a time: `offlineUntil` alone means "offline
+ * now, back by itself then"; with `offlineFrom` in the future it is a scheduled
+ * break that starts later (nothing changes now). Going online clears all of it.
+ */
+export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingOrders, opts = {}) => {
     if (!isId(restaurantId)) throw new ValidationError('Invalid restaurant id');
+    const when = (v) => {
+        if (v === undefined || v === null || v === '') return null;
+        const d = new Date(v);
+        if (Number.isNaN(d.getTime())) throw new ValidationError('Invalid offline time');
+        return d;
+    };
+    const until = when(opts.offlineUntil);
+    const from = when(opts.offlineFrom);
+    const now = Date.now();
+    if (until && until.getTime() <= now) throw new ValidationError('Pick a time in the future to come back online');
+    if (from && until && from >= until) throw new ValidationError('The break must end after it starts');
+    const scheduled = Boolean(from && from.getTime() > now);
+    const reason = String(opts.offlineReason || '').trim().slice(0, 80);
 
     // An admin took it offline (say its app was not working): only an admin
     // puts it back.
@@ -1115,9 +1139,15 @@ export const updateRestaurantAcceptingOrders = async (restaurantId, isAcceptingO
 
     // Offline = a manual force-offline. Online = clear the override and go back
     // to following the outlet timings.
+    const data = isAcceptingOrders
+        ? { isAcceptingOrders: true, outsideHoursOverride: false, offlineReason: '', offlineFrom: null, offlineUntil: null }
+        : scheduled
+            // A break later today: stay online until it starts.
+            ? { offlineReason: reason, offlineFrom: from, offlineUntil: until }
+            : { isAcceptingOrders: false, outsideHoursOverride: false, offlineReason: reason, offlineFrom: null, offlineUntil: until };
     const { count } = await prisma.foodRestaurant.updateMany({
         where: { id: String(restaurantId) },
-        data: { isAcceptingOrders: Boolean(isAcceptingOrders), outsideHoursOverride: false },
+        data,
     });
     if (!count) return null;
 

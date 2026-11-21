@@ -96,7 +96,11 @@ export const updateRestaurantProfileController = async (req, res, next) => {
 export const updateRestaurantAcceptingOrdersController = async (req, res, next) => {
     try {
         const restaurantId = req.user?.userId;
-        const restaurant = await updateRestaurantAcceptingOrders(restaurantId, req.body?.isAcceptingOrders);
+        const restaurant = await updateRestaurantAcceptingOrders(restaurantId, req.body?.isAcceptingOrders, {
+            offlineReason: req.body?.offlineReason,
+            offlineFrom: req.body?.offlineFrom,
+            offlineUntil: req.body?.offlineUntil,
+        });
         return sendResponse(res, 200, 'Restaurant availability updated successfully', { restaurant });
     } catch (error) {
         next(error);
