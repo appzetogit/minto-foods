@@ -38,6 +38,7 @@ const createFoodForm = () => ({
   image: "",
   foodType: "",
   isAvailable: true,
+  couponEligible: true,
   preparationTime: "",
   // The platform's cut on this dish. Empty means it simply follows the
   // restaurant's rate, which is what most dishes do.
@@ -454,6 +455,7 @@ export default function FoodsList() {
       image: String(food.image || ""),
       foodType: String(food.foodType || "Non-Veg"),
       isAvailable: food.isAvailable !== false,
+      couponEligible: food.couponEligible !== false,
       preparationTime: String(food.preparationTime || ""),
       commissionType: String(food.commission?.commissionType || "percentage"),
       // Blank rather than "0" when the dish has no rate of its own: 0 is a
@@ -682,6 +684,7 @@ export default function FoodsList() {
         videoUrl,
         foodType: foodForm.foodType === "Veg" ? "Veg" : "Non-Veg",
         isAvailable: foodForm.isAvailable !== false,
+        couponEligible: foodForm.couponEligible !== false,
         preparationTime: String(foodForm.preparationTime || "").trim(),
         // null clears the dish rate back to the restaurant's; omitting the key
         // entirely would mean "leave alone", which is not what an emptied field
@@ -1471,6 +1474,15 @@ export default function FoodsList() {
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={foodForm.couponEligible !== false}
+                  onChange={(e) => setFoodForm((prev) => ({ ...prev, couponEligible: e.target.checked }))}
+                />
+                Allow coupons on this dish
+                <span className="text-xs text-slate-400">(off: shown as &quot;Not eligible for coupons&quot;)</span>
+              </label>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Commission

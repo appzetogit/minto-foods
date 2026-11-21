@@ -141,6 +141,12 @@ export const adminSidebarMenu = [
       },
       {
         type: "link",
+        label: "Flash Deals & Buy 1 Get 1",
+        path: "/admin/food/item-deals",
+        icon: "Zap",
+      },
+      {
+        type: "link",
         label: "Offer Banners",
         path: "/admin/food/offer-banners",
         icon: "Megaphone",

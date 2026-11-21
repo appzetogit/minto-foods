@@ -48,6 +48,7 @@ const AddonsList = lazy(() => import("@food/pages/admin/addons/AddonsList"));
 const BasicCampaign = lazy(() => import("@food/pages/admin/campaigns/BasicCampaign"));
 const FoodCampaign = lazy(() => import("@food/pages/admin/campaigns/FoodCampaign"));
 const Coupons = lazy(() => import("@food/pages/admin/Coupons"));
+const ItemDeals = lazy(() => import("@food/pages/admin/ItemDeals"));
 const Cuisines = lazy(() => import("@food/pages/admin/Cuisines"));
 const Cashback = lazy(() => import("@food/pages/admin/Cashback"));
 const Banners = lazy(() => import("@food/pages/admin/Banners"));
@@ -304,6 +305,7 @@ export default function AdminRouter() {
             <Route path="campaigns/basic" element={<BasicCampaign />} />
             <Route path="campaigns/food" element={<FoodCampaign />} />
             <Route path="coupons" element={<Coupons />} />
+            <Route path="item-deals" element={<ItemDeals />} />
             <Route path="cuisines" element={<Cuisines />} />
             <Route path="cashback" element={<Cashback />} />
             <Route path="banners" element={<Banners />} />
