@@ -636,6 +636,15 @@ const takeRiderOfflineOnLogout = async (refreshToken) => {
     const jwt = await import("jsonwebtoken");
     const claims = jwt.default.decode(refreshToken);
     if (claims?.role !== "DELIVERY_PARTNER" || !isId(String(claims.userId || ""))) return;
+    // Logging out a phone that a newer login already replaced must not switch
+    // off the rider's current phone.
+    if (claims.tokenVersion !== undefined) {
+      const rider = await prisma.foodDeliveryPartner.findUnique({
+        where: { id: String(claims.userId) },
+        select: { tokenVersion: true },
+      });
+      if (Number(claims.tokenVersion) !== (Number(rider?.tokenVersion) || 0)) return;
+    }
     const { updateDeliveryAvailability } = await import(
       "../../modules/food/delivery/services/delivery.service.js"
     );
