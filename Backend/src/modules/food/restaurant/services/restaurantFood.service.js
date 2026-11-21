@@ -362,9 +362,19 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
         'name', 'description', 'image', 'images', 'price',
         'foodType', 'categoryId', 'categoryName', 'preparationTime',
     ];
+    // The app sends the whole dish on every save, so "sent" is not "changed":
+    // toggling a switch (recommended, coupons, availability) used to send the
+    // dish back for approval and pull it off the customers' menu. Only a real
+    // change to what customers see does.
+    const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    const norm = (key, v) => (key === 'price' ? Number(v) || 0 : v);
+    const variantsKey = (list) =>
+        (list || []).map((v) => [String(v.name || ''), Number(v.price) || 0, Number(v.otherPrice) || 0]);
     const shouldResubmitForApproval =
-        Object.keys(update).some((key) => CRITICAL_APPROVAL_FIELDS.includes(key)) ||
-        nextVariants !== undefined;
+        CRITICAL_APPROVAL_FIELDS.some(
+            (key) => key in update && !same(norm(key, update[key]), norm(key, existing[key])),
+        ) ||
+        (nextVariants !== undefined && !same(variantsKey(nextVariants), variantsKey(existing.variants)));
 
     if (shouldResubmitForApproval) {
         update.approvalStatus = 'pending';
