@@ -340,11 +340,17 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
             : normalizeFoodType(existing.foodType === 'NonVeg' ? 'Non-Veg' : existing.foodType);
     if (body.foodType !== undefined) update.foodType = toFoodTypeColumn(targetFoodType);
 
-    if (
-        body.categoryId !== undefined ||
-        body.categoryName !== undefined ||
-        body.foodType !== undefined
-    ) {
+    // Only when the category or food type actually changes. The app sends the
+    // whole dish on every save; re-checking an untouched category refused the
+    // save outright ("Category not found") for a dish filed under a category
+    // this restaurant can no longer pick -- nothing about the dish could be
+    // edited.
+    const categoryChanged =
+        (body.categoryId !== undefined && toStr(body.categoryId) !== toStr(existing.categoryId)) ||
+        (body.categoryId === undefined && body.categoryName !== undefined &&
+            toStr(body.categoryName).toLowerCase() !== toStr(existing.categoryName).toLowerCase()) ||
+        (body.foodType !== undefined && update.foodType !== undefined && update.foodType !== existing.foodType);
+    if (categoryChanged) {
         const resolved = await resolveCategoryForRestaurant(context, {
             categoryId: body.categoryId !== undefined ? body.categoryId : existing.categoryId,
             categoryName:
