@@ -293,7 +293,7 @@ export default function LandingPage() {
         setZones(list);
         setCity((current) => {
           if (current && Number.isFinite(current.lat)) return current;
-          const preferred = list.find((z) => /indore/i.test(z.name)) || list[0];
+          const preferred = list.find((z) => /bhiwandi/i.test(z.name)) || list[0];
           return preferred || null;
         });
       } catch (err) {
@@ -567,7 +567,7 @@ export default function LandingPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Try “poha”, “pizza” or a restaurant"
+                placeholder="Try “biryani”, “burger” or a restaurant"
                 className="flex-1 min-w-0 bg-transparent py-2.5 text-base outline-none placeholder:text-slate-400"
               />
               <button type="submit" className="rounded-full px-5 sm:px-7 py-3 text-sm sm:text-base font-semibold text-white shrink-0" style={{ background: GRADIENT }}>
