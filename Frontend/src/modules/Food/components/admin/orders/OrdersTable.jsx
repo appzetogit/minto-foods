@@ -359,12 +359,22 @@ export default function OrdersTable({
                     <div className="flex flex-col gap-2 min-w-[200px] max-w-md">
                       {order.items && Array.isArray(order.items) && order.items.length > 0 ? (
                         order.items.map((item, idx) => (
-                          <div key={idx || item.itemId || idx} className="flex items-center gap-2 text-sm">
+                          <div key={idx || item.itemId || idx} className="flex items-start gap-2 text-sm">
                             <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded min-w-[2.5rem] text-center">
                               {item.quantity || 1}x
                             </span>
                             <span className="text-slate-800 font-medium flex-1">
                               {item.name || item.itemName || item.title || 'Unknown Item'}
+                              {item.variantName && (
+                                <span className="block text-xs text-slate-500 font-normal">{item.variantName}</span>
+                              )}
+                              {/* The add-ons the customer paid for: the kitchen and the
+                                  team both need to see them, not only the details popup. */}
+                              {Array.isArray(item.addons) && item.addons.length > 0 && (
+                                <span className="block text-xs text-amber-700 font-semibold">
+                                  + {item.addons.map((a) => a?.name || 'Add-on').join(', ')}
+                                </span>
+                              )}
                             </span>
                             {item.price && (
                               <span className="text-xs text-slate-500">
