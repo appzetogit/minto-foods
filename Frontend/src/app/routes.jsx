@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-
 import { Suspense, lazy, useEffect, useState } from 'react'
 import { AppShellSkeleton } from '@food/components/ui/loading-skeletons'
 import LandingPage from './LandingPage'
+import BrandSplash from './BrandSplash'
 import { isFeatureEnabled, loadCorePublicAppConfig } from '@food/services/publicAppConfig'
 
 const NATIVE_LAST_ROUTE_KEY = 'native_last_route'
@@ -57,7 +58,7 @@ const RootEntryRoute = () => {
     loadFeatureSettings()
   }, [])
 
-  if (loading) return <PageLoader />
+  if (loading) return <BrandSplash />
   if (!showLandingAtRoot) return <Navigate to="/food/user" replace />
   return <LandingPage />
 }

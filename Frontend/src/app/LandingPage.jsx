@@ -152,21 +152,80 @@ function ScrollButtons({ targetRef }) {
   );
 }
 
-function Img({ src, alt, className, fallback = FALLBACK_FOOD }) {
+// Fades in once loaded; the wrapper's mint shimmer (mf-shimmer) shows until then.
+function Img({ src, alt, className = "", fallback = FALLBACK_FOOD, eager = false }) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [src]);
+  const [loaded, setLoaded] = useState(false);
+  const ref = useRef(null);
+  const finalSrc = !src || failed ? fallback : src;
+  useEffect(() => {
+    setFailed(false);
+    setLoaded(Boolean(ref.current?.complete && ref.current?.naturalWidth));
+  }, [src]);
   return (
     <img
-      src={!src || failed ? fallback : src}
+      ref={ref}
+      src={finalSrc}
       alt={alt}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className={className}
+      loading={eager ? "eager" : "lazy"}
+      onLoad={() => setLoaded(true)}
+      onError={() => (failed ? setLoaded(true) : setFailed(true))}
+      className={`${className} transition-opacity duration-500 ${loaded ? "opacity-100" : "opacity-0"}`}
     />
   );
 }
 
-const Skeleton = ({ className }) => <div className={`animate-pulse rounded-2xl bg-slate-100 ${className}`} />;
+// Skeletons in the brand's mint shimmer, shaped like the cards they stand in for.
+const Skeleton = ({ className = "" }) => <div className={`mf-shimmer rounded-2xl ${className}`} />;
+
+const OfferSkeleton = () => (
+  <div className="shrink-0 w-[280px] sm:w-[320px] h-[150px] rounded-3xl p-5 flex flex-col gap-3 border border-[#12A594]/10 bg-[#F4FBF9]">
+    <Skeleton className="h-3 w-24 !rounded-full" />
+    <Skeleton className="h-6 w-48 !rounded-full" />
+    <div className="mt-auto flex justify-between">
+      <Skeleton className="h-8 w-28 !rounded-full" />
+      <Skeleton className="h-8 w-16 !rounded-full" />
+    </div>
+  </div>
+);
+
+const CategorySkeleton = () => (
+  <div className="shrink-0 w-24 sm:w-28 flex flex-col items-center gap-2">
+    <Skeleton className="w-24 h-24 sm:w-28 sm:h-28 !rounded-full" />
+    <Skeleton className="h-3 w-16 !rounded-full" />
+  </div>
+);
+
+const DishSkeleton = () => (
+  <div className="shrink-0 w-[200px] sm:w-[230px] rounded-3xl bg-white border border-slate-100 overflow-hidden">
+    <Skeleton className="aspect-[4/3] !rounded-none" />
+    <div className="p-4 space-y-2.5">
+      <Skeleton className="h-4 w-3/4 !rounded-full" />
+      <Skeleton className="h-3 w-1/2 !rounded-full" />
+      <div className="pt-2 flex items-center justify-between">
+        <Skeleton className="h-5 w-12 !rounded-full" />
+        <Skeleton className="h-7 w-16 !rounded-xl" />
+      </div>
+    </div>
+  </div>
+);
+
+const RestaurantSkeleton = () => (
+  <div className="rounded-3xl bg-white border border-slate-100 overflow-hidden">
+    <Skeleton className="aspect-[16/10] !rounded-none" />
+    <div className="p-4 space-y-2.5">
+      <div className="flex justify-between gap-3">
+        <Skeleton className="h-5 w-2/3 !rounded-full" />
+        <Skeleton className="h-5 w-10 !rounded-lg" />
+      </div>
+      <Skeleton className="h-3 w-1/2 !rounded-full" />
+      <div className="pt-1 flex gap-3">
+        <Skeleton className="h-3 w-20 !rounded-full" />
+        <Skeleton className="h-3 w-14 !rounded-full" />
+      </div>
+    </div>
+  </div>
+);
 
 function RestaurantCard({ r }) {
   const open = isOpen(r);
@@ -179,7 +238,7 @@ function RestaurantCard({ r }) {
       href={`/food/user/restaurants/${restaurantSlug(r)}`}
       className="group block rounded-3xl bg-white border border-slate-100 overflow-hidden hover:shadow-xl hover:shadow-[#12A594]/10 hover:-translate-y-1 transition-all duration-300"
     >
-      <div className="relative aspect-[16/10] overflow-hidden bg-[#E7F7F3]">
+      <div className="relative aspect-[16/10] overflow-hidden mf-shimmer">
         <Img src={restaurantImage(r)} alt={r.restaurantName || r.name} className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${open ? "" : "grayscale"}`} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
@@ -605,7 +664,7 @@ export default function LandingPage() {
               ].map(([n, l]) => (
                 <div key={l} className="rounded-2xl bg-white/80 border border-[#12A594]/10 px-3 py-3">
                   <div className="text-2xl sm:text-3xl font-extrabold" style={{ color: C.deep }}>
-                    {loading ? <span className="inline-block w-8 h-7 rounded bg-slate-100 animate-pulse align-middle" /> : n}
+                    {loading ? <span className="mf-shimmer inline-block w-10 h-7 rounded-lg align-middle" /> : n}
                   </div>
                   <div className="text-[11px] sm:text-xs text-slate-500 leading-tight mt-0.5">{l}</div>
                 </div>
@@ -618,14 +677,17 @@ export default function LandingPage() {
             className="relative mx-auto w-full max-w-[420px] hidden sm:block"
           >
             <div className="absolute inset-6 rounded-full" style={{ background: GRADIENT, opacity: 0.9 }} />
-            <div className="relative rounded-full overflow-hidden border-[10px] border-white shadow-2xl shadow-[#0B6E63]/25 aspect-square">
-              <Img
-                src={heroDish?.image || FALLBACK_FOOD}
-                alt={heroDish?.name || "Food"}
-                className="w-full h-full object-cover"
-              />
+            <div className="relative rounded-full overflow-hidden border-[10px] border-white shadow-2xl shadow-[#0B6E63]/25 aspect-square mf-shimmer">
+              {!loading && (
+                <Img
+                  eager
+                  src={heroDish?.image || FALLBACK_FOOD}
+                  alt={heroDish?.name || "Food"}
+                  className="w-full h-full object-cover"
+                />
+              )}
             </div>
-            {heroDish && (
+            {!loading && heroDish && (
               <motion.a href={`/food/user/restaurants/${restaurantSlug(heroDish.r)}?dish=${heroDish.id}`}
                 animate={{ y: [0, -8, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
                 className="absolute -left-4 bottom-12 bg-white rounded-2xl shadow-xl p-3 pr-5 flex items-center gap-3 max-w-[240px]"
@@ -663,7 +725,7 @@ export default function LandingPage() {
             <SectionHead tag="Today's deals" title={`Offers in ${cityLabel}`} right={<ScrollButtons targetRef={offersRef} />} />
             <div ref={offersRef} className="flex gap-4 overflow-x-auto snap-x pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
               {loading
-                ? Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="shrink-0 w-[280px] h-[150px]" />)
+                ? Array.from({ length: 3 }).map((_, i) => <OfferSkeleton key={i} />)
                 : offers.map((o, i) => (
                     <div key={o.key} className="snap-start shrink-0 w-[280px] sm:w-[320px] rounded-3xl p-5 text-white relative overflow-hidden flex flex-col"
                       style={{ background: i % 2 ? `linear-gradient(135deg, ${C.ink}, ${C.deep})` : GRADIENT }}
@@ -694,12 +756,12 @@ export default function LandingPage() {
             <SectionHead tag="Recommended for you" title="What's on your mind?" right={<ScrollButtons targetRef={catsRef} />} />
             <div ref={catsRef} className="flex gap-4 sm:gap-6 overflow-x-auto snap-x pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
               {loading
-                ? Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="shrink-0 w-24 h-28 !rounded-full" />)
+                ? Array.from({ length: 8 }).map((_, i) => <CategorySkeleton key={i} />)
                 : categories.map((c) => {
                     const slug = c.slug || String(c.name || "").toLowerCase().replace(/\s+/g, "-");
                     return (
                       <a key={c.id || c._id || slug} href={`/food/user/category/${slug}`} className="snap-start shrink-0 w-24 sm:w-28 flex flex-col items-center gap-2 group">
-                        <span className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden bg-[#E7F7F3] ring-2 ring-transparent group-hover:ring-[#12A594] transition">
+                        <span className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden mf-shimmer ring-2 ring-transparent group-hover:ring-[#12A594] transition">
                           <Img src={imgUrl(c.image)} alt={c.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                         </span>
                         <span className="text-sm font-semibold text-center text-slate-700 group-hover:text-[#0B6E63] line-clamp-1">{c.name}</span>
@@ -716,12 +778,12 @@ export default function LandingPage() {
             <SectionHead tag="Popular near you" title="Dishes people love" right={<ScrollButtons targetRef={dishesRef} />} />
             <div ref={dishesRef} className="flex gap-4 overflow-x-auto snap-x pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
               {loading
-                ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="shrink-0 w-[220px] h-[260px]" />)
+                ? Array.from({ length: 4 }).map((_, i) => <DishSkeleton key={i} />)
                 : dishes.map((d) => (
                     <a key={`${d.r.id}-${d.id}`} href={`/food/user/restaurants/${restaurantSlug(d.r)}?dish=${d.id}`}
                       className="snap-start shrink-0 w-[200px] sm:w-[230px] rounded-3xl bg-white border border-slate-100 overflow-hidden hover:shadow-xl hover:shadow-[#12A594]/10 hover:-translate-y-1 transition-all group"
                     >
-                      <div className="aspect-[4/3] overflow-hidden bg-[#E7F7F3]">
+                      <div className="aspect-[4/3] overflow-hidden mf-shimmer">
                         <Img src={d.image} alt={d.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                       </div>
                       <div className="p-4">
@@ -764,7 +826,7 @@ export default function LandingPage() {
 
           {loading ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[290px] !rounded-3xl" />)}
+              {Array.from({ length: 4 }).map((_, i) => <RestaurantSkeleton key={i} />)}
             </div>
           ) : filtered.length === 0 ? (
             <div className="rounded-3xl bg-[#F4FBF9] border border-[#12A594]/10 p-10 text-center">
