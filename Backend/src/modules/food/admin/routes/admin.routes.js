@@ -28,6 +28,7 @@ import * as adminCityController from '../controllers/adminCity.controller.js';
 import * as bankChangeController from '../controllers/bankChange.controller.js';
 import * as profileChangeController from '../controllers/profileChange.controller.js';
 import { sendError } from '../../../../utils/response.js';
+import * as itemDeals from '../../deals/itemDeal.controller.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { requireAdminPermission, requireAnyAdminPermission } from '../../../../core/roles/adminPermission.middleware.js';
@@ -146,7 +147,7 @@ const resolveSectionFromRequest = (path = '', method = '') => {
         path.startsWith('/restaurant-subscriptions')
     ) return 'restaurant_management';
     if (path.startsWith('/categories') || path.startsWith('/addons') || path.startsWith('/foods')) return 'food_management';
-    if (path.startsWith('/offers')) return 'promotions_management';
+    if (path.startsWith('/offers') || path.startsWith('/item-deals')) return 'promotions_management';
     if (path.startsWith('/orders') || path.startsWith('/order-refunds') || path.startsWith('/order-detect-delivery') || path.startsWith('/dispatch')) return 'order_management';
     if (path.startsWith('/delivery')) return 'delivery_management';
     if (path.startsWith('/withdrawals')) return 'transaction_management';
@@ -209,6 +210,7 @@ router.use('/categories', requireAdminPermission('food_management', 'view'));
 router.use('/addons', requireAdminPermission('food_management', 'view'));
 router.use('/foods', requireAdminPermission('food_management', 'view'));
 router.use('/offers', requireAdminPermission('promotions_management', 'view'));
+router.use('/item-deals', requireAdminPermission('promotions_management', 'view'));
 router.use('/delivery', requireAdminPermission('delivery_management', 'view'));
 router.use('/withdrawals', requireAdminPermission('transaction_management', 'view'));
 router.use('/reports', requireAdminPermission('report_management', 'view'));
@@ -454,6 +456,12 @@ router.patch('/foods/:id/approve', foodApprovalController.approveFoodItemControl
 router.patch('/foods/:id/reject', foodApprovalController.rejectFoodItemController);
 router.post('/foods/bulk-approve', adminController.bulkApproveFoodItems);
 
+
+// ----- Item deals (flash, Buy 1 Get 1) -----
+router.get('/item-deals', itemDeals.adminList);
+router.post('/item-deals', itemDeals.adminCreate);
+router.patch('/item-deals/:id', itemDeals.adminSetStatus);
+router.delete('/item-deals/:id', itemDeals.adminDelete);
 
 // ----- Offers & Coupons -----
 router.get('/offers', adminController.getAllOffers);

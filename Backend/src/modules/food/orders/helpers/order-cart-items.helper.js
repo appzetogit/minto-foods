@@ -1,6 +1,7 @@
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
+import { applyItemDeals } from '../../deals/itemDeal.service.js';
 import {
   loadLiveRules,
   rulesForFoods,
@@ -91,6 +92,9 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
   ]);
 
   const foodById = new Map(foodDocs.map((doc) => [doc.id, doc]));
+  // Live flash / Buy-1-Get-1 deals. A line is priced from the dealt copy (the
+  // flash price), the saving worked out against the original.
+  const dealtById = new Map((await applyItemDeals(foodDocs)).map((doc) => [doc.id, doc]));
 
   // Admin price rules turn the restaurant's price into the customer's. The
   // restaurant's price is kept on every line as `basePrice` so payouts and
@@ -167,9 +171,13 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
         throw new ValidationError(`${foodDoc.name} is currently unavailable`);
       }
 
-      const base = resolveFoodItemPrice(foodDoc, rawItem);
+      const dealDoc = dealtById.get(itemId) || foodDoc;
+      const base = resolveFoodItemPrice(dealDoc, rawItem);
       const rule = ruleByFood.get(itemId) || null;
       const appPrice = toAppPrice(base.price, rule);
+      const flashSavingPerUnit = dealDoc.deal && dealDoc !== foodDoc
+        ? Math.max(0, toAppPrice(resolveFoodItemPrice(foodDoc, rawItem).price, rule) - appPrice)
+        : 0;
       const appOther = base.otherPrice > 0 ? toAppPrice(base.otherPrice, rule) : 0;
       const pricing = {
         ...base,
@@ -192,6 +200,10 @@ export async function resolveOrderCartItems(restaurantId, rawItems = []) {
         basePrice: base.price + addonsBaseTotal,
         baseVariantPrice: base.price,
         markupPercent: rule ? Number(rule.percent) || 0 : 0,
+        // Deal and coupon rules for this dish (see calculateOrderPricing).
+        deal: dealDoc.deal || null,
+        couponEligible: dealDoc.couponEligible !== false,
+        flashSavingPerUnit,
         priceRuleId: rule ? String(rule.id) : null,
         addons,
         quantity,

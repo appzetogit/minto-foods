@@ -2,6 +2,7 @@ import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
+import { applyItemDeals } from '../../deals/itemDeal.service.js';
 
 const requireId = (value, label) => {
     const raw = String(value || '').trim();
@@ -62,7 +63,7 @@ export const getUserFavorites = async (userId) => {
     const byId = (list) => new Map(list.map((d) => [d.id, d]));
     const restaurantMap = byId(restaurants);
     // Customer prices (admin price rules), same as the menu shows.
-    const foodMap = byId(await applyAppPricing(foods));
+    const foodMap = byId(await applyAppPricing(await applyItemDeals(foods)));
 
     return {
         restaurantIds,

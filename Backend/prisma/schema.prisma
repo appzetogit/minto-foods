@@ -949,6 +949,7 @@ model FoodRestaurant {
   @@index([estimatedDeliveryTimeMinutes])
   @@index([rating])
   @@map("food_restaurants")
+  itemDeals FoodItemDeal[]
 }
 
 model FoodDeliveryPartner {
@@ -1863,6 +1864,9 @@ model FoodItem {
   videoUrl String @default("")
 
   foodType    FoodType @default(NonVeg)
+  /// Coupons do not discount this dish (a cold drink, a combo already
+  /// priced low). Shown to customers as "Not eligible for coupons".
+  couponEligible Boolean @default(true)
   isAvailable Boolean  @default(true)
 
   rating       Decimal @default(0) @db.Decimal(2, 1)
@@ -3994,4 +3998,32 @@ model FoodRestaurantSlugHistory {
 
   @@index([restaurantId])
   @@map("food_restaurant_slug_history")
+}
+
+/// A restaurant's own offer on chosen dishes, applied without a code:
+/// `flash` cuts their price until it ends, `bogo` makes every second unit of
+/// the same dish free. Funded by the restaurant (it lowers its own price).
+/// Dishes under a live deal are not eligible for coupons.
+model FoodItemDeal {
+  id String @id @default(dbgenerated("encode(gen_random_bytes(12), 'hex')")) @db.VarChar(24)
+
+  restaurantId  String        @db.VarChar(24)
+  kind          String        @db.VarChar(10) // flash | bogo
+  title         String        @default("") @db.VarChar(80)
+  /// ponytail: id array like FoodOffer.restaurantIds; read whole per restaurant.
+  itemIds       String[]
+  discountType  DiscountType? // flash only
+  discountValue Decimal?      @db.Decimal(14, 2)
+  startAt       DateTime?
+  endAt         DateTime?
+  status        OfferStatus   @default(active)
+  createdByRole CreatorRole   @default(RESTAURANT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant FoodRestaurant @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId, status])
+  @@map("food_item_deals")
 }

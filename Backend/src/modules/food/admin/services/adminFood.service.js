@@ -63,6 +63,7 @@ const serializeFood = (f, restaurantName) => ({
     foodType: fromFoodTypeColumn(f.foodType),
     isAvailable: f.isAvailable !== false,
     preparationTime: f.preparationTime || '',
+    couponEligible: f.couponEligible !== false,
     approvalStatus: f.approvalStatus || 'approved',
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
@@ -323,6 +324,7 @@ export async function createFood(body = {}) {
             foodType: toFoodTypeColumn(foodType),
             isAvailable: body.isAvailable !== false,
             preparationTime: typeof body.preparationTime === 'string' ? body.preparationTime.trim() : '',
+            couponEligible: body.couponEligible !== false && body.couponEligible !== 'false',
             // An admin creating a dish is the approval.
             approvalStatus: 'approved',
         },
@@ -380,6 +382,9 @@ export async function updateFood(id, body = {}) {
 
     if (body.foodType !== undefined) data.foodType = toFoodTypeColumn(targetFoodType);
     if (body.isAvailable !== undefined) data.isAvailable = body.isAvailable !== false;
+    if (body.couponEligible !== undefined) {
+        data.couponEligible = body.couponEligible !== false && body.couponEligible !== 'false';
+    }
     if (body.preparationTime !== undefined) {
         data.preparationTime = String(body.preparationTime || '').trim();
     }
