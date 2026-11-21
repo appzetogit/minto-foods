@@ -217,6 +217,22 @@ test('changing a dish sends it back for approval', async () => {
     assert.equal(updated.rejectionReason, '');
 });
 
+test('saving the whole dish with only a switch changed keeps it approved', async () => {
+    const mine = await makeRestaurant();
+    const food = await createRestaurantFood(mine.id, { name: 'Paratha', price: 20, description: 'Hot' });
+    created.foods.push(food.id);
+    await prisma.foodItem.update({ where: { id: food.id }, data: { approvalStatus: 'approved', approvedAt: new Date() } });
+
+    // What the app sends on Save: every field, unchanged, plus the switch.
+    const updated = await updateRestaurantFood(mine.id, food.id, {
+        name: 'Paratha', price: 20, description: 'Hot', foodType: 'Non-Veg',
+        variants: [], couponEligible: false, isRecommended: true,
+    });
+    assert.equal(updated.approvalStatus, 'approved');
+    assert.equal(updated.couponEligible, false);
+    assert.equal(updated.isRecommended, true);
+});
+
 test('toggling availability back on clears the scheduled restock', async () => {
     const mine = await makeRestaurant();
     const food = await createRestaurantFood(mine.id, { name: 'Soup', price: 80 });
