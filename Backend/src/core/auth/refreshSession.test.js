@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../../config/prisma.js';
 import { config } from '../../config/env.js';
 import { uniquePhone } from '../../utils/testIds.js';
-import { refreshAccessToken } from './auth.service.js';
+import { refreshAccessToken, logout } from './auth.service.js';
 
 /**
  * Riders were logged out mid-shift: the refresh token came back unchanged on
@@ -74,6 +74,13 @@ test('the socket handshake refuses a token from a replaced phone', async () => {
         /another device/,
     );
     assert.equal(await sessionRefusal({ userId: rider.id, role: 'DELIVERY_PARTNER', tokenVersion: 3 }), null);
+});
+
+test('logging out a replaced phone leaves the rider online on the new one', async () => {
+    await prisma.foodDeliveryPartner.update({ where: { id: rider.id }, data: { availabilityStatus: 'online' } });
+    const old = await issue({ userId: rider.id, role: 'DELIVERY_PARTNER', tokenVersion: 2 });
+    assert.equal((await logout(old)).invalidated, true);
+    assert.equal((await prisma.foodDeliveryPartner.findUnique({ where: { id: rider.id } })).availabilityStatus, 'online');
 });
 
 test('a token we never issued changes nothing', async () => {
