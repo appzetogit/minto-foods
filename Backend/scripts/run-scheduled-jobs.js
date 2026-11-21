@@ -12,6 +12,7 @@ let expireOffersInterval = null;
 let fssaiExpiryInterval = null;
 let subscriptionBillingInterval = null;
 let orderWatchdogInterval = null;
+let prepDelayInterval = null;
 
 const shutdown = async (signal) => {
     logger.info(`${signal} received, stopping scheduled jobs`);
@@ -19,6 +20,7 @@ const shutdown = async (signal) => {
     if (fssaiExpiryInterval) clearInterval(fssaiExpiryInterval);
     if (subscriptionBillingInterval) clearInterval(subscriptionBillingInterval);
     if (orderWatchdogInterval) clearInterval(orderWatchdogInterval);
+    if (prepDelayInterval) clearInterval(prepDelayInterval);
 
     try {
         await disconnectDB();
@@ -123,6 +125,15 @@ const start = async () => {
         fssaiExpiryInterval = setInterval(runFssaiExpirySync, 60 * 60 * 1000);
         subscriptionBillingInterval = setInterval(runSubscriptionBilling, 6 * 60 * 60 * 1000);
         orderWatchdogInterval = setInterval(runOrderWatchdog, 5 * 60 * 1000);
+        // Prep time ran out: tell rider, customer and restaurant (once).
+        prepDelayInterval = setInterval(async () => {
+            try {
+                const { notifyPrepDelays } = await import('../src/modules/food/orders/services/prepDelay.service.js');
+                await notifyPrepDelays();
+            } catch (err) {
+                logger.error(`Prep delay check error: ${err.message}`);
+            }
+        }, 60 * 1000);
 
         logger.info('Scheduled jobs runner started');
     } catch (err) {

@@ -1467,6 +1467,8 @@ model FoodOrder {
   /// Minutes the restaurant said the food takes, set when it accepts. Drives
   /// its countdown on the order card and the kitchen part of the ETA.
   packingMinutes       Int?
+  /// When everyone was told the prep time ran out (once per order).
+  prepDelayNotifiedAt  DateTime?
   platformFee          Decimal      @default(0) @db.Decimal(14, 2)
   /// Quick Mode surcharge; also included in platformFee.
   quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)

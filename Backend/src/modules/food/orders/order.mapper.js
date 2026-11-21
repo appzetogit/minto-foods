@@ -1,3 +1,4 @@
+import { prepInfo } from './services/prepTiming.js';
 /**
  * Translates between the flat `food_orders` row and the nested order shape the
  * rest of the codebase and every client already speak.
@@ -192,6 +193,8 @@ export function toOrder(row) {
         },
 
         statusHistory: row.statusHistory || [],
+        // Prep due time and whether the kitchen is late, for every app.
+        prep: prepInfo({ ...row, statusHistory: row.statusHistory || [] }),
 
         ratings: {
             restaurant: entityRating(row.restaurantRating, row.restaurantRatingComment, row.restaurantRatedAt),
