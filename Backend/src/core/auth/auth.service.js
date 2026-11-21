@@ -92,6 +92,22 @@ const saveLoginFcmToken = async ({ ownerType, ownerId, fcmToken, platform, owner
  * browser tabs and machines, and evicting those would be a regression, not a
  * safeguard.
  */
+/**
+ * Closes the sockets an account already has open, after a login or "log out
+ * all devices" replaced its sessions. Their tokens are now refused at the
+ * handshake, but a socket that is already connected was authorised once and
+ * would otherwise keep receiving the account's events -- a replaced rider phone
+ * kept getting new-order offers.
+ */
+const closeReplacedSockets = async (room) => {
+  try {
+    const { getIO, rooms } = await import("../../config/socket.js");
+    getIO()?.in(rooms[room.kind](room.id)).disconnectSockets(true);
+  } catch (err) {
+    logger.warn(`Old sockets not closed for ${room.kind}:${room.id}: ${err?.message || err}`);
+  }
+};
+
 const bumpTokenVersion = async (delegate, id) => {
   const updated = await delegate.update({
     where: { id: String(id) },
@@ -268,6 +284,7 @@ export const verifyUserOtpAndLogin = async (
     role: user.role || "USER",
     tokenVersion: await bumpTokenVersion(prisma.foodUser, user.id),
   };
+  await closeReplacedSockets({ kind: "user", id: user.id });
 
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
@@ -530,6 +547,7 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
     role: ROLES.DELIVERY_PARTNER,
     tokenVersion: await bumpTokenVersion(prisma.foodDeliveryPartner, deliveryPartner.id),
   };
+  await closeReplacedSockets({ kind: "delivery", id: deliveryPartner.id });
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
   const ttlMs = ms(config.jwtRefreshExpiresIn || "7d");
@@ -577,6 +595,7 @@ export const logoutAllRestaurantDevices = async (restaurantId) => {
   if (!restaurant) throw new NotFoundError("Restaurant not found");
 
   await bumpTokenVersion(prisma.foodRestaurant, id);
+  await closeReplacedSockets({ kind: "restaurant", id });
   const { count } = await prisma.foodRefreshToken.deleteMany({ where: { userId: id } });
   await prisma.$executeRawUnsafe(
     `UPDATE "food_restaurants" SET "fcmTokens" = '{}', "fcmTokenMobile" = '{}', "updatedAt" = now() WHERE "id" = $1`,
@@ -1077,7 +1096,8 @@ export const refreshAccessToken = async (token) => {
     if (!owner || owner.deletedAt) throw new AuthError("This account has been deleted");
     const stored = Number(owner?.tokenVersion) || 0;
     if (tokenVersion !== undefined && Number(tokenVersion) !== stored) {
-      await takeRiderOfflineOnRefusedSession(jwt.default, token);
+      // Another phone signed in: the rider is on duty there, so this refusal
+      // must not take them offline.
       throw new AuthError(
         'You have been signed out because this account was used on another device',
       );

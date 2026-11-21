@@ -46,54 +46,47 @@ export const authMiddleware = (req, res, next) => {
         adminType: decoded.adminType
     };
 
+    sessionRefusal(decoded)
+        .then((reason) => (reason ? sendError(res, 401, reason) : next()))
+        .catch(() => sendError(res, 401, 'Authentication failed'));
+};
+
+/**
+ * Why a verified token's session no longer counts, or null when it does.
+ *
+ * Shared by HTTP requests and the socket handshake: a phone replaced by a
+ * newer login must lose both, or its open socket keeps receiving order offers
+ * meant for the rider's current phone.
+ */
+export const sessionRefusal = async (decoded) => {
     const delegate = SESSION_SCOPED_MODELS[decoded.role];
-    if (!delegate) return next();
+    if (!delegate) return null;
 
     // A malformed id would otherwise reach the database as a query that cannot
     // match; reject it here as the bad token it is.
-    if (!isId(decoded.userId)) return sendError(res, 401, 'Invalid or expired token');
+    if (!isId(decoded.userId)) return 'Invalid or expired token';
 
-    // One indexed lookup of two small fields. USER already paid for this to check
-    // isActive; the version travels in the same query rather than a second round
-    // trip, and the other two roles now share the same path.
-    //
-    // isActive is selected for every role even though only USER has the column
-    // read below — restaurants and partners use `status`, which this check has
-    // never consulted.
-    delegate()
-        .findUnique({
-            where: { id: decoded.userId },
-            select: { tokenVersion: true, deletedAt: true, ...(decoded.role === 'USER' ? { isActive: true } : {}) },
-        })
-        .then((doc) => {
-            if (!doc) return sendError(res, 401, 'Account not found');
-            // Checked before the version: a token issued before the delete may carry
-            // no version at all, and must still stop working.
-            if (doc.deletedAt) return sendError(res, 401, 'This account has been deleted');
-            if (decoded.role === 'USER' && doc.isActive === false) {
-                return sendError(res, 401, 'User account is deactivated');
-            }
+    // isActive is selected for USER only: restaurants and partners use `status`,
+    // which this check has never consulted.
+    const doc = await delegate().findUnique({
+        where: { id: decoded.userId },
+        select: { tokenVersion: true, deletedAt: true, ...(decoded.role === 'USER' ? { isActive: true } : {}) },
+    });
+    if (!doc) return 'Account not found';
+    // Checked before the version: a token issued before the delete may carry
+    // no version at all, and must still stop working.
+    if (doc.deletedAt) return 'This account has been deleted';
+    if (decoded.role === 'USER' && doc.isActive === false) return 'User account is deactivated';
 
-            // A token minted before the latest login belongs to a device that has
-            // since been replaced.
-            //
-            // Tokens issued BEFORE this feature shipped carry no version at all.
-            // Treating those as 0 would sign every existing user out the moment a
-            // single new login bumped anyone; instead they are accepted until the
-            // account next logs in, which is when the eviction genuinely applies.
-            const stored = Number(doc.tokenVersion) || 0;
-            const presented = decoded.tokenVersion;
-            if (presented !== undefined && Number(presented) !== stored) {
-                return sendError(
-                    res,
-                    401,
-                    'You have been signed out because this account was used on another device'
-                );
-            }
-
-            return next();
-        })
-        .catch(() => sendError(res, 401, 'Authentication failed'));
+    // A token minted before the latest login belongs to a device that has since
+    // been replaced. Tokens from before versioning carry none and are accepted
+    // until the account next logs in.
+    const stored = Number(doc.tokenVersion) || 0;
+    const presented = decoded.tokenVersion;
+    if (presented !== undefined && Number(presented) !== stored) {
+        return 'You have been signed out because this account was used on another device';
+    }
+    return null;
 };
 export const optionalAuth = (req, res, next) => {
     const authHeader = req.headers.authorization || '';
