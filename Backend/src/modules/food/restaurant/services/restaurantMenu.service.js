@@ -9,6 +9,7 @@ import {
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
 import { findApprovedRestaurant } from './restaurantLookup.helper.js';
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
+import { applyItemDeals } from '../../deals/itemDeal.service.js';
 
 const buildMenuFromFoods = async (foods = []) => {
     const categoryIds = [
@@ -71,6 +72,10 @@ const buildMenuFromFoods = async (foods = []) => {
             approvedAt: food.approvedAt,
             rejectedAt: food.rejectedAt,
             preparationTime: food.preparationTime || '',
+            // A live flash / BOGO deal (badge, countdown) and whether coupons
+            // discount this dish ("Not eligible for coupons").
+            deal: food.deal || null,
+            couponEligible: food.couponEligible !== false,
             // The dish's own score from customers' item ratings. Stored on the
             // row but never sent, so no app could show it.
             rating: Number(food.rating) || 0,
@@ -151,7 +156,7 @@ export async function getPublicApprovedRestaurantMenu(restaurantIdOrSlug) {
     });
     // Customers see the app price (admin price rules); the restaurant's own
     // menu endpoint above keeps the restaurant's prices.
-    return buildMenuFromFoods(await applyAppPricing(foods));
+    return buildMenuFromFoods(await applyAppPricing(await applyItemDeals(foods)));
 }
 
 export async function syncMenuItemApprovalStatus() {

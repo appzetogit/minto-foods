@@ -1,4 +1,5 @@
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
+import { applyItemDeals } from '../../deals/itemDeal.service.js';
 import { logger } from '../../../../utils/logger.js';
 import { prisma } from '../../../../config/prisma.js';
 import { isId } from '../../../../utils/helpers.js';
@@ -1743,7 +1744,7 @@ const attachRecommendedItems = async (restaurants) => {
 
     const byRestaurant = new Map();
     // Customer prices (admin price rules), same as the menu shows.
-    for (const item of await applyAppPricing(items)) {
+    for (const item of await applyAppPricing(await applyItemDeals(items))) {
         const list = byRestaurant.get(item.restaurantId) || [];
         if (list.length < 10) {
             // price is Decimal, so it would otherwise reach the client as a string.

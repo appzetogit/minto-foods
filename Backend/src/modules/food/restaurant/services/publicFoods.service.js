@@ -8,6 +8,7 @@ import {
 import { restoreExpiredFoodAvailability } from './foodAvailability.service.js';
 import { restaurantsInReach } from '../../shared/deliveryRadius.js';
 import { applyAppPricing } from '../../pricing/priceRules.service.js';
+import { applyItemDeals } from '../../deals/itemDeal.service.js';
 import { attachOutletTimingsToRestaurants } from './outletTimings.service.js';
 import { withOpenStatus } from '../helpers/restaurantAvailability.helper.js';
 import { openFirst } from '../../shared/openFirst.js';
@@ -92,7 +93,8 @@ export async function listPublicFoods(query = {}) {
 
     // App prices (admin price rules), before the ₹99 filter so it tests the
     // price customers actually see.
-    const priced = await applyAppPricing(list);
+    // Live flash / BOGO deals first (restaurant prices), then the app price.
+    const priced = await applyAppPricing(await applyItemDeals(list));
 
     const foods = priced
         .map((food) => {
@@ -135,6 +137,8 @@ export async function listPublicFoods(query = {}) {
                 foodType: food.foodType || 'Non-Veg',
                 isAvailable: food.isAvailable !== false,
                 preparationTime: food.preparationTime || '',
+                deal: food.deal || null,
+                couponEligible: food.couponEligible !== false,
                 approvalStatus: food.approvalStatus || 'approved',
             };
         })

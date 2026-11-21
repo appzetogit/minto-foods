@@ -83,6 +83,7 @@ import {
 import * as orderController from '../../orders/controllers/order.controller.js';
 import { authMiddleware, optionalAuth } from '../../../../core/auth/auth.middleware.js';
 import { sendError, sendResponse } from '../../../../utils/response.js';
+import * as itemDeals from '../../deals/itemDeal.controller.js';
 import { listRestaurantReviews, listPublicRestaurantReviews } from '../../orders/services/rating.service.js';
 import { findApprovedRestaurant } from '../services/restaurantLookup.helper.js';
 import { getRestaurantFinanceController } from '../controllers/restaurantFinance.controller.js';
@@ -169,6 +170,8 @@ router.get('/restaurants/:id', cacheResponse(60, 'restaurant_detail'), getApprov
 // out-of-stock has to come back when its time is up, not ten minutes later.
 router.get('/restaurants/:id/menu', cacheResponse(60, 'restaurant_menu'), getPublicRestaurantMenuController);
 router.get('/public/foods', cacheResponse(300, 'public_foods'), listPublicFoodsController);
+// Live flash deals across restaurants, for the customer's Flash Deals page.
+router.get('/public/flash-deals', itemDeals.publicFlashDeals);
 router.get('/restaurants/:id/outlet-timings', cacheResponse(600, 'restaurant_timings'), getOutletTimingsByRestaurantIdController);
 router.get('/offers', optionalAuth, listPublicOffersController);
 // Public: categories list (zone-aware; returns zone categories + global)
@@ -395,6 +398,11 @@ router.get('/support/tickets', authMiddleware, requireRestaurant, listRestaurant
 router.get('/support/tickets/:id', authMiddleware, requireRestaurant, getRestaurantSupportTicketController);
 
 // Offers (restaurant dashboard)
+// Flash deals and Buy 1 Get 1 on the restaurant's own dishes.
+router.get('/item-deals', authMiddleware, requireRestaurant, itemDeals.listMine);
+router.post('/item-deals', authMiddleware, requireRestaurant, itemDeals.createMine);
+router.patch('/item-deals/:id', authMiddleware, requireRestaurant, itemDeals.setMineStatus);
+router.delete('/item-deals/:id', authMiddleware, requireRestaurant, itemDeals.deleteMine);
 router.get('/my-offers', authMiddleware, requireRestaurant, listRestaurantOffersController);
 router.post('/my-offers', authMiddleware, requireRestaurant, createRestaurantOfferController);
 router.patch('/my-offers/:id/status', authMiddleware, requireRestaurant, updateRestaurantOfferStatusController);

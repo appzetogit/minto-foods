@@ -276,6 +276,7 @@ export async function createRestaurantFood(restaurantId, body = {}) {
             isAvailable: body.isAvailable !== false,
             isRecommended: body.isRecommended === true,
             preparationTime: toStr(body.preparationTime),
+            couponEligible: body.couponEligible !== false && body.couponEligible !== 'false',
             approvalStatus: 'pending',
             requestedAt: new Date(),
         },
@@ -327,6 +328,10 @@ export async function updateRestaurantFood(restaurantId, foodId, body = {}) {
 
     Object.assign(update, buildAvailabilityUpdate(body));
     if (body.preparationTime !== undefined) update.preparationTime = toStr(body.preparationTime);
+    // "Not eligible for coupons" -- not a change customers need re-approved.
+    if (body.couponEligible !== undefined) {
+        update.couponEligible = body.couponEligible !== false && body.couponEligible !== 'false';
+    }
     if (body.isRecommended !== undefined) update.isRecommended = body.isRecommended === true;
 
     const targetFoodType =

@@ -631,6 +631,50 @@ async function resolveDeliveryAddress(userId, dto) {
   return addresses[0] || dto.deliveryAddress;
 }
 
+/**
+ * Buy 1 Get 1: every second unit of a dish under a live BOGO deal becomes its
+ * own line at no charge for the dish (add-ons still charged). The bill, the
+ * restaurant's payout and its commission then see a free unit with no special
+ * case anywhere downstream. `dealDiscount` is what the customer saved through
+ * deals (flash and BOGO), for the bill. Exported for the tests.
+ */
+export function splitDealLines(resolvedItems = []) {
+  const items = [];
+  let dealDiscount = 0;
+  for (const raw of resolvedItems) {
+    const it = { ...raw, price: Number(raw.price) || 0, quantity: Number(raw.quantity) || 1 };
+    dealDiscount += (Number(it.flashSavingPerUnit) || 0) * it.quantity;
+    const free = it.deal?.bogo ? Math.floor(it.quantity / 2) : 0;
+    if (!free) {
+      items.push(it);
+      continue;
+    }
+    const dishPrice = Number(it.variantPrice) || 0;
+    const dishBase = Number(it.baseVariantPrice) || 0;
+    items.push({ ...it, quantity: it.quantity - free });
+    items.push({
+      ...it,
+      quantity: free,
+      name: `${it.name} (Buy 1 Get 1 free)`,
+      price: round2(Math.max(0, it.price - dishPrice)),
+      basePrice: round2(Math.max(0, (Number(it.basePrice) || 0) - dishBase)),
+      variantPrice: 0,
+      baseVariantPrice: 0,
+      isFree: true,
+    });
+    dealDiscount += free * dishPrice;
+  }
+  return { items, dealDiscount: round2(dealDiscount) };
+}
+
+/** What a coupon may discount: no deal on the dish, and not marked ineligible. */
+export const couponEligibleTotal = (items = []) =>
+  round2(
+    items
+      .filter((it) => it.couponEligible !== false && !it.deal)
+      .reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0),
+  );
+
 export async function calculateOrderPricing(userId, dto, options = {}) {
   const at = options.at instanceof Date ? options.at : new Date();
   // The admin's cap on one dish, for the quote and for the order (createOrder
@@ -655,17 +699,15 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
   }
 
   const resolvedItems = await resolveOrderCartItems(dto.restaurantId, dto.items);
-  const items = resolvedItems.map((item) => ({
-    ...item,
-    price: Number(item.price) || 0,
-    quantity: Number(item.quantity) || 1,
-  }));
+  const { items, dealDiscount } = splitDealLines(resolvedItems);
   const subtotal = round2(
     items.reduce(
       (sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
       0,
     ),
   );
+  // The coupon's discount and its minimum order count only these dishes.
+  const couponEligibleSubtotal = couponEligibleTotal(items);
 
   // Zone comes from the restaurant, matching how an order records its zone
   // (order.service.js falls back to restaurant.zoneId), so the quote a
@@ -775,7 +817,7 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
 
     const verdict = checkOfferEligibility({
       offer,
-      subtotal,
+      subtotal: couponEligibleSubtotal,
       restaurantId: dto.restaurantId,
       userId: signedIn ? String(userId) : null,
       now,
@@ -784,8 +826,13 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
       priorOrdersHere,
     });
 
-    if (verdict.ok) {
-      discount = computeOfferDiscount(offer, subtotal);
+    if (verdict.ok && couponEligibleSubtotal <= 0) {
+      couponError = {
+        code: "NO_ELIGIBLE_ITEMS",
+        message: "Coupons do not apply to the items in your cart (deals and items not eligible for coupons).",
+      };
+    } else if (verdict.ok) {
+      discount = computeOfferDiscount(offer, couponEligibleSubtotal);
       appliedCoupon = { code: codeRaw, discount };
     } else {
       couponError = { code: verdict.code, message: verdict.message };
@@ -829,6 +876,9 @@ export async function calculateOrderPricing(userId, dto, options = {}) {
     deliveryFeeGst,
     platformFee,
     discount,
+    // Saved through flash / Buy-1-Get-1 deals; already out of `subtotal`.
+    dealDiscount,
+    couponEligibleSubtotal,
     total,
     // The rates behind `tax` and `deliveryFeeGst`, so the apps can label the
     // bill rows ("GST (5%)") instead of showing a bare rupee figure.
