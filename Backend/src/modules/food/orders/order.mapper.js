@@ -1,4 +1,5 @@
 import { prepInfo } from './services/prepTiming.js';
+import { handoverInfo, stuckInfo } from './services/handoverTiming.js';
 /**
  * Translates between the flat `food_orders` row and the nested order shape the
  * rest of the codebase and every client already speak.
@@ -195,6 +196,10 @@ export function toOrder(row) {
         statusHistory: row.statusHistory || [],
         // Prep due time and whether the kitchen is late, for every app.
         prep: prepInfo({ ...row, statusHistory: row.statusHistory || [] }),
+        // The 1-minute pickup handover from "ready", and whether the order is
+        // long overdue — the same clock in the restaurant, rider and admin apps.
+        handover: handoverInfo({ ...row, statusHistory: row.statusHistory || [] }),
+        stuck: stuckInfo(row),
 
         ratings: {
             restaurant: entityRating(row.restaurantRating, row.restaurantRatingComment, row.restaurantRatedAt),

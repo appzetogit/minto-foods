@@ -751,16 +751,21 @@ export async function confirmReachedPickupDelivery(orderId, deliveryPartnerId) {
       }),
       prisma.foodDeliveryPartner.findUnique({
         where: { id: String(deliveryPartnerId) },
-        select: { name: true },
+        select: { name: true, phone: true },
       }),
     ]);
 
     await notifyOwnersSafely([{ ownerType: 'RESTAURANT', ownerId: row.restaurantId }], {
-      title: 'Rider arrived!',
-      body: `${partner?.name || 'The delivery partner'} has arrived at ${
+      // Who and which order, first — in a rush several riders stand at the
+      // counter, and the order number was missing ("to pick up Order .").
+      title: `Rider ${partner?.name || ''} arrived · Order #${row.orderId || row.id}`.replace('Rider  ', 'Rider '),
+      body: `${partner?.name || 'The delivery partner'} is at ${
         restaurant?.restaurantName || 'your restaurant'
-      } to pick up Order .`,
-      data: { type: 'rider_arrived', orderMongoId: row.id, partnerName: partner?.name || '' },
+      } for Order #${row.orderId || row.id}. Hand it over within a minute of it being ready.`,
+      data: {
+        type: 'rider_arrived', orderMongoId: row.id, orderId: row.orderId || row.id,
+        partnerName: partner?.name || '', partnerPhone: partner?.phone || '',
+      },
     });
   } catch (error) {
     logger.error(
