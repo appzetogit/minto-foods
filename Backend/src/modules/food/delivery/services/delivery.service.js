@@ -707,17 +707,18 @@ const computeRange = (period, date) => {
 };
 
 /**
- * A trip counts as inside the window if ANY of its timeline stamps falls in it.
- * `completedAt` was in the Mongo filter but is not a field on the order, so it
- * never matched anything — dropped rather than carried over.
+ * Each trip belongs to exactly one day: a delivered one to the day it was
+ * delivered, any other to the day it was placed — the same dates the earnings
+ * totals and cancellation pay use. It used to match ANY stamp (delivered,
+ * created or last updated), so an order delivered on the 11th and rated on
+ * the 12th was listed on both days and history stopped adding up to the wallet.
  */
 const withinRange = (start, end) => [
     { deliveredAt: { gte: start, lte: end } },
-    { updatedAt: { gte: start, lte: end } },
-    { createdAt: { gte: start, lte: end } },
+    { deliveredAt: null, createdAt: { gte: start, lte: end } },
 ];
 
-const TRIP_ORDER_BY = [{ deliveredAt: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }];
+const TRIP_ORDER_BY = [{ createdAt: 'desc' }]; // newest order first, delivered or not
 
 // ----- Earnings summary -----
 export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) => {
@@ -953,10 +954,13 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
 
     const [orders, bonusTxList] = await Promise.all([
         prisma.foodOrder.findMany({
+            // Delivered, or cancelled with cancellation pay: what the wallet
+            // credits. Only deliveries counted here, so the week's total fell
+            // short of the balance by every cancellation paid.
             where: {
                 dispatchDeliveryPartnerId: partnerId,
-                orderStatus: 'delivered',
                 OR: withinRange(start, end),
+                AND: [{ OR: [{ orderStatus: 'delivered' }, { riderCancelPay: { gt: 0 } }] }],
             },
             include: { items: true, restaurant: { select: { id: true, restaurantName: true } } },
             orderBy: TRIP_ORDER_BY,
@@ -974,15 +978,17 @@ export const getDeliveryPocketDetails = async (deliveryPartnerId, query = {}) =>
     const paymentTransactions = (orders || []).map((o) => ({
         _id: o.id,
         type: 'payment',
-        amount: num(o.riderEarning),
+        amount: o.orderStatus === 'delivered' ? num(o.riderEarning) : num(o.riderCancelPay),
         status: 'Completed',
         date: o.deliveredAt || o.createdAt,
         createdAt: o.deliveredAt || o.createdAt,
         orderId: o.orderId || o.id,
         metadata: { orderId: o.orderId || o.id },
-        description: o.restaurant?.restaurantName
-            ? `Order earning - ${o.restaurant.restaurantName}`
-            : 'Order earning',
+        description: o.orderStatus !== 'delivered'
+            ? 'Cancellation pay'
+            : o.restaurant?.restaurantName
+                ? `Order earning - ${o.restaurant.restaurantName}`
+                : 'Order earning',
     }));
 
     const bonusTransactions = (bonusTxList || []).map((t) => ({
