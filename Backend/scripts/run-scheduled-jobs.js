@@ -133,6 +133,9 @@ const start = async () => {
                 // Restaurants' timed offline breaks start and end on the minute.
                 const { applyRestaurantOfflineSchedule } = await import('../src/modules/food/restaurant/services/restaurantOffline.service.js');
                 await applyRestaurantOfflineSchedule();
+                // Pickup handover ran past its minute; orders stuck for hours.
+                const { sendOrderAlerts } = await import('../src/modules/food/orders/services/orderAlerts.service.js');
+                await sendOrderAlerts();
             } catch (err) {
                 logger.error(`Prep delay check error: ${err.message}`);
             }

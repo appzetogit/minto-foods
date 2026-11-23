@@ -1,4 +1,5 @@
 import { findZoneForPoint } from '../../shared/zone.service.js';
+import { orderTimeline } from './handoverTiming.js';
 import { notifyCustomer, notifyCustomerForStatus } from './customerNotify.service.js';
 import { normalizeRecipientFields } from '../validators/order.validator.js';
 import { prisma } from '../../../../config/prisma.js';
@@ -1381,6 +1382,11 @@ export async function getOrderById(
   if (admin) {
     const out = normalizeOrderForClient(order);
     out.transaction = await buildAdminTransactionView(order.id);
+    // Every step with who did it and the delays (kitchen, handover, total).
+    out.timeline = orderTimeline(row, {
+      restaurant: row.restaurant?.restaurantName || '',
+      rider: row.deliveryPartner?.name || '',
+    });
     return out;
   }
 

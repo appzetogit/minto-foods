@@ -1476,6 +1476,10 @@ model FoodOrder {
   packingMinutes       Int?
   /// When everyone was told the prep time ran out (once per order).
   prepDelayNotifiedAt  DateTime?
+  /// When the rider was told the 1-minute pickup handover ran out (once).
+  handoverLateNotifiedAt DateTime?
+  /// Last "order is stuck" alert to the rider and restaurant (repeats every 30 min).
+  stuckNotifiedAt        DateTime?
   platformFee          Decimal      @default(0) @db.Decimal(14, 2)
   /// Quick Mode surcharge; also included in platformFee.
   quickDeliveryFee     Decimal      @default(0) @db.Decimal(14, 2)
