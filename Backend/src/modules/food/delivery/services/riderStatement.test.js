@@ -65,7 +65,8 @@ test('the statement lists payouts and bonuses and ends on the wallet balance', a
     assert.equal(thisWeek.openingBalance, 35);
     assert.equal(thisWeek.earned, 345, '35 delivery + 10 cancellation + 300 bonus');
     assert.equal(thisWeek.paidOut, 35);
-    assert.equal(thisWeek.closingBalance, st.summary.available + st.summary.pending, 'ends on the wallet');
+    assert.equal(thisWeek.pending, 50);
+    assert.equal(thisWeek.closingBalance, st.summary.available, 'ends on the wallet balance');
 
     assert.deepEqual(st.payouts.map((p) => p.status).sort(), ['paid', 'pending', 'rejected']);
     const p = st.payouts.find((x) => x.status === 'paid');
