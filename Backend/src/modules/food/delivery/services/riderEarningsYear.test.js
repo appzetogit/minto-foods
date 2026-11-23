@@ -68,3 +68,29 @@ test('cancellation pay counts in earnings; a cancelled order without it does not
         await prisma.foodRestaurant.delete({ where: { id: r.id } });
     }
 });
+
+test('credited incentives count in the period they were credited, and in the total', async () => {
+    const rider = await prisma.foodDeliveryPartner.create({
+        data: { name: 'Incentive Rider', phone: uniquePhone('8'), status: 'approved' },
+    });
+    created.push(rider.id);
+    await prisma.deliveryBonusTransaction.create({
+        data: { deliveryPartnerId: rider.id, transactionId: `inc-${uniquePhone('7')}`, amount: 300, reference: 'Earning Addon' },
+    });
+    await prisma.deliveryBonusTransaction.create({
+        data: {
+            deliveryPartnerId: rider.id, transactionId: `inc-${uniquePhone('7')}`, amount: 100,
+            createdAt: new Date(2024, 0, 10),
+        },
+    });
+    try {
+        const today = (await getDeliveryPartnerEarnings(rider.id, { period: 'today' })).summary;
+        assert.equal(today.incentive, 300);
+        assert.equal(today.totalEarnings, 300);
+        assert.equal(today.totalOrders, 0, 'an incentive is not an order');
+        const all = (await getDeliveryPartnerEarnings(rider.id, { period: 'all' })).summary;
+        assert.equal(all.incentive, 400);
+    } finally {
+        await prisma.deliveryBonusTransaction.deleteMany({ where: { deliveryPartnerId: rider.id } });
+    }
+});
