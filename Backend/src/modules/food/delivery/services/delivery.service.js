@@ -691,11 +691,18 @@ const getMonthRange = (anchorDate) => {
     return { start, end };
 };
 
+/** 1 Jan to 31 Dec of the anchor's year, for the rider app's Yearly tab. */
+const getYearRange = (anchorDate) => {
+    const y = new Date(anchorDate).getFullYear();
+    return { start: new Date(y, 0, 1, 0, 0, 0, 0), end: new Date(y, 11, 31, 23, 59, 59, 999) };
+};
+
 const computeRange = (period, date) => {
     const p = String(period || 'daily').toLowerCase();
     const anchor = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
     if (p === 'weekly' || p === 'week') return getWeekRange(anchor);
     if (p === 'monthly' || p === 'month') return getMonthRange(anchor);
+    if (p === 'yearly' || p === 'year') return getYearRange(anchor);
     return { start: toStartOfDay(anchor), end: toEndOfDay(anchor) };
 };
 
@@ -725,6 +732,7 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
     let range = null;
     if (period === 'today') range = { start: toStartOfDay(date), end: toEndOfDay(date) };
     else if (period === 'month') range = getMonthRange(date);
+    else if (period === 'year') range = getYearRange(date);
     else if (period === 'all') range = null;
     else range = getWeekRange(date); // week, and anything unrecognised
 
