@@ -66,8 +66,13 @@ export async function getDeliveryEarnings(query = {}) {
     const limit = Math.max(1, Math.min(1000, parseInt(query.limit, 10) || 50));
     const skip = (page - 1) * limit;
 
-    // Only dispatched orders have a rider to pay.
-    const where = { dispatchDeliveryPartnerId: { not: null } };
+    // Only dispatched orders have a rider to pay, and only the ones that paid:
+    // delivered, or cancelled with cancellation pay. Every cancelled order the
+    // rider had been on used to be listed too, reading as an earning at ₹0.
+    const where = {
+        dispatchDeliveryPartnerId: { not: null },
+        AND: [{ OR: [{ orderStatus: 'delivered' }, { riderCancelPay: { gt: 0 } }] }],
+    };
 
     const createdAt = buildDateRange(query);
     if (createdAt) where.createdAt = createdAt;

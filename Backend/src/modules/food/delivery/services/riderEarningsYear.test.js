@@ -37,3 +37,34 @@ test('period=year counts only the picked year', async () => {
     const all = await getDeliveryPartnerEarnings(rider.id, { period: 'all' });
     assert.equal(all.summary.totalOnlineMinutes, 180);
 });
+
+test('cancellation pay counts in earnings; a cancelled order without it does not', async () => {
+    const rider = await prisma.foodDeliveryPartner.create({
+        data: { name: 'Cancel Pay Rider', phone: uniquePhone('8'), status: 'approved' },
+    });
+    created.push(rider.id);
+    const r = await prisma.foodRestaurant.create({
+        data: { restaurantName: 'CP Kitchen', ownerName: 'O', ownerPhone: uniquePhone('9'), status: 'approved' },
+    });
+    const u = await prisma.foodUser.create({ data: { phone: uniquePhone('5') } });
+    const base = {
+        userId: u.id, restaurantId: r.id, dispatchDeliveryPartnerId: rider.id, paymentMethod: 'cash',
+        addrStreet: '1', addrCity: 'Indore', addrState: 'MP', subtotal: 100, total: 100, riderEarning: 30,
+    };
+    const orders = await Promise.all([
+        prisma.foodOrder.create({ data: { ...base, orderId: `CP-${uniquePhone('1')}`, orderStatus: 'delivered', deliveredAt: new Date() } }),
+        prisma.foodOrder.create({ data: { ...base, orderId: `CP-${uniquePhone('2')}`, orderStatus: 'cancelled_by_admin', riderCancelPay: 10 } }),
+        prisma.foodOrder.create({ data: { ...base, orderId: `CP-${uniquePhone('3')}`, orderStatus: 'cancelled_by_admin' } }),
+    ]);
+    try {
+        const { summary } = await getDeliveryPartnerEarnings(rider.id, { period: 'today' });
+        assert.equal(summary.totalEarnings, 40, '30 delivered + 10 cancellation pay');
+        assert.equal(summary.orderEarning, 30);
+        assert.equal(summary.cancelPay, 10);
+        assert.equal(summary.totalOrders, 1, 'only deliveries are orders completed');
+    } finally {
+        await prisma.foodOrder.deleteMany({ where: { id: { in: orders.map((o) => o.id) } } });
+        await prisma.foodUser.delete({ where: { id: u.id } });
+        await prisma.foodRestaurant.delete({ where: { id: r.id } });
+    }
+});
