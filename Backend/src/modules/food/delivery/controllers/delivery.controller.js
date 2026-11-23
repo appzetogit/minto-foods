@@ -1,4 +1,5 @@
 import { isId } from '../../../../utils/helpers.js';
+import { getRiderStatement } from '../services/riderStatement.service.js';
 import { registerDeliveryPartner, updateDeliveryPartnerProfile, updateDeliveryPartnerBankDetails, listSupportTicketsByPartner, createSupportTicket, getSupportTicketByIdAndPartner, updateDeliveryPartnerDetails, updateDeliveryPartnerProfilePhotoBase64, updateDeliveryAvailability, getDeliveryPartnerWallet, getDeliveryPartnerEarnings, getDeliveryPartnerTripHistory, getDeliveryPocketDetails, getActiveEarningAddonsForPartner, deleteDeliveryPartnerAccount } from '../services/delivery.service.js';
 import { createDeliveryCashDepositOrder, getDeliveryPartnerWalletEnhanced, requestDeliveryWithdrawal, verifyDeliveryCashDepositPayment } from '../services/deliveryFinance.service.js';
 import { getDeliveryCashLimitSettings, getDeliveryEmergencyHelp } from '../../admin/services/admin.service.js';
@@ -299,6 +300,16 @@ export const getPocketDetailsController = async (req, res, next) => {
         const deliveryPartnerId = req.user?.userId;
         const data = await getDeliveryPocketDetails(deliveryPartnerId, req.query || {});
         return sendResponse(res, 200, 'Pocket details fetched successfully', data);
+    } catch (error) {
+        next(error);
+    }
+};
+
+/** Earnings, bonuses, payouts and balance, week by week (rider app Payouts screen). */
+export const getWalletStatementController = async (req, res, next) => {
+    try {
+        const data = await getRiderStatement(req.user?.userId, req.query || {});
+        return sendResponse(res, 200, 'Wallet statement fetched successfully', data);
     } catch (error) {
         next(error);
     }
