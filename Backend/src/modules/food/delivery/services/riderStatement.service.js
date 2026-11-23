@@ -11,7 +11,7 @@ import { riderBalance } from './riderBalance.service.js';
  * The rider app showed only a balance: payouts, bonuses and past weeks were
  * nowhere, so a rider could not tell what they were paid or when. Every figure
  * here is read from the same records as riderBalance, so the closing balance
- * of the latest week is the wallet's balance (before pending requests).
+ * of the latest week is the wallet's balance.
  *
  * Dates: a delivery counts on its delivery day, cancellation pay on the day
  * the order was placed (as trip history does); a payout on the day it was paid.
@@ -66,6 +66,11 @@ export async function getRiderStatement(riderId, query = {}) {
             .map((w) => ({ at: w.processedAt || w.updatedAt, kind: 'paidOut', amount: -num(w.amount) })),
         ...settlements.filter((s) => s.status === 'processed')
             .map((s) => ({ at: s.processedAt || s.updatedAt, kind: 'paidOut', amount: -num(s.amount) })),
+        // A request waiting for admin is held back from the balance the day it
+        // was made, as the wallet does, so the latest week ends on the
+        // wallet's balance rather than above it.
+        ...withdrawals.filter((w) => w.status === 'pending')
+            .map((w) => ({ at: w.createdAt, kind: 'pending', amount: -num(w.amount) })),
     ];
 
     const thisMonday = mondayOf(new Date());
@@ -88,10 +93,11 @@ export async function getRiderStatement(riderId, query = {}) {
             bonus: sum('bonus'),
             adjustments: sum('adjustment'),
             paidOut: money(-sum('paidOut')),
+            pending: money(-sum('pending')),
             openingBalance: opening,
         };
         row.earned = money(row.deliveryPay + row.cancelPay + row.bonus + row.adjustments);
-        row.closingBalance = money(opening + row.earned - row.paidOut);
+        row.closingBalance = money(opening + row.earned - row.paidOut - row.pending);
         weekRows.push(row);
     }
     weekRows.reverse(); // newest first
