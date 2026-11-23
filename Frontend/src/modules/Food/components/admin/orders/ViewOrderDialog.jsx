@@ -14,7 +14,7 @@ import { getCartCompareItemTotal, getLineCompareUnitPrice } from "@food/utils/fo
 import { DualMoney } from "@food/components/user/FoodPriceDisplay"
 import { restaurantLabel } from "@food/utils/entityLabels"
 import { RiderPicker } from "@food/pages/admin/dispatch/AssignRider"
-import { KitchenTiming } from "./PrepTimer"
+import { KitchenTiming, HandoverBadge } from "./PrepTimer"
 import { prepTiming } from "./orderStage"
 const debugLog = (...args) => {}
 const debugWarn = (...args) => {}
@@ -854,8 +854,49 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
             </div>
           )}
 
-          {/* Order Timeline */}
-          {statusHistory.length > 0 && (
+          {/* Order Timeline — every step, who did it, and the delays that
+              matter (food ready late, handover delay, total delivery time). */}
+          {Array.isArray(detail?.timeline) && detail.timeline.length > 0 ? (
+            <div className="border-t border-slate-200 pt-4">
+              <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                <History className="w-4 h-4" />
+                Order Timeline
+              </h3>
+              <HandoverBadge handover={detail.handover} stuck={detail.stuck} />
+              <div className="mt-3">
+                {detail.timeline.map((step, index, arr) => {
+                  const isLast = index === arr.length - 1
+                  return (
+                    <div key={`${step.key}-${index}`} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className={`w-5 h-5 rounded-full mt-0.5 shrink-0 flex items-center justify-center text-[11px] font-bold text-white ${step.warning ? "bg-amber-500" : "bg-slate-900"}`}>
+                          {step.warning ? "!" : "✓"}
+                        </div>
+                        {!isLast && <div className="w-0.5 flex-1 bg-slate-300 my-1" />}
+                      </div>
+                      <div className={`flex-1 min-w-0 ${isLast ? "" : "pb-5"}`}>
+                        <p className="text-sm font-semibold leading-tight text-slate-900">{step.label}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {step.at
+                            ? new Date(step.at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })
+                            : ""}
+                        </p>
+                        {step.actor ? <p className="text-xs text-slate-700 mt-1.5">{step.actor}</p> : null}
+                        {step.note ? <p className="text-xs text-slate-500 mt-1 leading-snug">{step.note}</p> : null}
+                        {step.delay ? (
+                          <div className="mt-2 rounded-lg bg-slate-100 px-3 py-2.5">
+                            <p className="text-xs text-slate-700">{step.delay.label}</p>
+                            <p className="text-sm font-semibold text-amber-600">{step.delay.value}</p>
+                            {step.delay.note ? <p className="text-xs text-slate-500 mt-1">{step.delay.note}</p> : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ) : statusHistory.length > 0 && (
             <div className="border-t border-slate-200 pt-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">
                 <History className="w-4 h-4" />

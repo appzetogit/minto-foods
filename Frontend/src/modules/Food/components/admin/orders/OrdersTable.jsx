@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import { Eye, Printer, ArrowUpDown, ArrowUp, ArrowDown, Loader2, Check, X, Trash2, RefreshCw, Volume2, PackageCheck, UserPlus } from "lucide-react"
 import { refundPicture } from "./RefundModal"
 import { stageColor } from "./orderStage"
-import { PrepCountdown } from "./PrepTimer"
+import { PrepCountdown, HandoverBadge } from "./PrepTimer"
 
 const getStatusColor = (orderStatus) => {
   const colors = {
@@ -473,6 +473,7 @@ export default function OrdersTable({
                         <span className="text-xs text-slate-500">{order.deliveryType}</span>
                       </div>
                       <PrepCountdown timing={order.prepTiming} />
+                      <HandoverBadge handover={order.handover} stuck={order.stuck} />
                       {order.stageNote ? (
                         <div className={`text-xs ${order.stageLate ? "font-semibold text-red-600" : "text-slate-500"}`}>
                           {order.stageNote}

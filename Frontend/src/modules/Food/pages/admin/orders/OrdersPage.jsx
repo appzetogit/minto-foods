@@ -772,6 +772,8 @@ export default function OrdersPage({ statusKey = "all" }) {
           return { stageLabel: stage.label || displayStatus, stageNote: stage.note, stageLate: stage.late }
         })(),
         prepTiming: prepTiming(order),
+        handover: order.handover || null,
+        stuck: order.stuck || null,
         deliveryPartnerName,
         deliveryPartnerPhone,
         deliveryType: order.deliveryType || "Home Delivery",
