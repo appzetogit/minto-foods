@@ -844,7 +844,15 @@ export async function notifyRestaurantNewOrder(orderDoc) {
         // is incoming_orders_channel, which exists only in the rider app —
         // Android silently demotes an unknown channel to low importance, so the
         // alert would arrive without sound or a heads-up even once it displayed.
-        androidChannelId: "new_order_channel",
+        //
+        // The ringing channel, not the silent one. The silent channel assumed
+        // the order card would always do the ringing, but the card needs the
+        // app woken for the data message — and on many Android 10–12 phones
+        // the battery saver does not wake it, or "Display over other apps" is
+        // off. Then only this notification arrived, silently, and the order
+        // was missed. When the card does open it cancels this notification
+        // (which stops its sound) and rings itself.
+        androidChannelId: "new_order_alert_v3",
         data: {
           type: "new_order",
           title: "New order received",

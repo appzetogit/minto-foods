@@ -2968,7 +2968,8 @@ export async function updateOrderStatusAdmin(orderId, orderStatus, note = "", ad
         title: "Order cancelled by admin",
         body: `Order #${fields.orderDisplayId} was cancelled. Reason: ${fields.cancellationReason}`,
         androidTag: `order_cancel_${updated.id}`,
-        androidChannelId: "new_order_channel",
+        // Ringing channel, for phones that never start the app to ring itself.
+        androidChannelId: "new_order_alert_v3",
         data: { type: "order_status_update", orderMongoId: updated.id, ...fields },
       },
     ).catch((err) => logger.warn(`Admin-cancel alert to restaurant failed for ${updated.id}: ${err?.message || err}`));
