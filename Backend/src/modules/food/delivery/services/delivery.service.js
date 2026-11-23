@@ -764,7 +764,12 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
         ...(range ? { createdAt: { gte: range.start, lte: range.end } } : {}),
     };
 
-    const [totalOrders, agg, cancelAgg, sessions] = await Promise.all([
+    // Incentives (admin bonuses and earning add-ons) and manual admin credits,
+    // dated when credited. The summary used to send incentive: 0 whatever had
+    // been paid, so a rider's credited incentives were missing here and from
+    // the total — while the wallet balance did include them.
+    const creditedAt = range ? { createdAt: { gte: range.start, lte: range.end } } : {};
+    const [totalOrders, agg, cancelAgg, sessions, bonusAgg, adjustmentRows] = await Promise.all([
         prisma.foodOrder.count({ where }),
         prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true, tipAmount: true } }),
         prisma.foodOrder.aggregate({ where: cancelWhere, _sum: { riderCancelPay: true } }),
@@ -772,10 +777,27 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
             where: sessionWhere,
             select: { wentOnlineAt: true, wentOfflineAt: true },
         }),
+        prisma.deliveryBonusTransaction.aggregate({
+            where: { deliveryPartnerId: partnerId, ...creditedAt },
+            _sum: { amount: true },
+        }),
+        // Same rows riderBalance counts as adjustments.
+        prisma.transaction.findMany({
+            where: {
+                entityType: 'deliveryBoy', entityId: partnerId, category: 'adjustment',
+                idempotencyKey: null, status: 'completed', ...creditedAt,
+            },
+            select: { type: true, amount: true },
+        }),
     ]);
 
     const cancelPay = num(cancelAgg?._sum?.riderCancelPay);
-    const totalEarnings = Math.round((num(agg?._sum?.riderEarning) + cancelPay) * 100) / 100;
+    const incentive = num(bonusAgg?._sum?.amount);
+    const adjustments = Math.round(adjustmentRows
+        .reduce((a, t) => a + (t.type === 'credit' ? num(t.amount) : -num(t.amount)), 0) * 100) / 100;
+    const totalEarnings = Math.round(
+        (num(agg?._sum?.riderEarning) + cancelPay + incentive + adjustments) * 100,
+    ) / 100;
     // riderEarning already contains the tip, so the delivery part is what is
     // left after taking it out. Adding them would count every tip twice.
     const totalTips = num(agg?._sum?.tipAmount);
@@ -812,7 +834,12 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
             /// up to totalEarnings instead of overlapping it.
             orderEarning: deliveryEarning,
             tips: totalTips,
-            incentive: 0,
+            /// Delivery pay + tips: what the deliveries themselves earned
+            /// (for per-order averages; incentives are not per order).
+            deliveryEarnings: num(agg?._sum?.riderEarning),
+            incentive,
+            /// Manual credits (or debits) by admin.
+            adjustments,
             /// Cancellation pay for orders cancelled while the rider was on them.
             cancelPay,
             otherEarnings: cancelPay,
