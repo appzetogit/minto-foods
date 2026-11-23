@@ -517,6 +517,14 @@ export const verifyDeliveryOtpAndLogin = async (phone, otp, fcmToken, platform) 
 
   // Update FCM token if provided - CRITICAL: do this BEFORE returning pendingApproval
   // so we can notify them when approved.
+  // A rider works one phone at a time. The previous phone's push tokens used
+  // to stay on the account, so a phone that had logged out — or been replaced
+  // by this login — kept ringing with new-order offers. This phone's own
+  // token is saved just below.
+  await prisma.$executeRawUnsafe(
+    `UPDATE "food_delivery_partners" SET "fcmTokens" = '{}', "fcmTokenMobile" = '{}', "updatedAt" = now() WHERE "id" = $1`,
+    deliveryPartner.id,
+  );
   if (fcmToken) {
     await saveLoginFcmToken({
       ownerType: ROLES.DELIVERY_PARTNER,
