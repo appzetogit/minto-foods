@@ -42,6 +42,41 @@ export function PrepCountdown({ timing }) {
   )
 }
 
+/**
+ * The 1-minute pickup handover from Ready (server `handover`), live: time
+ * left, then how late — the team calls the rider. And a red badge for an
+ * order that has been open far longer than any delivery (server `stuck`).
+ */
+export function HandoverBadge({ handover, stuck }) {
+  const now = useNow()
+  const parts = []
+  if (handover?.dueAt && !handover.pickedUpAt) {
+    const left = new Date(handover.dueAt).getTime() - now
+    const arrived = handover.riderArrivedAt ? " · rider at restaurant" : " · rider not arrived"
+    parts.push(
+      left >= 0 ? (
+        <div key="h" className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 tabular-nums">
+          <Timer className="h-3.5 w-3.5" /> Handover: {clock(left)} left{arrived}
+        </div>
+      ) : (
+        <div key="h" className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">
+          <Timer className="h-3.5 w-3.5" /> Not picked up — late {clock(left)}{arrived}. Call the rider
+        </div>
+      ),
+    )
+  }
+  if (stuck?.since) {
+    const mins = Math.round((now - new Date(stuck.since).getTime()) / 60000) + 90
+    const h = Math.floor(mins / 60)
+    parts.push(
+      <div key="s" className="inline-flex items-center gap-1 rounded-md bg-rose-700 px-2 py-0.5 text-xs font-bold text-white">
+        ⚠ Stuck — open {h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h ${mins % 60}m`}, not delivered
+      </div>,
+    )
+  }
+  return parts.length ? <>{parts}</> : null
+}
+
 const time = (d) => (d ? d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "—")
 const late = (m) => (m === null ? "" : m > 0 ? `${m} min late` : m < 0 ? `${-m} min early` : "on time")
 
