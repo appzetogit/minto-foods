@@ -165,3 +165,12 @@ test('a date range narrows it, and paging is reported', async () => {
     // The summary is over the whole filter, not just the page.
     assert.equal(paged.summary.totalOrders, 5);
 });
+
+test('a cancelled order appears only if it paid cancellation pay', async () => {
+    const unpaid = await makeOrder({ orderStatus: 'cancelled_by_admin' });
+    const paid = await makeOrder({ orderStatus: 'cancelled_by_admin', riderCancelPay: 10 });
+
+    const { earnings } = await getDeliveryEarnings({ search: tag, limit: 100 });
+    assert.ok(!earnings.some((e) => e.orderId === unpaid.orderId), 'nothing earned, not an earning');
+    assert.equal(earnings.find((e) => e.orderId === paid.orderId)?.amount, 10);
+});

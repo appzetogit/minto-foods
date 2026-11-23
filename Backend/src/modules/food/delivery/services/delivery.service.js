@@ -754,20 +754,31 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
             : {}),
     };
 
-    const [totalOrders, agg, sessions] = await Promise.all([
+    // Cancellation pay is in the wallet, so it belongs in earnings too. No
+    // cancel timestamp exists; it is dated by the order, as on the admin page.
+    const cancelWhere = {
+        dispatchDeliveryPartnerId: partnerId,
+        orderStatus: { not: 'delivered' },
+        riderCancelPay: { gt: 0 },
+        ...(range ? { createdAt: { gte: range.start, lte: range.end } } : {}),
+    };
+
+    const [totalOrders, agg, cancelAgg, sessions] = await Promise.all([
         prisma.foodOrder.count({ where }),
         prisma.foodOrder.aggregate({ where, _sum: { riderEarning: true, tipAmount: true } }),
+        prisma.foodOrder.aggregate({ where: cancelWhere, _sum: { riderCancelPay: true } }),
         prisma.foodDeliveryPartnerSession.findMany({
             where: sessionWhere,
             select: { wentOnlineAt: true, wentOfflineAt: true },
         }),
     ]);
 
-    const totalEarnings = num(agg?._sum?.riderEarning);
+    const cancelPay = num(cancelAgg?._sum?.riderCancelPay);
+    const totalEarnings = Math.round((num(agg?._sum?.riderEarning) + cancelPay) * 100) / 100;
     // riderEarning already contains the tip, so the delivery part is what is
     // left after taking it out. Adding them would count every tip twice.
     const totalTips = num(agg?._sum?.tipAmount);
-    const deliveryEarning = Math.round((totalEarnings - totalTips) * 100) / 100;
+    const deliveryEarning = Math.round((num(agg?._sum?.riderEarning) - totalTips) * 100) / 100;
 
     // Reported as 0 before the duty log existed, because nothing recorded when
     // a rider went on or off shift. Clipped to the window so only the part of
@@ -801,7 +812,9 @@ export const getDeliveryPartnerEarnings = async (deliveryPartnerId, query = {}) 
             orderEarning: deliveryEarning,
             tips: totalTips,
             incentive: 0,
-            otherEarnings: 0,
+            /// Cancellation pay for orders cancelled while the rider was on them.
+            cancelPay,
+            otherEarnings: cancelPay,
         },
         period,
         date: date.toISOString(),
