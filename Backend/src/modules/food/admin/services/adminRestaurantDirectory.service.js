@@ -31,6 +31,8 @@ const RESTAURANT_ROW = {
     // Who switched it off -- an admin (the restaurant app cannot undo that) or
     // the restaurant -- and the hours that open it by themselves.
     offlineByAdmin: true,
+    // The restaurant's own reason and timed break, from the restaurant app.
+    offlineReason: true, offlineFrom: true, offlineUntil: true,
     openingTime: true, closingTime: true, openDays: true,
     // So the Add Food form can lock a pure veg restaurant's dishes to Veg.
     pureVegRestaurant: true,
@@ -198,6 +200,7 @@ export async function getRestaurants(query = {}) {
                 where: statsWhere,
                 select: {
                     id: true, isAcceptingOrders: true, offlineByAdmin: true,
+                    offlineFrom: true, offlineUntil: true,
                     openingTime: true, closingTime: true, openDays: true,
                     zone: { select: { isActive: true } },
                 },

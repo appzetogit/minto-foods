@@ -42,3 +42,32 @@ test('an inactive zone hides it whatever the switch says', () => {
     const s = describeLiveStatus({ zone: { isActive: false }, outletTimings: hours('09:00', '23:00') }, now);
     assert.equal(s.code, 'zone-inactive');
 });
+
+test("a restaurant's own reason and timed break come back with it", () => {
+    const off = describeLiveStatus({
+        isAcceptingOrders: false,
+        offlineReason: 'Kitchen is full',
+        offlineUntil: new Date('2026-11-26T06:30:00.000Z'),
+        outletTimings: hours('09:00', '23:00'),
+    }, now);
+    assert.equal(off.code, 'offline-restaurant');
+    assert.equal(off.offlineReason, 'Kitchen is full');
+    assert.match(off.backOnlineAt, /^2026-11-26T12:00/);
+
+    // An admin's offline is never lifted by the timer, so no time is promised.
+    const admin = describeLiveStatus({
+        isAcceptingOrders: false, offlineByAdmin: true,
+        offlineUntil: new Date('2026-11-26T06:30:00.000Z'),
+        outletTimings: hours('09:00', '23:00'),
+    }, now);
+    assert.equal(admin.backOnlineAt, null);
+
+    const booked = describeLiveStatus({
+        offlineFrom: new Date('2026-11-26T08:30:00.000Z'),
+        offlineUntil: new Date('2026-11-26T09:30:00.000Z'),
+        outletTimings: hours('09:00', '23:00'),
+    }, now);
+    assert.equal(booked.code, 'online');
+    assert.match(booked.breakFrom, /^2026-11-26T14:00/);
+    assert.match(booked.breakUntil, /^2026-11-26T15:00/);
+});

@@ -135,11 +135,24 @@ const describeLive = (live) => {
         label: "Online",
         reason: slot ? `Within time slot (${slot})` : "No time slots set – open all day",
         until: live.closingTime ? `Till ${formatClock(live.closingTime)}` : "",
+        // A break the restaurant booked for later today/tomorrow.
+        note: live.breakFrom
+          ? `Break booked: ${formatWhen(live.breakFrom)}${live.breakUntil ? ` – ${formatWhen(live.breakUntil)}` : ""}`
+          : "",
       }
     case "offline-admin":
       return { tone: "red", label: "Offline", reason: "Turned off by admin", until: `Until an admin turns it on${slotOpenNote}` }
     case "offline-restaurant":
-      return { tone: "red", label: "Offline", reason: "Turned off by the restaurant", until: `Until the restaurant turns it on${slotOpenNote}` }
+      return {
+        tone: "red",
+        label: "Offline",
+        reason: live.offlineReason
+          ? `Turned off by the restaurant: "${live.offlineReason}"`
+          : "Turned off by the restaurant",
+        until: live.backOnlineAt
+          ? `Back online ${formatWhen(live.backOnlineAt)} (automatic)`
+          : `Until the restaurant turns it on${slotOpenNote}`,
+      }
     case "outside-hours":
       return { tone: "amber", label: "Offline", reason: slot ? `Outside time slot (${slot})` : "Outside time slot", until: reopens }
     case "closed-day":
@@ -1682,6 +1695,9 @@ export default function RestaurantsList() {
                                     <Clock className="w-3 h-3 shrink-0" />
                                     {live.until}
                                   </span>
+                                )}
+                                {live.note && (
+                                  <span className="text-[11px] font-medium text-amber-700">{live.note}</span>
                                 )}
                               </div>
                             )
