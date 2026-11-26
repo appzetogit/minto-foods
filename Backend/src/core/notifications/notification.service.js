@@ -107,12 +107,37 @@ export const createInboxNotifications = async ({ notifications = [] } = {}) => {
     });
 };
 
-export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limit = 20 } = {}) => {
+/**
+ * Links of this owner's restaurant notifications ("/restaurant-detail/<id>")
+ * whose restaurant's zone does not cover the point: an Indore restaurant's
+ * offer means nothing to a customer ordering in Bhiwandi. A restaurant with no
+ * zone, or a zone with no drawn boundary, limits nothing.
+ */
+export const outOfZoneLinks = async ({ ownerType, ownerId, lat, lng }) => {
+    const la = Number(lat);
+    const ln = Number(lng);
+    if (lat == null || lng == null || !Number.isFinite(la) || !Number.isFinite(ln)) return [];
+    const rows = await prisma.$queryRaw`
+        SELECT DISTINCT n."link"
+        FROM "food_notifications" n
+        JOIN "food_restaurants" r ON r."id" = substring(n."link" from '^/restaurant-detail/([0-9a-f]{24})')
+        JOIN "food_zones" z ON z."id" = r."zoneId" AND z."isActive" = true AND z."boundary" IS NOT NULL
+        WHERE n."ownerType"::text = ${ownerType} AND n."ownerId" = ${ownerId}
+          AND n."dismissedAt" IS NULL
+          AND n."link" LIKE '/restaurant-detail/%'
+          AND NOT ST_Contains(z."boundary"::geometry, ST_SetSRID(ST_MakePoint(${ln}, ${la}), 4326))
+    `;
+    return rows.map((r) => r.link);
+};
+
+export const getInboxNotifications = async ({ ownerType, ownerId, page = 1, limit = 20, lat, lng } = {}) => {
     const where = {
         ownerType: normalizeOwnerType(ownerType),
         ownerId: requireId(ownerId, 'ownerId'),
         dismissedAt: null,
     };
+    const hidden = await outOfZoneLinks({ ...where, lat, lng });
+    if (hidden.length) where.link = { notIn: hidden };
     const { skip, ...meta } = normalizePagination({ page, limit });
 
     const [items, total, unreadCount] = await Promise.all([

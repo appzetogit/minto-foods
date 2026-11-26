@@ -13,7 +13,10 @@ export const getInboxController = async (req, res) => {
         const data = await getInboxNotifications({
             ...owner,
             page: req.query?.page,
-            limit: req.query?.limit
+            limit: req.query?.limit,
+            // Where the customer is ordering to; hides other zones' restaurant offers.
+            lat: req.query?.lat,
+            lng: req.query?.lng,
         });
         return sendResponse(res, 200, 'Notifications fetched successfully', data);
     } catch (error) {
