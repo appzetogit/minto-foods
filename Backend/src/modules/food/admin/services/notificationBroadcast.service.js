@@ -231,6 +231,30 @@ const resolveTargets = async ({ targetType, targetIds = [], targets = [], lapsed
     throw new ValidationError('Unsupported targetType');
 };
 
+/**
+ * A restaurant's offer is for customers who can order from it. Drops the
+ * customers whose every saved address lies outside that restaurant's zone;
+ * a customer with no located address is kept (the app hides it by their
+ * current location instead). Not a restaurant link, or a restaurant without
+ * a drawn zone: everyone stays.
+ */
+export const dropOtherZoneCustomers = async (targets, link) => {
+    const restaurantId = /^\/restaurant-detail\/([0-9a-f]{24})/.exec(String(link || ''))?.[1];
+    const userIds = targets.filter((t) => t.ownerType === 'USER').map((t) => t.ownerId);
+    if (!restaurantId || !userIds.length) return targets;
+    const rows = await prisma.$queryRaw`
+        SELECT a."userId"
+        FROM "food_user_addresses" a
+        JOIN "food_restaurants" r ON r."id" = ${restaurantId}
+        JOIN "food_zones" z ON z."id" = r."zoneId" AND z."isActive" = true AND z."boundary" IS NOT NULL
+        WHERE a."userId" = ANY(${userIds}) AND a."latitude" IS NOT NULL AND a."longitude" IS NOT NULL
+        GROUP BY a."userId"
+        HAVING NOT bool_or(ST_Contains(z."boundary"::geometry, ST_SetSRID(ST_MakePoint(a."longitude", a."latitude"), 4326)))
+    `;
+    const away = new Set(rows.map((r) => r.userId));
+    return away.size ? targets.filter((t) => !(t.ownerType === 'USER' && away.has(t.ownerId))) : targets;
+};
+
 const ROOM_BY_OWNER_TYPE = {
     USER: rooms.user,
     RESTAURANT: rooms.restaurant,
@@ -366,13 +390,15 @@ export const createBroadcastNotification = async ({ body = {}, adminId } = {}) =
 
     const createdById = requireId(adminId, 'createdBy');
 
-    const resolvedTargets = await resolveTargets({
+    let resolvedTargets = await resolveTargets({
         targetType,
         targetIds: body?.targetIds,
         targets: body?.targets,
         lapsedDays: body?.lapsedDays,
         lapsedIncludeNeverOrdered: body?.lapsedIncludeNeverOrdered,
     });
+    // A hand-picked list goes exactly where the admin chose.
+    if (targetType !== 'CUSTOM') resolvedTargets = await dropOtherZoneCustomers(resolvedTargets, link);
     if (!resolvedTargets.length) {
         throw new ValidationError(`No recipients found for ${targetType.toLowerCase()} broadcast`);
     }
