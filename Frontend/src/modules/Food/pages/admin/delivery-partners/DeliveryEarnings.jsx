@@ -34,6 +34,11 @@ const formatDate = (dateString) => {
 
 export default function DeliveryEarnings() {
   const [searchQuery, setSearchQuery] = useState("")
+  // Rider summary (what each rider is owed in the period), the order-by-order
+  // list, or the bonuses and earning add-ons credited.
+  const [tab, setTab] = useState("riders")
+  const [bonuses, setBonuses] = useState([])
+  const [riderSummary, setRiderSummary] = useState([])
   const [earnings, setEarnings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -87,6 +92,8 @@ export default function DeliveryEarnings() {
       if (response.data?.success) {
         setEarnings(response.data.data.earnings || [])
         setSummary(response.data.data.summary || {})
+        setBonuses(response.data.data.bonuses || [])
+        setRiderSummary(response.data.data.riderSummary || [])
         setPagination(response.data.data.pagination || pagination)
       } else {
         setError(response.data?.message || "Failed to fetch earnings")
@@ -305,6 +312,11 @@ export default function DeliveryEarnings() {
               <div>
                 <p className="text-sm text-slate-600 mb-1">Total Earnings</p>
                 <p className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalEarnings || 0)}</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Deliveries {formatCurrency(summary.deliveryEarnings || 0)}
+                  {" + "}Bonuses {formatCurrency(summary.totalBonuses || 0)}
+                  {Number(summary.cancelPay) > 0 && <>{" + "}Cancel pay {formatCurrency(summary.cancelPay)}</>}
+                </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-green-100 flex items-center justify-center">
                 <span className="text-lg font-bold text-green-600">₹</span>
@@ -424,8 +436,130 @@ export default function DeliveryEarnings() {
           </div>
         </div>
 
+        {/* Tabs */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {[
+            { key: "riders", label: `Rider summary (${riderSummary.length})` },
+            { key: "orders", label: `Order earnings (${summary.totalOrders || 0})` },
+            { key: "bonuses", label: `Bonuses & earning add-ons (${bonuses.length})` },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${tab === t.key
+                ? "bg-blue-600 border-blue-600 text-white"
+                : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "riders" && (
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
+            <p className="text-xs text-slate-500 mb-3">
+              What each rider earned in the selected period: delivery pay (tips included) + cancellation pay + bonuses
+              and earning add-ons credited. An earning add-on waiting for approval is not counted until it is credited.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    {["Delivery Boy", "Deliveries", "Delivery earnings", "Cancel pay", "Bonuses & add-ons", "Total earnings"].map((h, i) => (
+                      <th key={h} className={`px-4 py-3 text-xs font-bold text-slate-700 uppercase ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr><td colSpan={6} className="px-4 py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto" /></td></tr>
+                  ) : riderSummary.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-500">No earnings in this period</td></tr>
+                  ) : (
+                    riderSummary.map((r) => (
+                      <tr key={r.deliveryPartnerId} className="hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium text-slate-900">{r.deliveryPartnerName}</p>
+                          <p className="text-xs text-slate-500">{r.deliveryPartnerPhone}</p>
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-700">{r.deliveries}</td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-700">{formatCurrency(r.deliveryEarnings)}</td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-700">{formatCurrency(r.cancelPay)}</td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-700">
+                          {formatCurrency(r.bonuses)}
+                          {r.bonusCount > 0 && <span className="block text-[11px] text-slate-400">{r.bonusCount} credit{r.bonusCount > 1 ? "s" : ""}</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-green-700">{formatCurrency(r.totalEarnings)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {riderSummary.length > 0 && !loading && (
+                  <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                    <tr>
+                      <td className="px-4 py-3 text-sm font-bold text-slate-900">Total</td>
+                      <td className="px-4 py-3 text-right text-sm font-bold">{riderSummary.reduce((s, r) => s + r.deliveries, 0)}</td>
+                      <td className="px-4 py-3 text-right text-sm font-bold">{formatCurrency(riderSummary.reduce((s, r) => s + r.deliveryEarnings, 0))}</td>
+                      <td className="px-4 py-3 text-right text-sm font-bold">{formatCurrency(riderSummary.reduce((s, r) => s + r.cancelPay, 0))}</td>
+                      <td className="px-4 py-3 text-right text-sm font-bold">{formatCurrency(riderSummary.reduce((s, r) => s + r.bonuses, 0))}</td>
+                      <td className="px-4 py-3 text-right text-sm font-bold text-green-700">{formatCurrency(riderSummary.reduce((s, r) => s + r.totalEarnings, 0))}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        )}
+
+        {tab === "bonuses" && (
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
+            <p className="text-xs text-slate-500 mb-3">
+              Every bonus and earning add-on credited to a rider's wallet in the selected period, newest first.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    {["Credited on", "Delivery Boy", "Type", "Offer / reason", "Reference", "Amount"].map((h, i) => (
+                      <th key={h} className={`px-4 py-3 text-xs font-bold text-slate-700 uppercase ${i === 5 ? "text-right" : "text-left"}`}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr><td colSpan={6} className="px-4 py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto" /></td></tr>
+                  ) : bonuses.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-500">No bonuses credited in this period</td></tr>
+                  ) : (
+                    bonuses.map((b) => (
+                      <tr key={b.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">
+                          {new Date(b.creditedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium text-slate-900">{b.deliveryPartnerName}</p>
+                          <p className="text-xs text-slate-500">{b.deliveryPartnerPhone}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${b.type === "earning_addon" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                            {b.type === "earning_addon" ? "Earning add-on" : "Admin bonus"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-700">{b.title}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500 font-mono">{b.transactionId}</td>
+                        <td className="px-4 py-3 text-right text-sm font-bold text-green-700">{formatCurrency(b.amount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Earnings Table */}
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+        <div className={`bg-white rounded-lg shadow-sm border border-slate-200 p-4 ${tab === "orders" ? "" : "hidden"}`}>
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700">
               {error}

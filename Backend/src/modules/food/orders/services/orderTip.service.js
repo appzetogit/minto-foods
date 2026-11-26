@@ -120,15 +120,28 @@ export const tipAfterDelivery = async ({ userId, orderId, amount }) => {
     await deductWalletBalance(userId, tip, 'Tip for delivery partner', { orderId: order.id });
 
     try {
-        const updated = await prisma.foodOrder.update({
-            where: { id: order.id },
-            data: {
-                tipAmount: { increment: tip },
-                // Payouts are summed from the orders, so this is what actually
-                // owes the rider their tip.
-                riderEarning: { increment: tip },
-            },
-            select: { orderId: true, tipAmount: true, riderEarning: true },
+        const updated = await prisma.$transaction(async (tx) => {
+            const row = await tx.foodOrder.update({
+                where: { id: order.id },
+                data: {
+                    tipAmount: { increment: tip },
+                    // The rider's balance (riderBalance.service) is summed from
+                    // the orders, so this is what owes the rider their tip.
+                    riderEarning: { increment: tip },
+                },
+                select: { orderId: true, tipAmount: true, riderEarning: true },
+            });
+            // The balance sheet pays riders from the order's transaction, not
+            // the order, so the tip has to land there too -- it used to stop
+            // at the order, and the weekly payout came out short by every tip
+            // given after delivery. Only while the order is still unpaid: a
+            // settled transaction is not paid again, and the rider's balance
+            // (which does include the tip) covers it through a withdrawal.
+            await tx.foodTransaction.updateMany({
+                where: { orderId: order.id, isRiderSettled: false },
+                data: { riderShare: { increment: tip } },
+            });
+            return row;
         });
 
         return {

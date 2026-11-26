@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   Loader2, Search, IndianRupee, AlertTriangle, CheckCircle2, Info, History, Landmark,
 } from "lucide-react"
@@ -68,8 +68,17 @@ export default function BalanceSheet() {
   const [history, setHistory] = useState([])
   const [showHistory, setShowHistory] = useState(false)
 
+  // A failed load used to look exactly like an empty week ("Nothing
+  // outstanding"), so an error read as riders having earned nothing.
+  const [loadError, setLoadError] = useState("")
+  // Only the latest request may fill the table: switching tab or week while an
+  // earlier request is still out must not show the earlier answer.
+  const requestSeq = useRef(0)
+
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current
     setLoading(true)
+    setLoadError("")
     try {
       // The API takes a datetime range; the pickers are dates, so the end is
       // pushed to the last moment of that day or the final day pays nothing.
@@ -78,12 +87,15 @@ export default function BalanceSheet() {
         tab === "restaurants"
           ? await adminAPI.getBalanceSheetRestaurants(params)
           : await adminAPI.getBalanceSheetRiders(params)
+      if (seq !== requestSeq.current) return
       const payload = res?.data?.data ?? {}
       setData({ rows: payload.rows || [], totals: payload.totals || {} })
     } catch (error) {
+      if (seq !== requestSeq.current) return
       setData({ rows: [], totals: {} })
+      setLoadError(error?.response?.data?.message || error?.message || "Could not load the balance sheet")
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }, [tab, period])
 
@@ -273,6 +285,13 @@ export default function BalanceSheet() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
+            </div>
+          ) : loadError ? (
+            <div className="py-12 text-center">
+              <p className="text-sm font-semibold text-red-600 mb-2">Couldn't load this period: {loadError}</p>
+              <button type="button" onClick={load} className="px-4 py-2 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700">
+                Try again
+              </button>
             </div>
           ) : rows.length === 0 ? (
             <div className="py-12 text-center">
