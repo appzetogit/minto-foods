@@ -70,10 +70,93 @@ const mapRawRestaurant = (restaurant, index, zones) => ({
   isActive: restaurant.isActive !== false && restaurant.status === "approved",
   // The outlet's own online/offline switch (taking orders right now).
   isAcceptingOrders: restaurant.isAcceptingOrders !== false,
+  // Online right now or not, why, and until when (from the server).
+  liveStatus: restaurant.liveStatus || null,
   rating: restaurant.rating || restaurant.ratings?.average || 0,
   logo: getPrimaryRestaurantImage(restaurant, PLACEHOLDER_40),
   originalData: restaurant,
 })
+
+// ── Live online/offline status ───────────────────────────────────────────────
+// The backend works out, per restaurant, whether customers can order right now
+// and why not (Backend liveStatus.helper.js). These turn it into words.
+
+const LIVE_FILTERS = [
+  { key: "", label: "All" },
+  { key: "online", label: "Online" },
+  { key: "offline", label: "Offline (any reason)" },
+  { key: "offline-admin", label: "Turned off by admin" },
+  { key: "offline-restaurant", label: "Turned off by restaurant" },
+  { key: "outside-hours", label: "Outside time slot" },
+  { key: "closed-day", label: "Closed today" },
+  { key: "zone-inactive", label: "Zone inactive" },
+]
+
+const IST = "Asia/Kolkata"
+
+const formatClock = (hhmm) => {
+  const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})/)
+  if (!m) return hhmm || ""
+  const h = Number(m[1])
+  return `${((h + 11) % 12) + 1}:${m[2]} ${h < 12 ? "AM" : "PM"}`
+}
+
+const istDayKey = (date) => date.toLocaleDateString("en-CA", { timeZone: IST })
+
+// "today 6:00 PM", "tomorrow 9:00 AM", or "Sat, 28 Nov, 9:00 PM".
+const formatWhen = (iso) => {
+  if (!iso) return ""
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ""
+  const time = at
+    .toLocaleTimeString("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit", hour12: true })
+    .toUpperCase()
+  const now = new Date()
+  const tomorrow = new Date(now.getTime() + 86400000)
+  if (istDayKey(at) === istDayKey(now)) return `today ${time}`
+  if (istDayKey(at) === istDayKey(tomorrow)) return `tomorrow ${time}`
+  const day = at.toLocaleDateString("en-IN", { timeZone: IST, weekday: "short", day: "numeric", month: "short" })
+  return `${day}, ${time}`
+}
+
+const describeLive = (live) => {
+  if (!live?.code) return null
+  const slot = live.openingTime && live.closingTime
+    ? `${formatClock(live.openingTime)} – ${formatClock(live.closingTime)}`
+    : ""
+  const reopens = live.nextOpeningAt
+    ? `Opens ${formatWhen(live.nextOpeningAt)}`
+    : "No opening time in the next 7 days"
+  const slotOpenNote = live.withinHours ? " (its time slot is open now)" : ""
+  switch (live.code) {
+    case "online":
+      return {
+        tone: "green",
+        label: "Online",
+        reason: slot ? `Within time slot (${slot})` : "No time slots set – open all day",
+        until: live.closingTime ? `Till ${formatClock(live.closingTime)}` : "",
+      }
+    case "offline-admin":
+      return { tone: "red", label: "Offline", reason: "Turned off by admin", until: `Until an admin turns it on${slotOpenNote}` }
+    case "offline-restaurant":
+      return { tone: "red", label: "Offline", reason: "Turned off by the restaurant", until: `Until the restaurant turns it on${slotOpenNote}` }
+    case "outside-hours":
+      return { tone: "amber", label: "Offline", reason: slot ? `Outside time slot (${slot})` : "Outside time slot", until: reopens }
+    case "closed-day":
+      return { tone: "amber", label: "Offline", reason: "Closed today (day off in timings)", until: reopens }
+    case "zone-inactive":
+      return { tone: "slate", label: "Offline", reason: "Its zone is switched off", until: "Until the zone is turned on" }
+    default:
+      return { tone: "slate", label: live.online ? "Online" : "Offline", reason: live.code, until: "" }
+  }
+}
+
+const LIVE_TONE = {
+  green: { badge: "bg-green-100 text-green-700", dot: "bg-green-600" },
+  red: { badge: "bg-red-100 text-red-700", dot: "bg-red-600" },
+  amber: { badge: "bg-amber-100 text-amber-800", dot: "bg-amber-600" },
+  slate: { badge: "bg-slate-200 text-slate-700", dot: "bg-slate-500" },
+}
 
 const getSortByParam = (sortConfig) => {
   if (!sortConfig.key || sortConfig.key === "zone") return "created-desc"
@@ -184,6 +267,11 @@ export default function RestaurantsList() {
   const [totalRestaurants, setTotalRestaurants] = useState(0)
   const [restaurantStats, setRestaurantStats] = useState({ total: 0, active: 0, inactive: 0 })
   const [page, setPage] = useState(1)
+  // Live status filter ("" = all) and the per-state counts for its chips.
+  const [liveFilter, setLiveFilter] = useState("")
+  const [liveCounts, setLiveCounts] = useState(null)
+  // Bumped to refetch, e.g. after switching a restaurant on or off.
+  const [reloadKey, setReloadKey] = useState(0)
   const [selectedRestaurant, setSelectedRestaurant] = useState(null)
   const [restaurantDetails, setRestaurantDetails] = useState(null)
   const [restaurantOutletTimings, setRestaurantOutletTimings] = useState(null)
@@ -293,6 +381,7 @@ export default function RestaurantsList() {
           limit: PAGE_SIZE,
           ...(debouncedSearchQuery && { search: debouncedSearchQuery }),
           sortBy: getSortByParam(sortConfig),
+          ...(liveFilter && { liveStatus: liveFilter }),
           includeStats: page === 1,
         })
 
@@ -321,6 +410,7 @@ export default function RestaurantsList() {
                 active: Number(data.stats.active) || 0,
                 inactive: Number(data.stats.inactive) || 0,
               })
+              if (data.stats.live) setLiveCounts(data.stats.live)
             }
           }
         } else if (!cancelled) {
@@ -355,7 +445,7 @@ export default function RestaurantsList() {
       cancelled = true
       clearTimeout(t)
     }
-  }, [page, debouncedSearchQuery, sortConfig, zones, navigate])
+  }, [page, debouncedSearchQuery, sortConfig, zones, navigate, liveFilter, reloadKey])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1118,6 +1208,8 @@ export default function RestaurantsList() {
         prev.map((r) => ((r._id || r.id) === restaurantId ? { ...r, isAcceptingOrders: next } : r)),
       )
       toast.success(`${restaurant.name} is now ${next ? "online" : "offline"}`)
+      // The live status and its reason come from the server.
+      setReloadKey((k) => k + 1)
     } catch (err) {
       toast.error(err?.response?.data?.message || "Couldn't change the restaurant's online status")
     } finally {
@@ -1363,6 +1455,30 @@ export default function RestaurantsList() {
             </div>
           </div>
 
+          {/* Online / offline right now, by reason */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider mr-1">Live status</span>
+            {LIVE_FILTERS.map((f) => {
+              const count = f.key && liveCounts ? liveCounts[f.key] : null
+              const selected = liveFilter === f.key
+              return (
+                <button
+                  key={f.key || "all"}
+                  type="button"
+                  onClick={() => { setPage(1); setLiveFilter(f.key) }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${selected
+                    ? "bg-blue-600 border-blue-600 text-white"
+                    : "bg-white border-slate-300 text-slate-700 hover:bg-slate-50"}`}
+                >
+                  {f.label}
+                  {count != null && (
+                    <span className={`ml-1.5 ${selected ? "text-blue-100" : "text-slate-400"}`}>{count}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
           <div className="text-sm text-slate-600 mb-4">
             {loading
               ? "Loading..."
@@ -1449,13 +1565,16 @@ export default function RestaurantsList() {
                         <ArrowUpDown className={`w-3 h-3 ${sortConfig.key === 'status' ? 'text-blue-600' : 'text-slate-400'}`} />
                       </div>
                     </th>
+                    <th className="px-6 py-4 text-left text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+                      Live Status
+                    </th>
                     <th className="px-6 py-4 text-center text-[10px] font-bold text-slate-700 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
                   {filteredRestaurants.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-20 text-center">
+                      <td colSpan={9} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center justify-center">
                           <p className="text-lg font-semibold text-slate-700 mb-1">No Data Found</p>
                           <p className="text-sm text-slate-500">No restaurants match your search</p>
@@ -1545,6 +1664,28 @@ export default function RestaurantsList() {
                               </span>
                             </button>
                           </div>
+                        </td>
+                        <td className="px-6 py-4 min-w-[220px]">
+                          {(() => {
+                            const live = describeLive(restaurant.liveStatus)
+                            if (!live) return <span className="text-xs text-slate-400">—</span>
+                            const tone = LIVE_TONE[live.tone] || LIVE_TONE.slate
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                <span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${tone.badge}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                                  {live.label}
+                                </span>
+                                <span className="text-xs font-medium text-slate-700">{live.reason}</span>
+                                {live.until && (
+                                  <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                                    <Clock className="w-3 h-3 shrink-0" />
+                                    {live.until}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-center">
                           <div className="flex items-center justify-center gap-2">

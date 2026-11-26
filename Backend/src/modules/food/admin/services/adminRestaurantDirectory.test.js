@@ -173,3 +173,21 @@ test('the menu is generated from dishes, not stored', async () => {
 
     assert.equal(await getRestaurantMenuById('not-an-id'), null);
 });
+
+test('the list filters on online/offline and counts each state', async () => {
+    const tag = uniqueTag('Live');
+    const on = await makeRestaurant({ restaurantName: `${tag} On` });
+    const off = await makeRestaurant({ restaurantName: `${tag} Off`, isAcceptingOrders: false, offlineByAdmin: true });
+
+    const offline = await getRestaurants({ search: tag, liveStatus: 'offline-admin' });
+    assert.deepEqual(offline.restaurants.map((r) => r.id), [off.id]);
+    assert.equal(offline.restaurants[0].liveStatus.code, 'offline-admin');
+
+    const anyOffline = await getRestaurants({ search: tag, liveStatus: 'offline' });
+    assert.ok(anyOffline.restaurants.some((r) => r.id === off.id));
+
+    const all = await getRestaurants({ search: tag, includeStats: true });
+    assert.equal(all.total, 2);
+    assert.ok(all.restaurants.find((r) => r.id === on.id).liveStatus.code);
+    assert.ok(all.stats.live['offline-admin'] >= 1);
+});

@@ -1280,10 +1280,85 @@ export async function listOrdersUser(userId, query) {
   });
 }
 
+const round2Money = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+};
+
+/**
+ * The parts the admin money split folds together, pulled apart for display.
+ * Nothing here changes a total; each pair adds back to the figure it came from.
+ *
+ * - Tip. order.tipAmount counts every tip, but only the one given at checkout
+ *   is inside order.total (and in the transaction's riderShare, via
+ *   riderEarning). A tip left after delivery is taken from the wallet later and
+ *   touches neither. So the checkout tip is what the charges do not explain,
+ *   capped at the recorded tip -- the same rule the invoice uses.
+ * - Quick Mode. The surcharge is added into platformFee (and also stored in
+ *   quickDeliveryFee), so it is the platform's, not the rider's; it is split
+ *   out of platformFee here rather than shown on top of it.
+ */
+export function buildAdminSplitDetails(pricing = {}, amounts = null) {
+  const p = pricing || {};
+  const charges = round2Money(
+    (Number(p.subtotal) || 0) +
+      (Number(p.packagingFee) || 0) +
+      (Number(p.deliveryFee) || 0) +
+      (Number(p.deliveryFeeGst) || 0) +
+      (Number(p.platformFee) || 0) +
+      (Number(p.tax) || 0) -
+      (Number(p.discount) || 0),
+  );
+  const tipTotal = Math.max(0, round2Money(p.tip ?? p.tipAmount));
+  const unexplained = Math.max(0, round2Money((Number(p.total) || 0) - Math.max(0, charges)));
+  const tipOnOrder = Math.min(tipTotal, unexplained);
+  const tipAfterDelivery = Math.max(0, round2Money(tipTotal - tipOnOrder));
+
+  const platformFeeTotal = Math.max(0, round2Money(p.platformFee));
+  const quickDeliveryFee = Math.min(platformFeeTotal, Math.max(0, round2Money(p.quickDeliveryFee)));
+  const platformFeeBase = round2Money(platformFeeTotal - quickDeliveryFee);
+
+  const out = {
+    tipOnOrder,
+    tipAfterDelivery,
+    tipTotal,
+    platformFeeTotal,
+    platformFeeBase,
+    quickDeliveryFee,
+  };
+
+  if (amounts) {
+    const riderShare = round2Money(amounts.riderShare);
+    const riderTip = Math.max(0, Math.min(tipOnOrder, riderShare));
+    out.riderTip = riderTip;
+    out.riderEarningExTip = round2Money(riderShare - riderTip);
+  }
+  return out;
+}
+
+/**
+ * The split details for the transaction: the tip comes from the order (the
+ * transaction has no tip column), the platform fee from the transaction's own
+ * snapshot so the two platform lines add back to the fee it booked.
+ */
+export function adminTransactionSplit(orderPricing, tx) {
+  const fromOrder = buildAdminSplitDetails(orderPricing || {}, tx?.amounts || null);
+  const txFee = tx?.pricing?.platformFee;
+  if (txFee == null) return fromOrder;
+  const platformFeeTotal = Math.max(0, round2Money(txFee));
+  const quickDeliveryFee = Math.min(platformFeeTotal, fromOrder.quickDeliveryFee);
+  return {
+    ...fromOrder,
+    platformFeeTotal,
+    quickDeliveryFee,
+    platformFeeBase: round2Money(platformFeeTotal - quickDeliveryFee),
+  };
+}
+
 /**
  * Full money split + audit history for the admin order detail view.
  */
-async function buildAdminTransactionView(orderId) {
+async function buildAdminTransactionView(orderId, orderPricing = null) {
   try {
     const tx = await foodTransactionService.getTransactionByOrder(orderId);
     if (!tx) return null;
@@ -1291,6 +1366,13 @@ async function buildAdminTransactionView(orderId) {
       status: tx.status || null,
       paymentMethod: tx.paymentMethod || null,
       amounts: tx.amounts || null,
+      // The fee snapshot the split was made from (food, packaging, delivery,
+      // platform fee) -- the dialog lists it under "Customer Paid".
+      pricing: tx.pricing || null,
+      // Tip and Quick Mode pulled out of riderShare / platformFee. The tip is
+      // read off the order (the transaction has no tip column); quick mode
+      // likewise, and is capped at the transaction's own platformFee.
+      split: adminTransactionSplit(orderPricing, tx),
       settlement: tx.settlement || null,
       history: (tx.history || []).map((entry) => ({
         kind: entry.kind,
@@ -1381,7 +1463,8 @@ export async function getOrderById(
 
   if (admin) {
     const out = normalizeOrderForClient(order);
-    out.transaction = await buildAdminTransactionView(order.id);
+    out.feeBreakdown = buildAdminSplitDetails(order.pricing);
+    out.transaction = await buildAdminTransactionView(order.id, order.pricing);
     // Every step with who did it and the delays (kitchen, handover, total).
     out.timeline = orderTimeline(row, {
       restaurant: row.restaurant?.restaurantName || '',

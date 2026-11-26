@@ -163,6 +163,22 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
     order.platformFee ?? orderPricing.platformFee ?? 0,
   )
   const basePlatformFee = Math.max(0, totalPlatformFee - quickDeliveryFee)
+  // Tip at checkout is inside the total; a tip left after delivery was taken
+  // from the wallet later and is not. Both come from the admin order detail.
+  const feeBreakdown = detail?.feeBreakdown || null
+  const checkoutTip = Number(feeBreakdown?.tipOnOrder) || 0
+  const tipAfterDelivery = Number(feeBreakdown?.tipAfterDelivery) || 0
+  // Tip and Quick Mode pulled out of riderShare / platformFee; each pair adds
+  // back to the figure the split booked.
+  const txSplit = transaction?.split || null
+  const txRiderTip = Number(txSplit?.riderTip) || 0
+  const txRiderEarning = txSplit
+    ? Number(txSplit.riderEarningExTip) || 0
+    : Number(transaction?.amounts?.riderShare) || 0
+  const txQuickFee = Number(txSplit?.quickDeliveryFee) || 0
+  const txPlatformFee = txSplit
+    ? Number(txSplit.platformFeeBase) || 0
+    : Number(transaction?.pricing?.platformFee) || 0
 
   // Debug: Log order data to check billImageUrl
   if (order.billImageUrl) {
@@ -709,6 +725,12 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                   <span className="font-medium text-slate-900">₹{order.vatTax.toFixed(2)}</span>
                 </div>
               )}
+              {checkoutTip > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Rider Tip</span>
+                  <span className="font-medium text-slate-900">{formatDialogMoney(checkoutTip)}</span>
+                </div>
+              )}
               <div className="pt-2 border-t border-slate-200">
                 <div className="flex justify-between items-start gap-3">
                   <span className="text-base font-semibold text-slate-700 shrink-0">Total Amount</span>
@@ -720,6 +742,11 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                     saleClassName="inline-flex items-center rounded-full border border-[#008078] bg-[#008078]/10 px-2 py-0.5 text-base font-bold text-[#008078] tabular-nums"
                   />
                 </div>
+                {tipAfterDelivery > 0 && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    + {formatDialogMoney(tipAfterDelivery)} tipped after delivery (paid from wallet, not in this total)
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -755,8 +782,20 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-500">Platform fee earned</span>
-                      <span className="text-slate-700">{formatDialogMoney(transaction.pricing.platformFee)}</span>
+                      <span className="text-slate-700">{formatDialogMoney(txPlatformFee)}</span>
                     </div>
+                    {txQuickFee > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Quick Mode fee earned (platform keeps)</span>
+                        <span className="text-slate-700">{formatDialogMoney(txQuickFee)}</span>
+                      </div>
+                    )}
+                    {txRiderTip > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-500">Rider tip (passed to rider)</span>
+                        <span className="text-slate-700">{formatDialogMoney(txRiderTip)}</span>
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 <div className="flex justify-between text-sm">
@@ -786,8 +825,19 @@ export default function ViewOrderDialog({ isOpen, onOpenChange, order, onChanged
                 )}
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-600">Rider Earning</span>
-                  <span className="font-medium text-slate-900">{formatDialogMoney(transaction.amounts.riderShare)}</span>
+                  <span className="font-medium text-slate-900">{formatDialogMoney(txRiderEarning)}</span>
                 </div>
+                {txRiderTip > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Rider Tip</span>
+                    <span className="font-medium text-slate-900">{formatDialogMoney(txRiderTip)}</span>
+                  </div>
+                )}
+                {tipAfterDelivery > 0 && (
+                  <p className="text-xs text-slate-500 pl-3">
+                    + {formatDialogMoney(tipAfterDelivery)} tipped after delivery from wallet (paid to rider, outside this split)
+                  </p>
+                )}
                 {Number(transaction.amounts.taxAmount) > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-600">Tax (GST)</span>

@@ -8,6 +8,7 @@ import { connectRedis, closeRedis } from './src/config/redis.js';
 import { initSocket } from './src/config/socket.js';
 import { closeBullMQConnection } from './src/queues/index.js';
 import { logger } from './src/utils/logger.js';
+import { installProcessGuards } from './src/utils/processGuards.js';
 import { initializeFirebaseRealtime } from './src/config/firebase.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
@@ -49,6 +50,9 @@ const gracefulShutdown = async (signal) => {
 };
 
 const startSocketServer = async () => {
+    // A stray rejection used to close the server and drop every rider and
+    // customer connection; now it is logged with its stack (see processGuards).
+    installProcessGuards({ logger, name: 'Socket server' });
     try {
         validateConfig();
         initializeFirebaseRealtime();
@@ -78,16 +82,6 @@ const startSocketServer = async () => {
             process.exit(1);
         });
 
-        process.on('unhandledRejection', (err) => {
-            logger.error(`Socket server unhandled rejection: ${err?.message || err}`);
-            if (server) server.close(() => process.exit(1));
-            else process.exit(1);
-        });
-
-        process.on('uncaughtException', (err) => {
-            logger.error(`Socket server uncaught exception: ${err?.message || err}`);
-            process.exit(1);
-        });
     } catch (error) {
         logger.error(`Error starting socket server: ${error.message}`);
         process.exit(1);

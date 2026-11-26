@@ -3,6 +3,8 @@ import { isId } from '../../../../utils/helpers.js';
 import { ValidationError } from '../../../../core/auth/errors.js';
 import { toRestaurant } from '../../restaurant/restaurant.mapper.js';
 import { getRestaurantMenu } from '../../restaurant/services/restaurantMenu.service.js';
+import { attachOutletTimingsToRestaurants } from '../../restaurant/services/outletTimings.service.js';
+import { describeLiveStatus, LIVE_STATUS_CODES } from '../../restaurant/helpers/liveStatus.helper.js';
 
 /**
  * The admin restaurant directory, extracted from admin.service.js.
@@ -26,12 +28,16 @@ const RESTAURANT_ROW = {
     // The restaurant's own online/offline switch, so the admin list can show
     // it and turn it off for an outlet whose app has stopped working.
     isAcceptingOrders: true,
+    // Who switched it off -- an admin (the restaurant app cannot undo that) or
+    // the restaurant -- and the hours that open it by themselves.
+    offlineByAdmin: true,
+    openingTime: true, closingTime: true, openDays: true,
     // So the Add Food form can lock a pure veg restaurant's dishes to Veg.
     pureVegRestaurant: true,
 };
 
 const ZONE_SUMMARY = {
-    select: { id: true, name: true, zoneName: true, cityRef: { select: { id: true, name: true } } },
+    select: { id: true, name: true, zoneName: true, isActive: true, cityRef: { select: { id: true, name: true } } },
 };
 
 /**
@@ -61,6 +67,23 @@ const activeFilter = (raw) => {
     if (raw === 'false' || raw === false) return { status: { not: 'approved' } };
     return null;
 };
+
+export { describeLiveStatus, LIVE_STATUS_CODES };
+
+const LIVE_FILTERS = new Set(['online', 'offline', ...LIVE_STATUS_CODES]);
+
+const matchesLiveFilter = (code, filter) => {
+    if (filter === 'online') return code === 'online';
+    if (filter === 'offline') return code !== 'online';
+    return code === filter;
+};
+
+// The same timings (defaults included) the customer apps judge by.
+const withLiveStatus = async (rows, now) =>
+    (await attachOutletTimingsToRestaurants(rows)).map((row) => ({
+        row,
+        live: describeLiveStatus(row, now),
+    }));
 
 export async function getRestaurants(query = {}) {
     const limit = Math.min(Math.max(parseInt(query.limit, 10) || 100, 1), 1000);
@@ -123,21 +146,35 @@ export async function getRestaurants(query = {}) {
         'active-desc': { status: 'desc' },
     }[sortBy] || { createdAt: 'desc' };
 
-    const [rows, total] = await Promise.all([
-        prisma.foodRestaurant.findMany({
-            where,
-            orderBy,
-            skip,
-            take: limit,
-            select: { ...RESTAURANT_ROW, zone: ZONE_SUMMARY, pendingZone: ZONE_SUMMARY },
-        }),
-        prisma.foodRestaurant.count({ where }),
-    ]);
+    const now = new Date();
+    const liveFilter = LIVE_FILTERS.has(query.liveStatus) ? query.liveStatus : null;
+    const select = { ...RESTAURANT_ROW, zone: ZONE_SUMMARY, pendingZone: ZONE_SUMMARY };
+
+    let pageRows;
+    let total;
+    if (liveFilter) {
+        // Online/offline depends on the clock, not a column, so this filter
+        // runs over every match and the page is cut afterwards.
+        const all = await withLiveStatus(await prisma.foodRestaurant.findMany({ where, orderBy, select }), now);
+        const kept = all.filter(({ live }) => matchesLiveFilter(live.code, liveFilter));
+        total = kept.length;
+        pageRows = kept.slice(skip, skip + limit);
+    } else {
+        const [rows, count] = await Promise.all([
+            prisma.foodRestaurant.findMany({ where, orderBy, skip, take: limit, select }),
+            prisma.foodRestaurant.count({ where }),
+        ]);
+        total = count;
+        pageRows = await withLiveStatus(rows, now);
+    }
 
     const result = {
         // The nested `location` the admin tables read is rebuilt from the flat
         // columns.
-        restaurants: rows.map((row) => withCity(row, toRestaurant(row))),
+        restaurants: pageRows.map(({ row, live }) => ({
+            ...withCity(row, toRestaurant(row)),
+            liveStatus: live,
+        })),
         total,
         page,
         limit,
@@ -148,7 +185,7 @@ export async function getRestaurants(query = {}) {
         // counts describe the whole set the admin is filtering within.
         const statsWhere = ['pending', 'approved', 'rejected'].includes(status) ? { status } : {};
 
-        const [statsTotal, statsActive] = await Promise.all([
+        const [statsTotal, statsActive, statsRows] = await Promise.all([
             prisma.foodRestaurant.count({ where: statsWhere }),
             // AND, not a spread: statsWhere may already constrain `status`, and
             // spreading would let the second key silently replace the filter —
@@ -157,7 +194,19 @@ export async function getRestaurants(query = {}) {
             prisma.foodRestaurant.count({
                 where: { AND: [statsWhere, { status: 'approved' }] },
             }),
+            prisma.foodRestaurant.findMany({
+                where: statsWhere,
+                select: {
+                    id: true, isAcceptingOrders: true, offlineByAdmin: true,
+                    openingTime: true, closingTime: true, openDays: true,
+                    zone: { select: { isActive: true } },
+                },
+            }),
         ]);
+
+        // One count per live state, for the filter chips.
+        const live = Object.fromEntries(LIVE_STATUS_CODES.map((code) => [code, 0]));
+        for (const { live: l } of await withLiveStatus(statsRows, now)) live[l.code] += 1;
 
         result.stats = {
             total: statsTotal,
@@ -165,6 +214,7 @@ export async function getRestaurants(query = {}) {
             // Previously both of these equalled the total, because the column
             // they counted on did not exist.
             inactive: statsTotal - statsActive,
+            live: { ...live, offline: statsRows.length - live.online },
         };
     }
 

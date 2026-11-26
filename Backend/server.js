@@ -14,6 +14,7 @@ import { expireExpiredOffers } from './src/modules/food/admin/services/admin.ser
 import { syncExpiredFssaiNotifications } from './src/modules/food/restaurant/services/fssaiExpiry.service.js';
 
 import { logger } from './src/utils/logger.js';
+import { installProcessGuards } from './src/utils/processGuards.js';
 import { initializeFirebaseRealtime } from './src/config/firebase.js';
 import { ensureUploadStorageReady } from './src/services/storage.service.js';
 
@@ -135,6 +136,8 @@ const startBackgroundJobs = async () => {
 };
 
 const startServer = async () => {
+    // Installed first, so a rejection during startup is logged with its stack too.
+    installProcessGuards({ logger, name: 'API', exitOnUncaught: config.nodeEnv === 'production' });
     try {
         validateConfig();
         initializeFirebaseRealtime();
@@ -198,21 +201,6 @@ const startServer = async () => {
                 logger.error(`Server Error: ${err.message}`);
             }
             process.exit(1);
-        });
-
-        process.on('unhandledRejection', (err) => {
-            logger.error(`Unhandled Rejection: ${err?.message || err}`);
-            if (config.nodeEnv === 'production') {
-                if (server) server.close(() => process.exit(1));
-                else process.exit(1);
-            }
-        });
-
-        process.on('uncaughtException', (err) => {
-            logger.error(`Uncaught Exception: ${err?.message || err}`);
-            if (config.nodeEnv === 'production') {
-                process.exit(1);
-            }
         });
 
     } catch (error) {
